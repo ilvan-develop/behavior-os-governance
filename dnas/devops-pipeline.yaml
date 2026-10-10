@@ -1,0 +1,44 @@
+name: "DevOps Pipeline"
+version: "2.0.0"
+description: "CI/CD governance with deployment gates and rollback protocols"
+personas:
+  - role: operator
+    name: "Release Engineer"
+    authority: "operator"
+    skills:
+      - "ci-cd-pipelines"
+      - "deployment-strategies"
+      - "rollback-procedures"
+      - "infrastructure-as-code"
+governance:
+  - id: "deployment-approval"
+    level: "critical"
+    action: "escalate"
+    conditions:
+      - type: "deployment"
+        value: true
+    description: "All deployments require approval from Release Engineer"
+  - id: "rollback-required"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "rollback"
+        value: true
+    description: "Warn when rollback procedures are triggered"
+  - id: "pipeline-approval"
+    level: "medium"
+    action: "block"
+    conditions:
+      - type: "pipeline-change"
+        value: true
+    description: "Block unauthorized pipeline configuration changes"
+quality:
+  - id: "test-passing"
+    type: "test_coverage"
+    threshold: 90
+  - id: "security-scan"
+    type: "security"
+    threshold: 0
+  - id: "lint-clean"
+    type: "lint"
+    threshold: 0

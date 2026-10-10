@@ -1,0 +1,28 @@
+{
+  "name": "@behavior-os/opencode-plugin",
+  "version": "2.0.0",
+  "description": "OpenCode v2 plugin for Behavior-OS governance",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@behavior-os/core": "workspace:*",
+    "@opencode/plugin": "^2.0.0-beta.10",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "behavioros-orchestrator",
+  "version": "1.0.0",
+  "description": "Autonomous orchestration skills for Behavior-OS",
+  "author": "Ilvan Joaquim",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilvan-develop/behavioros"
+  },
+  "keywords": [
+    "ai-agents",
+    "governance",
+    "orchestration",
+    "autonomous",
+    "mcp"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@10.4.0",
+  "scripts": {
+    "build": "echo 'Orchestrator package - see main repo'",
+    "test": "echo 'Tests in main behavior-os repo'"
+  },
+  "dependencies": {
+    "@behavior-os/core": "workspace:*",
+    "@behavior-os/sdk": "workspace:*",
+    "@behavior-os/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,51 @@
+name: "Healthcare HIPAA"
+version: "2.0.0"
+description: "Healthcare governance with HIPAA compliance and patient data protection"
+personas:
+  - role: operator
+    name: "HIPAA Officer"
+    authority: "healthcare"
+    skills:
+      - "hipaa-compliance"
+      - "patient-data-protection"
+      - "medical-records"
+      - "privacy-rules"
+governance:
+  - id: "patient-data-access"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "patient-record"
+        value: true
+    description: "Block unauthorized access to patient records"
+  - id: "phi-encryption"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "phi-data"
+        value: true
+    description: "Block unencrypted PHI transmission"
+  - id: "audit-logging"
+    level: "high"
+    action: "log"
+    conditions:
+      - type: "any-access"
+        value: true
+    description: "Log all access to healthcare data"
+  - id: "consent-verification"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "patient-consent"
+        value: false
+    description: "Block operations without patient consent"
+quality:
+  - id: "hipaa-audit"
+    type: "test_coverage"
+    threshold: 95
+  - id: "no-breaches"
+    type: "security"
+    threshold: 0
+  - id: "access-control"
+    type: "access_control"
+    threshold: 0

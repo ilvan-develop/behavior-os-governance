@@ -1,0 +1,51 @@
+name: "Mobile App"
+version: "2.0.0"
+description: "Governance for mobile app development with platform-specific requirements"
+personas:
+  - role: architect
+    name: "Mobile Tech Lead"
+    authority: "mobile-lead"
+    skills:
+      - "ios-development"
+      - "android-development"
+      - "cross-platform"
+      - "app-store-optimization"
+governance:
+  - id: "app-store-compliance"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "app-store-submission"
+        value: true
+    description: "Block submission without app store compliance check"
+  - id: "platform-testing"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-platform-test"
+        value: true
+    description: "Block releases without platform-specific testing"
+  - id: "permission-audit"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "excessive-permissions"
+        value: true
+    description: "Warn on excessive permission requests"
+  - id: "offline-support"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "no-offline-mode"
+        value: true
+    description: "Warn when offline mode is not implemented"
+quality:
+  - id: "device-coverage"
+    type: "test_coverage"
+    threshold: 85
+  - id: "performance-target"
+    type: "performance"
+    threshold: 60
+  - id: "memory-limit"
+    type: "security"
+    threshold: 256

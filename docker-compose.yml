@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  behavioros-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - BEHAVIOROS_DNA_PATH=/app/dnas/enterprise-governance.yaml
+      - BEHAVIOROS_LOG_LEVEL=info
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["pnpm", "mcp:start"]
+    ports:
+      - "3000:3000"
+
+  behavioros-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["pnpm", "test"]
+    environment:
+      - CI=true

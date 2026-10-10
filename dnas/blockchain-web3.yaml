@@ -1,0 +1,51 @@
+name: "Blockchain/Web3"
+version: "2.0.0"
+description: "Governance for blockchain smart contracts with security and audit requirements"
+personas:
+  - role: architect
+    name: "Smart Contract Auditor"
+    authority: "auditor"
+    skills:
+      - "solidity"
+      - "smart-contract-security"
+      - "formal-verification"
+      - "gas-optimization"
+governance:
+  - id: "security-audit"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "contract-deployment"
+        value: true
+    description: "Block contract deployment without security audit"
+  - id: "formal-verification"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "high-value-contract"
+        value: true
+    description: "Warn when formal verification is missing for high-value contracts"
+  - id: "gas-optimization"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "gas-exceeded"
+        value: true
+    description: "Warn on excessive gas consumption"
+  - id: "upgrade-governance"
+    level: "critical"
+    action: "escalate"
+    conditions:
+      - type: "proxy-upgrade"
+        value: true
+    description: "Escalate proxy upgrades to governance committee"
+quality:
+  - id: "coverage"
+    type: "test_coverage"
+    threshold: 95
+  - id: "audit-clean"
+    type: "security"
+    threshold: 0
+  - id: "formal-proof"
+    type: "access_control"
+    threshold: 0

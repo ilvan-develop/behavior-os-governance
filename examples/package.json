@@ -1,0 +1,20 @@
+{
+  "name": "behavioros-examples",
+  "version": "1.0.0",
+  "description": "BehaviorOS v2.0 - Example Applications",
+  "private": true,
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@behavior-os/core": "workspace:*",
+    "@behavior-os/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.0.0"
+  }
+}

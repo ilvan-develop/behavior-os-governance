@@ -1,0 +1,51 @@
+name: "Enterprise SOX"
+version: "2.0.0"
+description: "Sarbanes-Oxley compliance governance for enterprise financial reporting"
+personas:
+  - role: operator
+    name: "SOX Compliance Officer"
+    authority: "sox-officer"
+    skills:
+      - "sarbanes-oxley"
+      - "internal-controls"
+      - "financial-reporting"
+      - "audit-compliance"
+governance:
+  - id: "change-control"
+    level: "critical"
+    action: "escalate"
+    conditions:
+      - type: "production-change"
+        value: true
+    description: "All production changes require change control board approval"
+  - id: "segregation-duties"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "conflicting-role"
+        value: true
+    description: "Block operations violating segregation of duties"
+  - id: "audit-documentation"
+    level: "high"
+    action: "log"
+    conditions:
+      - type: "financial-operation"
+        value: true
+    description: "Log all financial operations for audit trail"
+  - id: "access-review"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "privilege-escalation"
+        value: true
+    description: "Warn on privilege escalation attempts"
+quality:
+  - id: "full-coverage"
+    type: "test_coverage"
+    threshold: 95
+  - id: "no-vulnerabilities"
+    type: "security"
+    threshold: 0
+  - id: "zero-lint"
+    type: "lint"
+    threshold: 0

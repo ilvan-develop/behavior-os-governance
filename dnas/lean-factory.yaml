@@ -1,0 +1,26 @@
+name: Lean Factory
+version: "2.0.0"
+description: "Continuous improvement and waste elimination"
+
+personas:
+  - role: operator
+    name: Process Engineer
+    authority: operator
+    skills:
+      - optimization
+      - kaizen
+      - value-stream
+
+governance:
+  - id: waste-elimination
+    level: medium
+    action: warn
+    conditions:
+      - type: redundant-action
+        value: true
+    description: "Warn on redundant operations"
+
+quality:
+  - id: coverage
+    type: test_coverage
+    threshold: 70

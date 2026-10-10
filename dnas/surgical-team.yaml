@@ -1,0 +1,58 @@
+name: Surgical Team
+version: "2.0.0"
+description: "Zero-defect governance with sterile field protocols"
+
+personas:
+  - role: architect
+    name: Lead Surgeon
+    authority: architect
+    boundaries:
+      - id: max-modules
+        type: max_modules
+        value: 1
+    skills:
+      - surgical-procedure
+      - team-leadership
+      - clinical-decision
+
+governance:
+  - id: sterile-field
+    level: critical
+    action: block
+    conditions:
+      - type: production
+        value: true
+    description: "Block any non-approved production changes"
+  - id: timeout-verification
+    level: high
+    action: escalate
+    conditions:
+      - type: deployment
+        value: true
+    description: "Escalate all deployment actions"
+
+quality:
+  - id: zero-defect
+    type: test_coverage
+    threshold: 100
+  - id: no-lint
+    type: lint
+    threshold: 0
+  - id: no-security
+    type: security
+    threshold: 0
+
+workflows:
+  - id: surgery
+    name: Surgical Protocol
+    steps:
+      - id: "1"
+        name: Pre-op
+        required: true
+        approvalRequired: true
+      - id: "2"
+        name: Procedure
+        required: true
+      - id: "3"
+        name: Post-op
+        required: true

@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "behavioros": {
+      "command": "node",
+      "args": ["packages/mcp-server/dist/server.js"],
+      "env": {
+        "BEHAVIOROS_DNA_PATH": "./dnas/enterprise-governance.yaml",
+        "BEHAVIOROS_PROJECT": "my-project",
+        "BEHAVIOROS_LOG_LEVEL": "info"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "path": "./plugins/opencode-v2",
+      "enabled": true
+    }
+  ],
+  "instructions": ["docs/PROTOCOL.md", "docs/AGENT-PROTOCOL.md"]
+}

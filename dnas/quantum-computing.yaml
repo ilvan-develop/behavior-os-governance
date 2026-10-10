@@ -1,0 +1,51 @@
+name: "Quantum Computing"
+version: "2.0.0"
+description: "Governance for quantum computing simulations and quantum algorithm development"
+personas:
+  - role: architect
+    name: "Quantum Algorithm Engineer"
+    authority: "quantum-lead"
+    skills:
+      - "quantum-circuits"
+      - "quantum-algorithms"
+      - "quantum-error-correction"
+      - "quantum-simulation"
+governance:
+  - id: "quantum-validity"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "invalid-circuit"
+        value: true
+    description: "Block execution of invalid quantum circuits"
+  - id: "qubit-budget"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "qubit-exceeded"
+        value: true
+    description: "Warn when qubit budget is exceeded"
+  - id: "error-correction"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-error-correction"
+        value: true
+    description: "Block without error correction for deep circuits"
+  - id: "classical-verification"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "no-classical-check"
+        value: true
+    description: "Warn when classical verification is missing"
+quality:
+  - id: "circuit-tests"
+    type: "test_coverage"
+    threshold: 90
+  - id: "simulator-validation"
+    type: "security"
+    threshold: 0
+  - id: "benchmark-compliance"
+    type: "performance"
+    threshold: 80

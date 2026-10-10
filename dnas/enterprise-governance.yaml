@@ -1,0 +1,36 @@
+name: Enterprise Governance
+version: "2.0.0"
+description: "Compliance-focused governance for regulated industries"
+
+personas:
+  - role: operator
+    name: Compliance Officer
+    authority: operator
+    skills:
+      - compliance
+      - audit
+      - reporting
+
+governance:
+  - id: change-management
+    level: critical
+    action: escalate
+    conditions:
+      - type: change
+        value: true
+    description: "All changes must be reviewed"
+  - id: data-protection
+    level: critical
+    action: block
+    conditions:
+      - type: pii-access
+        value: true
+    description: "Block unauthorized PII access"
+
+quality:
+  - id: coverage
+    type: test_coverage
+    threshold: 80
+  - id: lint
+    type: lint
+    threshold: 0

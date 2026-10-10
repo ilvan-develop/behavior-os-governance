@@ -1,0 +1,44 @@
+name: "Startup Agile"
+version: "2.0.0"
+description: "Fast-paced governance for startup environments with rapid iteration"
+personas:
+  - role: architect
+    name: "Tech Lead"
+    authority: "tech-lead"
+    skills:
+      - "rapid-prototyping"
+      - "agile-methodology"
+      - "cross-functional-collaboration"
+      - " MVP-development"
+governance:
+  - id: "sprint-boundary"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "sprint-overrun"
+        value: true
+    description: "Warn when sprint boundaries are exceeded"
+  - id: "code-quality"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "test-coverage"
+        value: "< 70"
+    description: "Block merge without minimum test coverage"
+  - id: "documentation"
+    level: "low"
+    action: "warn"
+    conditions:
+      - type: "no-docs"
+        value: true
+    description: "Warn when documentation is missing"
+quality:
+  - id: "minimum-coverage"
+    type: "test_coverage"
+    threshold: 70
+  - id: "lint-clean"
+    type: "lint"
+    threshold: 3
+  - id: "basic-security"
+    type: "security"
+    threshold: 2

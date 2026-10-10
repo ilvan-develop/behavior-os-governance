@@ -1,0 +1,51 @@
+name: "IoT Embedded"
+version: "2.0.0"
+description: "Governance for IoT and embedded systems with safety and reliability focus"
+personas:
+  - role: architect
+    name: "Embedded Systems Lead"
+    authority: "embedded-lead"
+    skills:
+      - "firmware-development"
+      - "real-time-systems"
+      - "safety-critical"
+      - "hardware-software-co-design"
+governance:
+  - id: "safety-certification"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "safety-critical-code"
+        value: true
+    description: "Block safety-critical code without certification"
+  - id: "memory-constraints"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "memory-exceeded"
+        value: true
+    description: "Warn when memory constraints are violated"
+  - id: "real-time-requirements"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "timing-violation"
+        value: true
+    description: "Block releases with timing violations"
+  - id: "hardware-testing"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-hardware-test"
+        value: true
+    description: "Block firmware updates without hardware testing"
+quality:
+  - id: "static-analysis"
+    type: "lint"
+    threshold: 0
+  - id: "memory-safe"
+    type: "security"
+    threshold: 0
+  - id: "timing-verified"
+    type: "test_coverage"
+    threshold: 95

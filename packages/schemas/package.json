@@ -1,0 +1,26 @@
+{
+  "name": "@behavior-os/schemas",
+  "version": "2.0.0",
+  "description": "Zod schemas for Behavior-OS types",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,34 @@
+# Behavior-OS Protocol
+
+## 7-Step Protocol
+
+### Step 1: Select DNA Pattern
+Use `bos_select_dna` to choose governance pattern.
+
+### Step 2: Display DNA Block
+Show selected DNA for verification.
+
+### Step 3: Resolve Truth
+Verify requirements with `bos_resolve_truth`.
+
+### Step 4: Create Mission
+Define mission with `bos_create_mission`.
+
+### Step 5: Delegate
+Execute work through delegation.
+
+### Step 6: Run Audit
+Validate with `bos_run_audit`.
+
+### Step 7: Record Learning
+Capture insights with `bos_record_learning`.
+
+## Rules
+
+- Read `.behavioros/state.json` at session start
+- Update state after each step
+- Select DNA before every task
+- Show DNA block to human
+- Delegate all file operations
+- Run audit before completion
+- Record learning after every mission

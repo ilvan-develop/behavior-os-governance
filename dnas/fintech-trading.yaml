@@ -1,0 +1,51 @@
+name: "Fintech Trading"
+version: "2.0.0"
+description: "High-frequency trading governance with latency optimization and risk controls"
+personas:
+  - role: architect
+    name: "Trading Systems Lead"
+    authority: "trading-lead"
+    skills:
+      - "high-frequency-trading"
+      - "latency-optimization"
+      - "risk-management"
+      - "market-data-processing"
+governance:
+  - id: "latency-budget"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "latency-exceeded"
+        value: true
+    description: "Block trades exceeding latency budget"
+  - id: "risk-limits"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "risk-exceeded"
+        value: true
+    description: "Block operations exceeding risk limits"
+  - id: "order-validation"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "invalid-order"
+        value: true
+    description: "Warn on potentially invalid orders"
+  - id: "market-hours"
+    level: "medium"
+    action: "block"
+    conditions:
+      - type: "outside-hours"
+        value: true
+    description: "Block trading outside market hours"
+quality:
+  - id: "latency-tests"
+    type: "performance"
+    threshold: 1
+  - id: "simulator-tests"
+    type: "test_coverage"
+    threshold: 95
+  - id: "risk-models"
+    type: "security"
+    threshold: 0

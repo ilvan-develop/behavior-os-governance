@@ -1,0 +1,51 @@
+name: "Gaming Studio"
+version: "2.0.0"
+description: "Governance for game development with performance and asset management"
+personas:
+  - role: architect
+    name: "Technical Director"
+    authority: "tech-director"
+    skills:
+      - "game-engine"
+      - "performance-optimization"
+      - "asset-pipeline"
+      - "cross-platform"
+governance:
+  - id: "performance-target"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "fps-drop"
+        value: true
+    description: "Block builds that don't meet performance targets"
+  - id: "asset-validation"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "asset-size"
+        value: "> 100MB"
+    description: "Warn on oversized assets"
+  - id: "platform-testing"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-platform-test"
+        value: true
+    description: "Block release without platform-specific testing"
+  - id: "ip-protection"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "ip-leak"
+        value: true
+    description: "Block any intellectual property leaks"
+quality:
+  - id: "frame-rate"
+    type: "performance"
+    threshold: 60
+  - id: "memory-limit"
+    type: "performance"
+    threshold: 256
+  - id: "asset-size"
+    type: "access_control"
+    threshold: 100

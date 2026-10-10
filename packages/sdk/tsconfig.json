@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "baseUrl": ".",
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "@behavior-os/core": ["../core/src/index"],
+      "@behavior-os/schemas": ["../schemas/src/index"]
+    }
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

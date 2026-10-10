@@ -1,0 +1,4 @@
+* text=auto
+*.md lingua=en
+*.yaml linguist-language=YAML
+*.json linguist-language=JSON

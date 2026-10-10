@@ -1,0 +1,51 @@
+name: "Research Lab"
+version: "2.0.0"
+description: "Governance for research environments with data integrity and reproducibility"
+personas:
+  - role: architect
+    name: "Principal Investigator"
+    authority: "pi"
+    skills:
+      - "experimental-design"
+      - "data-integrity"
+      - "reproducibility"
+      - "peer-review"
+governance:
+  - id: "data-integrity"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "data-modification"
+        value: true
+    description: "Block unauthorized data modification"
+  - id: "experiment-approval"
+    level: "high"
+    action: "escalate"
+    conditions:
+      - type: "new-experiment"
+        value: true
+    description: "Escalate new experiments for PI approval"
+  - id: "peer-review"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "publication-ready"
+        value: true
+    description: "Warn when publication standards are not met"
+  - id: "reproducibility"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-reproducibility"
+        value: true
+    description: "Block results without reproducibility documentation"
+quality:
+  - id: "experiment-logs"
+    type: "test_coverage"
+    threshold: 80
+  - id: "data-validation"
+    type: "security"
+    threshold: 0
+  - id: "version-control"
+    type: "access_control"
+    threshold: 0

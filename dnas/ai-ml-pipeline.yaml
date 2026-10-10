@@ -1,0 +1,51 @@
+name: "AI/ML Pipeline"
+version: "2.0.0"
+description: "Governance for machine learning pipelines with model validation and data drift detection"
+personas:
+  - role: architect
+    name: "ML Engineer"
+    authority: "ml-lead"
+    skills:
+      - "model-training"
+      - "data-pipelines"
+      - "model-validation"
+      - "drift-detection"
+governance:
+  - id: "model-validation"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "model-deployment"
+        value: true
+    description: "Block model deployment without validation"
+  - id: "data-quality"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "data-quality-below"
+        value: "90%"
+    description: "Warn when data quality falls below threshold"
+  - id: "drift-detection"
+    level: "high"
+    action: "escalate"
+    conditions:
+      - type: "model-drift"
+        value: true
+    description: "Escalate when model drift is detected"
+  - id: "reproducibility"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "no-random-seed"
+        value: true
+    description: "Block training without reproducibility controls"
+quality:
+  - id: "model-accuracy"
+    type: "test_coverage"
+    threshold: 85
+  - id: "data-integrity"
+    type: "security"
+    threshold: 0
+  - id: "fairness-audit"
+    type: "access_control"
+    threshold: 0

@@ -1,0 +1,51 @@
+name: "Data Engineering"
+version: "2.0.0"
+description: "Governance for data pipelines with quality, lineage, and GDPR compliance"
+personas:
+  - role: architect
+    name: "Data Engineer"
+    authority: "data-lead"
+    skills:
+      - "etl-pipelines"
+      - "data-quality"
+      - "data-lineage"
+      - "gdpr-compliance"
+governance:
+  - id: "data-quality"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "quality-below"
+        value: "95%"
+    description: "Block pipelines with data quality below threshold"
+  - id: "lineage-tracking"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "no-lineage"
+        value: true
+    description: "Warn when data lineage is not tracked"
+  - id: "pii-redaction"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "pii-exposed"
+        value: true
+    description: "Block pipelines exposing PII data"
+  - id: "retention-policy"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "retention-violation"
+        value: true
+    description: "Warn on data retention policy violations"
+quality:
+  - id: "pipeline-tests"
+    type: "test_coverage"
+    threshold: 90
+  - id: "data-quality"
+    type: "security"
+    threshold: 95
+  - id: "schema-validation"
+    type: "access_control"
+    threshold: 0

@@ -1,0 +1,51 @@
+name: "Open Source"
+version: "2.0.0"
+description: "Governance for open source projects with community standards and license compliance"
+personas:
+  - role: architect
+    name: "Community Maintainer"
+    authority: "maintainer"
+    skills:
+      - "open-source-governance"
+      - "community-management"
+      - "license-compliance"
+      - "contribution-guidelines"
+governance:
+  - id: "license-check"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "new-dependency"
+        value: true
+    description: "Block dependencies with incompatible licenses"
+  - id: "dco-signoff"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-dco"
+        value: true
+    description: "Block commits without DCO signoff"
+  - id: "community-standards"
+    level: "medium"
+    action: "warn"
+    conditions:
+      - type: "style-violation"
+        value: true
+    description: "Warn on style guideline violations"
+  - id: "changelog-required"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-changelog"
+        value: true
+    description: "Block releases without changelog"
+quality:
+  - id: "conformance"
+    type: "lint"
+    threshold: 0
+  - id: "documentation"
+    type: "test_coverage"
+    threshold: 80
+  - id: "community-guidelines"
+    type: "access_control"
+    threshold: 0

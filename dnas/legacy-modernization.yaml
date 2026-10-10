@@ -1,0 +1,51 @@
+name: "Legacy Modernization"
+version: "2.0.0"
+description: "Governance for legacy system modernization with incremental migration patterns"
+personas:
+  - role: architect
+    name: "Modernization Lead"
+    authority: "modernization-lead"
+    skills:
+      - "legacy-systems"
+      - "incremental-migration"
+      - "strangler-pattern"
+      - "technical-debt-management"
+governance:
+  - id: "backward-compatibility"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "breaking-change"
+        value: true
+    description: "Block breaking changes without compatibility plan"
+  - id: "debt-tracking"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "new-debt"
+        value: true
+    description: "Warn when new technical debt is introduced"
+  - id: "migration-testing"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-migration-test"
+        value: true
+    description: "Block migration without testing plan"
+  - id: "rollback-plan"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "no-rollback"
+        value: true
+    description: "Block without rollback plan"
+quality:
+  - id: "migration-coverage"
+    type: "test_coverage"
+    threshold: 90
+  - id: "legacy-compatibility"
+    type: "security"
+    threshold: 0
+  - id: "debt-limit"
+    type: "lint"
+    threshold: 10

@@ -1,0 +1,51 @@
+name: "Cloud Native"
+version: "2.0.0"
+description: "Governance for cloud-native applications with scalability and resilience"
+personas:
+  - role: architect
+    name: "Cloud Architect"
+    authority: "cloud-lead"
+    skills:
+      - "kubernetes"
+      - "microservices"
+      - "cloud-patterns"
+      - "observability"
+governance:
+  - id: "scaling-policy"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "scale-event"
+        value: true
+    description: "Warn on scaling events for review"
+  - id: "resource-limits"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "no-resource-limits"
+        value: true
+    description: "Block deployments without resource limits"
+  - id: "disaster-recovery"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-dr-plan"
+        value: true
+    description: "Block without disaster recovery plan"
+  - id: "monitoring-required"
+    level: "high"
+    action: "block"
+    conditions:
+      - type: "no-monitoring"
+        value: true
+    description: "Block deployments without monitoring"
+quality:
+  - id: "availability"
+    type: "performance"
+    threshold: 99.9
+  - id: "load-testing"
+    type: "test_coverage"
+    threshold: 80
+  - id: "security-scan"
+    type: "security"
+    threshold: 0

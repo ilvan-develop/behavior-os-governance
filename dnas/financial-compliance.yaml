@@ -1,0 +1,51 @@
+name: "Financial Compliance"
+version: "2.0.0"
+description: "Strict compliance governance for financial systems and regulated transactions"
+personas:
+  - role: operator
+    name: "Compliance Officer"
+    authority: "compliance"
+    skills:
+      - "regulatory-compliance"
+      - "audit-trails"
+      - "risk-management"
+      - "transaction-monitoring"
+governance:
+  - id: "transaction-approval"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "financial-transaction"
+        value: true
+    description: "Block all financial transactions without compliance approval"
+  - id: "audit-trail-required"
+    level: "critical"
+    action: "log"
+    conditions:
+      - type: "any-action"
+        value: true
+    description: "Log all actions for audit trail"
+  - id: "data-encryption"
+    level: "critical"
+    action: "block"
+    conditions:
+      - type: "pii-data"
+        value: true
+    description: "Block operations on PII data without encryption"
+  - id: "dual-authorization"
+    level: "high"
+    action: "escalate"
+    conditions:
+      - type: "high-value"
+        value: true
+    description: "Escalate high-value transactions for dual authorization"
+quality:
+  - id: "zero-defects"
+    type: "test_coverage"
+    threshold: 100
+  - id: "no-secrets"
+    type: "security"
+    threshold: 0
+  - id: "code-review"
+    type: "access_control"
+    threshold: 2
