@@ -154,6 +154,7 @@ export const GovernanceDecisionSchema = z.object({
   agentId: z.string(),
   missionId: z.string().optional(),
   transformed: z.boolean().optional(),
+  warnings: z.array(z.string()).optional(),
 });
 
 // ============================================================
@@ -266,7 +267,9 @@ export type AgentType = z.infer<typeof AgentTypeSchema>;
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type Agent = z.infer<typeof AgentSchema>;
 export type GovernanceVerdict = z.infer<typeof GovernanceVerdictSchema>;
-export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema>;
+export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema> & {
+  warnings?: string[];
+};
 export type AuditStage = z.infer<typeof AuditStageSchema>;
 export type AuditResult = z.infer<typeof AuditResultSchema>;
 export type AuditReport = z.infer<typeof AuditReportSchema>;
