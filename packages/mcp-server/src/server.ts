@@ -143,7 +143,7 @@ server.registerTool(
       title: 'Create Mission',
     },
   },
-  async ({ title, type, priority, description, tags }) => {
+  async ({ title, type, priority }) => {
     try {
       const bos = getBehaviorOS();
       const mission = bos.createMission({
@@ -226,17 +226,7 @@ server.registerTool(
       title: 'List Missions',
     },
   },
-  async ({
-    status,
-    type,
-    priority,
-    limit = 50,
-  }: {
-    status?: string;
-    type?: string;
-    priority?: string;
-    limit?: number;
-  }) => {
+  async ({ limit = 50 }: { limit?: number }) => {
     try {
       const bos = getBehaviorOS();
       const missions = bos.listMissions?.(limit) ?? [];
@@ -541,126 +531,46 @@ server.registerResource(
 );
 
 // ============================================================
-// DNA PATTERNS (Predefined)
+// DNA PATTERNS - Carregados do sistema de arquivos
 // ============================================================
 
 async function loadDNAPatterns(): Promise<Record<string, DNA>> {
-  return {
-    'surgical-team': {
+  // Load all DNA patterns from the dnas/ directory
+  const dnaPath = process.env.BEHAVIOROS_DNA_PATH || '/c/www/behavior-os/dnas';
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const yaml = await import('js-yaml');
+
+  const dnas: Record<string, DNA> = {};
+
+  try {
+    const files = fs.readdirSync(dnaPath);
+    for (const file of files) {
+      if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+        const content = fs.readFileSync(path.join(dnaPath, file), 'utf-8');
+        const dna = yaml.load(content) as DNA;
+        const name = file.replace(/\.(yaml|yml)$/, '');
+        dnas[name] = dna;
+      }
+    }
+  } catch {
+    // Fallback to hardcoded patterns if filesystem loading fails
+    console.error('Warning: Could not load DNA patterns from filesystem, using defaults');
+  }
+
+  // Ensure we have at least the basic patterns
+  if (Object.keys(dnas).length === 0) {
+    dnas['surgical-team'] = {
       name: 'Surgical Team',
       version: '2.0.0',
       description: 'Zero-defect governance with sterile field protocols',
-      personas: [
-        {
-          role: 'architect',
-          name: 'Lead Surgeon',
-          authority: 'architect',
-          boundaries: [{ id: 'max-modules', type: 'max_modules', value: 1 }],
-          skills: ['surgical-procedure', 'team-leadership', 'clinical-decision'],
-        },
-      ],
-      governance: [
-        {
-          id: 'sterile-field',
-          level: 'critical',
-          action: 'block',
-          conditions: [{ type: 'production', value: true }],
-          description: 'Block any non-approved production changes',
-        },
-        {
-          id: 'timeout-verification',
-          level: 'high',
-          action: 'escalate',
-          conditions: [{ type: 'deployment', value: true }],
-          description: 'Escalate all deployment actions',
-        },
-      ],
-      quality: [
-        { id: 'zero-defect', type: 'test_coverage', threshold: 100 },
-        { id: 'no-lint', type: 'lint', threshold: 0 },
-        { id: 'no-security', type: 'security', threshold: 0 },
-      ],
-    },
-    'enterprise-governance': {
-      name: 'Enterprise Governance',
-      version: '2.0.0',
-      description: 'Compliance-focused governance for regulated industries',
-      personas: [
-        {
-          role: 'operator',
-          name: 'Compliance Officer',
-          authority: 'operator',
-          skills: ['compliance', 'audit', 'reporting'],
-        },
-      ],
-      governance: [
-        {
-          id: 'change-management',
-          level: 'critical',
-          action: 'escalate',
-          conditions: [{ type: 'change', value: true }],
-          description: 'All changes must be reviewed',
-        },
-        {
-          id: 'data-protection',
-          level: 'critical',
-          action: 'block',
-          conditions: [{ type: 'pii-access', value: true }],
-          description: 'Block unauthorized PII access',
-        },
-      ],
-      quality: [
-        { id: 'coverage', type: 'test_coverage', threshold: 80 },
-        { id: 'lint', type: 'lint', threshold: 0 },
-      ],
-    },
-    'military-operations': {
-      name: 'Military Operations',
-      version: '2.0.0',
-      description: 'Chain of command and mission-focused operations',
-      personas: [
-        {
-          role: 'operator',
-          name: 'Mission Commander',
-          authority: 'admin',
-          skills: ['strategy', 'command', 'execution'],
-        },
-      ],
-      governance: [
-        {
-          id: 'chain-of-command',
-          level: 'high',
-          action: 'escalate',
-          conditions: [{ type: 'critical-action', value: true }],
-          description: 'Critical actions require commander approval',
-        },
-      ],
-      quality: [{ id: 'coverage', type: 'test_coverage', threshold: 75 }],
-    },
-    'lean-factory': {
-      name: 'Lean Factory',
-      version: '2.0.0',
-      description: 'Continuous improvement and waste elimination',
-      personas: [
-        {
-          role: 'operator',
-          name: 'Process Engineer',
-          authority: 'operator',
-          skills: ['optimization', 'kaizen', 'value-stream'],
-        },
-      ],
-      governance: [
-        {
-          id: 'waste-elimination',
-          level: 'medium',
-          action: 'warn',
-          conditions: [{ type: 'redundant-action', value: true }],
-          description: 'Warn on redundant operations',
-        },
-      ],
-      quality: [{ id: 'coverage', type: 'test_coverage', threshold: 70 }],
-    },
-  };
+      personas: [],
+      governance: [],
+      quality: [],
+    };
+  }
+
+  return dnas;
 }
 
 // ============================================================

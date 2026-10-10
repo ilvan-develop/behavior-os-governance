@@ -11,15 +11,7 @@ import type {
   MissionPriority,
   MissionType,
 } from '@behavior-os/schemas';
-import {
-  AuditEngine,
-  DNALoader,
-  EngineRegistry,
-  GovernanceEngine,
-  type LearningEngine,
-  type MissionEngine,
-  QualityEngine,
-} from './index';
+import { EngineRegistry, type LearningEngine, type MissionEngine } from './index';
 
 export interface BehaviorOSConfig {
   dnaPath?: string;
@@ -35,7 +27,7 @@ export class BehaviorOS {
   private agentState: AgentState;
   private agents: Map<string, Agent> = new Map();
 
-  constructor(config: BehaviorOSConfig = {}) {
+  constructor(_config: BehaviorOSConfig = {}) {
     this.registry = new EngineRegistry();
     this.agentState = {
       currentStep: 0,

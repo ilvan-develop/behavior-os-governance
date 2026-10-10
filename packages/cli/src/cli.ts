@@ -1,10 +1,10 @@
 #!/usr/bin/env node
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BehaviorOS } from '@behavior-os/core';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -120,7 +120,7 @@ program
           } else {
             console.log(chalk.yellow(`  ⚠ ${file} - missing required fields`));
           }
-        } catch (error) {
+        } catch (_error) {
           console.log(chalk.red(`  ✗ ${file} - error reading`));
         }
       }
@@ -134,7 +134,7 @@ program
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
-    const bos = new BehaviorOS();
+    const _bos = new BehaviorOS();
 
     console.log(chalk.blue('Validating Behavior-OS configuration...'));
 
@@ -205,7 +205,7 @@ program
   .command('diff')
   .description('Detect behavioral drift between DNA versions')
   .option('-d, --directory <path>', 'Project directory', '.')
-  .action(async (options) => {
+  .action(async (_options) => {
     console.log(chalk.blue('Checking for behavioral drift...'));
     console.log(chalk.gray('No drift detected.'));
   });
@@ -231,7 +231,7 @@ program
 
       console.log(chalk.green(`Verdict: ${decision.verdict}`));
       console.log(chalk.gray(`Reason: ${decision.reason}`));
-    } catch (error) {
+    } catch (_error) {
       console.log(chalk.yellow('Simulation completed (no DNA loaded)'));
     }
   });
@@ -242,7 +242,7 @@ program
   .description('Deploy with quality gates')
   .option('-d, --directory <path>', 'Project directory', '.')
   .option('--mission-id <id>', 'Mission ID to deploy')
-  .action(async (options) => {
+  .action(async (_options) => {
     console.log(chalk.blue('Running deployment quality gates...'));
 
     const gates = ['lint', 'typecheck', 'security', 'coverage'];
@@ -334,7 +334,7 @@ program
   .command('drift-check')
   .description('Compare current vs baseline behavior')
   .option('-d, --directory <path>', 'Project directory', '.')
-  .action(async (options) => {
+  .action(async (_options) => {
     console.log(chalk.blue('Checking for behavioral drift...'));
     console.log(chalk.green('No drift detected.'));
   });

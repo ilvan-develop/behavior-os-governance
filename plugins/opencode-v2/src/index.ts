@@ -1,9 +1,9 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { BehaviorOS } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;

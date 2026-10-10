@@ -85,14 +85,14 @@ describe('MissionEngine', () => {
   });
 
   it('should list all missions', () => {
-    const m1 = engine.create({
+    const _m1 = engine.create({
       title: 'Mission 1',
       type: 'feature',
       priority: 'high',
       dnaPattern: 'test',
       createdBy: 'agent-1',
     });
-    const m2 = engine.create({
+    const _m2 = engine.create({
       title: 'Mission 2',
       type: 'bugfix',
       priority: 'low',
@@ -171,21 +171,21 @@ describe('MissionEngine', () => {
   });
 
   it('should sort by priority', () => {
-    const m1 = engine.create({
+    const _m1 = engine.create({
       title: 'Low',
       type: 'feature',
       priority: 'low',
       dnaPattern: 'test',
       createdBy: 'agent-1',
     });
-    const m2 = engine.create({
+    const _m2 = engine.create({
       title: 'Critical',
       type: 'feature',
       priority: 'critical',
       dnaPattern: 'test',
       createdBy: 'agent-1',
     });
-    const m3 = engine.create({
+    const _m3 = engine.create({
       title: 'Medium',
       type: 'feature',
       priority: 'medium',

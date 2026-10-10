@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { DNA } from '../src/index.js';
 import {
   AuditStageSchema,
   DNASchema,

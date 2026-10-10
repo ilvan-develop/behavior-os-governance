@@ -24,6 +24,24 @@
   },
   "overrides": [
     {
+      "includes": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "**/.turbo/**"],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": ["**/*.html"],
+      "linter": {
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["**/tests/**", "**/*.test.ts"],
       "linter": {
         "rules": {

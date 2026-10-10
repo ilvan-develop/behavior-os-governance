@@ -1,4 +1,3 @@
-import type { LearningEvent } from '@behavior-os/schemas';
 import { describe, expect, it } from 'vitest';
 import { LearningEngine } from '../src/engine/learning-engine.js';
 

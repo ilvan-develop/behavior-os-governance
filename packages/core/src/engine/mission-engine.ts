@@ -14,7 +14,7 @@ export interface CreateMissionOptions {
 export class MissionEngine {
   private missions: Map<string, Mission> = new Map();
 
-  constructor(private dna?: DNA) {}
+  constructor(_dna?: DNA) {}
 
   create(options: CreateMissionOptions): Mission {
     const mission: Mission = {
@@ -49,7 +49,7 @@ export class MissionEngine {
     return mission;
   }
 
-  fail(missionId: string, reason?: string): Mission | null {
+  fail(missionId: string, _reason?: string): Mission | null {
     const mission = this.missions.get(missionId);
     if (!mission) return null;
 

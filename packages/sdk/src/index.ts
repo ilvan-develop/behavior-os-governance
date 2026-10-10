@@ -1,6 +1,5 @@
 import { BehaviorOS, type BehaviorOSConfig } from '@behavior-os/core';
 import type {
-  Agent,
   AuditReport,
   DNA,
   GovernanceDecision,

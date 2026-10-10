@@ -1,4 +1,4 @@
-import type { DNA, Mission } from '@behavior-os/schemas';
+import type { DNA } from '@behavior-os/schemas';
 import { describe, expect, it } from 'vitest';
 import { BehaviorOSSDK } from '../src/index.js';
 

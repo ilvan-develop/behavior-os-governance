@@ -1,5 +1,5 @@
 import { BehaviorOS } from '@behavior-os/core';
-import type { DNA, GovernanceDecision, Mission } from '@behavior-os/schemas';
+import type { GovernanceDecision, Mission } from '@behavior-os/schemas';
 
 /**
  * Orchestrator for autonomous AI agent teams

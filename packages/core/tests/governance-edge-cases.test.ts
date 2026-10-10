@@ -64,7 +64,7 @@ describe('GovernanceEngine Edge Cases', () => {
   });
 
   it('should handle very long rule IDs', () => {
-    const longRuleId = 'rule-' + 'x'.repeat(1000);
+    const longRuleId = `rule-${'x'.repeat(1000)}`;
     const engine = new GovernanceEngine(
       createDNA([
         {

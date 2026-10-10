@@ -1,11 +1,4 @@
-import {
-  describe,
-  expect,
-  it,
-  describe as vitestDescribe,
-  expect as vitestExpect,
-  it as vitestIt,
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('MCP Server Integration', () => {
   it('should have proper server structure', () => {

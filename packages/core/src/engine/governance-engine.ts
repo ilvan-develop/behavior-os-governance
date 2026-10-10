@@ -23,11 +23,11 @@ export class GovernanceEngine {
 
   evaluate(context: EvaluateContext): GovernanceDecision {
     const cacheKey = `${context.action}|${context.agentId}|${JSON.stringify(context.context)}`;
-    
+
     // Check cache with TTL
     const cached = this.decisionCache.get(cacheKey);
     if (cached) {
-      const cachedTime = parseInt(cached.id.split('-')[1] ?? '0');
+      const cachedTime = parseInt(cached.id.split('-')[1] ?? '0', 10);
       if (Date.now() - cachedTime < this.CACHE_TTL_MS) {
         return cached;
       }

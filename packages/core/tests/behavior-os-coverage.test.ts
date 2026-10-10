@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { BehaviorOS } from '../src/engine/behavior-os';
 import type { DNA } from '@behavior-os/schemas';
+import { describe, expect, it } from 'vitest';
+import { BehaviorOS } from '../src/engine/behavior-os';
 
 describe('BehaviorOS - Coverage Tests', () => {
   let bos: BehaviorOS;
@@ -181,7 +181,13 @@ describe('BehaviorOS - Coverage Tests', () => {
       description: 'Test',
       personas: [],
       governance: [
-        { id: 'rule-1', level: 'high', action: 'block', conditions: [{ type: 'blocked', value: true }], description: 'Block' },
+        {
+          id: 'rule-1',
+          level: 'high',
+          action: 'block',
+          conditions: [{ type: 'blocked', value: true }],
+          description: 'Block',
+        },
       ],
       quality: [],
     };

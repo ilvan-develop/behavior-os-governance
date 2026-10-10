@@ -1,5 +1,5 @@
-import type { Agent, DNA, Mission } from '@behavior-os/schemas';
-import { describe, expect, it, vi } from 'vitest';
+import type { DNA } from '@behavior-os/schemas';
+import { describe, expect, it } from 'vitest';
 import { AuditEngine } from '../src/engine/audit-engine.js';
 import { DNALoader } from '../src/engine/dna-loader.js';
 import { GovernanceEngine } from '../src/engine/governance-engine.js';

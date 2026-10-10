@@ -50,7 +50,7 @@ export class AuditEngine {
     return this.reports.find((r) => r.id === id);
   }
 
-  private generateSummary(stages: AuditResult[], overall: string): string {
+  private generateSummary(stages: AuditResult[], _overall: string): string {
     const passed = stages.filter((s) => s.status === 'passed').length;
     const failed = stages.filter((s) => s.status === 'failed').length;
     const warnings = stages.filter((s) => s.status === 'warning').length;
