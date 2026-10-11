@@ -91,8 +91,19 @@ try {
     name: 'bos_select_dna',
     arguments: { pattern: 'enterprise-governance' },
   });
+  const learning = await request('tools/call', {
+    name: 'bos_record_learning',
+    arguments: {
+      type: 'insight',
+      source: 'smoke-mcp',
+      content: 'relatedMission must be forwarded to the learning engine',
+      impact: 'high',
+      relatedMission: 'mission-smoke',
+    },
+  });
   const missionsText = missions?.content?.[0]?.text ?? '';
   const dnaText = dna?.content?.[0]?.text ?? '';
+  const learningText = learning?.content?.[0]?.text ?? '';
 
   console.log('MCP server   :', init?.serverInfo?.name, init?.serverInfo?.version);
   console.log('Tools (%d)   : %s', names.length, names.join(', '));
@@ -102,12 +113,16 @@ try {
   );
   console.log('bos_list_missions:', missionsText.replace(/\s+/g, ' ').slice(0, 160));
   console.log('bos_select_dna:', dnaText.replace(/\s+/g, ' ').slice(0, 160));
+  console.log('bos_record_learning:', learningText.replace(/\s+/g, ' ').slice(0, 200));
 
   if (names.length === 0) throw new Error('No tools registered');
   if (!names.includes('bos_evaluate_governance')) throw new Error('Missing governance tool');
   if (!names.includes('bos_run_audit')) throw new Error('Missing audit tool');
   if (dnaText.toLowerCase().includes('not found')) {
     throw new Error(`DNA patterns were not loaded from disk: ${dnaText}`);
+  }
+  if (!learningText.includes('mission-smoke')) {
+    throw new Error(`bos_record_learning dropped relatedMission: ${learningText}`);
   }
 } catch (error) {
   exitCode = 1;
