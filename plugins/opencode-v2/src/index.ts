@@ -113,7 +113,7 @@ export default Plugin.define({
     try {
       const dnasDir = process.env.BEHAVIOROS_DNA_PATH
         ? path.resolve(process.env.BEHAVIOROS_DNA_PATH)
-        : path.join(process.cwd(), 'dnas');
+        : path.join(ctx.location.directory, 'dnas');
       loadedDnaPatterns = await loadDNAFromDirectory(dnasDir);
 
       // Merge with built-in patterns
@@ -132,7 +132,7 @@ export default Plugin.define({
       }
     }
 
-    ctx.tool.transform((tools) => {
+    await ctx.tool.transform((tools) => {
       // Tool 1: bos_evaluate_governance
       tools.add({
         name: 'bos_evaluate_governance',
@@ -445,7 +445,7 @@ export default Plugin.define({
     });
 
     // Governance hook for write/edit/bash tools
-    ctx.tool.hook('execute.before', async (event: unknown): Promise<void> => {
+    await ctx.tool.hook('execute.before', async (event: unknown): Promise<void> => {
       const eventTyped = event as {
         tool?: string;
         agent?: string;
@@ -481,7 +481,7 @@ export default Plugin.define({
     });
 
     // Session context hook - surface BehaviorOS state to the model
-    ctx.session.hook('context', async (event): Promise<void> => {
+    await ctx.session.hook('context', async (event): Promise<void> => {
       const currentState = bos.getState();
       if (!currentState.selectedDna) return;
 
