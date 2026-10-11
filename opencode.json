@@ -3,7 +3,7 @@
   "mcpServers": {
     "behavioros": {
       "command": "node",
-      "args": ["packages/mcp-server/dist/server.js"],
+      "args": ["C:/www/behavior-os/packages/mcp-server/dist/server.js"],
       "env": {
         "BEHAVIOROS_DNA_PATH": "./dnas/enterprise-governance.yaml",
         "BEHAVIOROS_PROJECT": "my-project",
@@ -11,6 +11,6 @@
       }
     }
   },
-  "plugins": ["./.opencode/plugins/behavioros/index.ts"],
+  "plugins": ["./.opencode/plugins/behavioros"],
   "instructions": ["docs/PROTOCOL.md", "docs/AGENT-PROTOCOL.md"]
 }
