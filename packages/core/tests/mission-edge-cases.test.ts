@@ -81,7 +81,8 @@ describe('MissionEngine Edge Cases', () => {
       type: 'feature',
       priority: 'medium',
       dnaPattern: 'test',
-      createdBy: null as any,
+      // Deliberately malformed input at the runtime boundary.
+      createdBy: null as unknown as string,
     });
 
     expect(mission.createdBy).toBeNull();
@@ -142,7 +143,7 @@ describe('MissionEngine Edge Cases', () => {
     });
 
     engine.start(mission.id);
-    const failed = engine.fail(mission.id, null as any);
+    const failed = engine.fail(mission.id, null as unknown as string | undefined);
 
     expect(failed).not.toBeNull();
     expect(failed?.status).toBe('failed');

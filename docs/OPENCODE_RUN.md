@@ -28,19 +28,30 @@ powershell.exe -Command "cd 'C:\www\behavior-os'; opencode run --standalone 'tes
 ```
 $ opencode plugin list
 ID           VERSION  SOURCE
-behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros\index.ts
+behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 ```
 
-## Ferramentas Disponíveis
-- `evaluateGovernance` - Avaliar ações contra regras de governança
-- `createMission` - Criar novas missões
-- `startMission` - Iniciar missão
-- `completeMission` - Completar missão
-- `failMission` - Falhar missão com motivo
-- `recordLearning` - Registrar aprendizados
-- `listDnas` - Listar padrões DNA disponíveis
-- `evaluateQuality` - Avaliar métricas de qualidade
-- `runAudit` - Executar auditoria
+> O loader em `.opencode/plugins/behavioros.ts` aponta para o build do
+> `plugins/opencode-v2` (`dist/index.js`) — auto-discovery nativo do OpenCode v2.
+> O MCP server **não** é registado no `opencode.json` (`.mcp.json` é ignorado pelo v2);
+> mantém-se como pacote standalone para clientes MCP externos.
+
+## Ferramentas Disponíveis (12 × `bos_*`)
+- `bos_evaluate_governance` - Avaliar ações contra regras de governança
+- `bos_create_mission` - Criar novas missões
+- `bos_start_mission` - Iniciar missão
+- `bos_list_missions` - Listar missões (com filtros)
+- `bos_check_quality` - Verificar gates de qualidade
+- `bos_get_insights` - Obter insights do learning engine
+- `bos_get_state` - Estado atual do protocolo
+- `bos_get_status` - Status atual do Behavior-OS
+- `bos_list_dna` - Listar padrões DNA disponíveis
+- `bos_record_learning` - Registrar aprendizados
+- `bos_run_audit` - Executar auditoria
+- `bos_select_dna` - Selecionar padrão DNA
+
+> **Nota**: usa `opencode run --agent <agent>` para a sessão carregar o plugin.
+> Sem `--agent`, a sessão corre sem agente e as tools `bos_*` podem não aparecer.
 
 ## DNA Patterns Disponíveis
 21 padrões carregados dinamicamente:

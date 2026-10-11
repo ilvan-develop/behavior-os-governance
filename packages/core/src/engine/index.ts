@@ -10,6 +10,7 @@ export { AuditEngine, DNALoader, GovernanceEngine, LearningEngine, MissionEngine
 
 export class EngineRegistry {
   private engines = new Map<string, unknown>();
+  private engineDna = new Map<string, DNA>();
   private dnaLoader = new DNALoader();
 
   register(name: string, engine: unknown): void {
@@ -20,15 +21,28 @@ export class EngineRegistry {
     return this.engines.get(name) as T | undefined;
   }
 
+  // Governance and quality engines are bound to a specific DNA. Reuse the
+  // existing engine while the DNA reference is unchanged so their internal
+  // caches stay effective; recreate only when the DNA actually changes.
   createGovernanceEngine(dna: DNA): GovernanceEngine {
+    const existing = this.engines.get('governance');
+    if (existing instanceof GovernanceEngine && this.engineDna.get('governance') === dna) {
+      return existing;
+    }
     const engine = new GovernanceEngine(dna);
-    this.register('governance', engine);
+    this.engines.set('governance', engine);
+    this.engineDna.set('governance', dna);
     return engine;
   }
 
   createQualityEngine(dna: DNA): QualityEngine {
+    const existing = this.engines.get('quality');
+    if (existing instanceof QualityEngine && this.engineDna.get('quality') === dna) {
+      return existing;
+    }
     const engine = new QualityEngine(dna);
-    this.register('quality', engine);
+    this.engines.set('quality', engine);
+    this.engineDna.set('quality', dna);
     return engine;
   }
 

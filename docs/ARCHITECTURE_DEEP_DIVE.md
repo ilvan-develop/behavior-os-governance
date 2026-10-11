@@ -123,17 +123,18 @@ All data is validated through Zod v4.4.3 schemas:
 
 ## Integration Points
 
-### MCP Server
-- 45+ registered tools
+### MCP Server (standalone for external clients)
+- 11 registered tools
 - Resource templates
 - Prompt management
 - JSON-RPC protocol support
 
-### OpenCode v2 Plugin
-- Setup hook for initialization
-- Transform hooks for action modification
-- Event hooks for protocol enforcement
-- Native TypeScript integration
+### OpenCode v2 Plugin (single native channel)
+- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()`
+- `execute.before` governance hook intercepting write/edit/bash actions
+- Session context hook injecting protocol state
+- DNA patterns loaded from `dnas/` and merged with built-ins
+- Native TypeScript integration via `.opencode/plugins/` auto-discovery
 
 ### IDE Integrations
 - **Claude Code**: MCP server via `.mcp.json`

@@ -96,12 +96,12 @@ interface ProtocolStep {
 
 const PROTOCOL_STEPS: ProtocolStep[] = [
   { number: 1, name: 'Select DNA Pattern', tool: 'bos_select_dna' },
-  { number: 2, name: 'Display DNA Block', tool: 'visual' },
-  { number: 3, name: 'Resolve Truth', tool: 'bos_resolve_truth' },
-  { number: 4, name: 'Create Mission', tool: 'create-mission' },
-  { number: 5, name: 'Delegate', tool: 'task' },
+  { number: 2, name: 'Display DNA Block', tool: 'bos_list_dna' },
+  { number: 3, name: 'Resolve Truth', tool: 'bos_get_state' },
+  { number: 4, name: 'Create Mission', tool: 'bos_create_mission' },
+  { number: 5, name: 'Delegate', tool: 'bos_start_mission' },
   { number: 6, name: 'Run Audit', tool: 'bos_run_audit' },
-  { number: 7, name: 'Record Learning', tool: 'record-learning' },
+  { number: 7, name: 'Record Learning', tool: 'bos_record_learning' },
 ];
 
 export default Plugin.define({
@@ -261,7 +261,62 @@ export default Plugin.define({
         },
       });
 
-      // Tool 5: bos_run_audit
+      // Tool 5: bos_start_mission
+      tools.add({
+        name: 'bos_start_mission',
+        description: 'Start a mission by ID',
+        input: {
+          type: 'object',
+          properties: {
+            missionId: { type: 'string' },
+          },
+          required: ['missionId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+          const params = input as { missionId: string };
+          const mission = bos.startMission(params.missionId);
+          if (!mission) {
+            return {
+              content: `Mission "${params.missionId}" not found`,
+              output: { error: `Mission "${params.missionId}" not found` },
+            };
+          }
+          return {
+            content: `Mission "${params.missionId}" started. Status: ${mission.status}`,
+            output: mission,
+          };
+        },
+      });
+
+      // Tool 6: bos_list_missions
+      tools.add({
+        name: 'bos_list_missions',
+        description: 'List all missions with optional filters',
+        input: {
+          type: 'object',
+          properties: {
+            status: { type: 'string' },
+            type: { type: 'string' },
+            priority: { type: 'string' },
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+          const params = input as {
+            status?: string;
+            type?: string;
+            priority?: string;
+            limit?: number;
+          };
+          const missions = bos.listMissions(params.limit ?? 50);
+          return {
+            content: JSON.stringify(missions, null, 2),
+            output: missions,
+          };
+        },
+      });
+
+      // Tool 7: bos_run_audit
       tools.add({
         name: 'bos_run_audit',
         description: 'Run audit pipeline for a mission',
@@ -270,12 +325,17 @@ export default Plugin.define({
           properties: {
             missionId: { type: 'string' },
             agentId: { type: 'string' },
+            stages: { type: 'array', items: { type: 'string' } },
           },
           required: ['missionId', 'agentId'],
         },
         execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
-          const params = input as { missionId: string; agentId: string };
-          const report = bos.runAudit({ missionId: params.missionId, agentId: params.agentId });
+          const params = input as { missionId: string; agentId: string; stages?: string[] };
+          const report = bos.runAudit({
+            missionId: params.missionId,
+            agentId: params.agentId,
+            stages: params.stages,
+          });
           return {
             content: `Audit complete: ${report.overall}`,
             output: report,
@@ -283,7 +343,51 @@ export default Plugin.define({
         },
       });
 
-      // Tool 6: bos_record_learning
+      // Tool 8: bos_check_quality
+      tools.add({
+        name: 'bos_check_quality',
+        description: 'Check quality metrics against governance gates',
+        input: {
+          type: 'object',
+          properties: {
+            metrics: {
+              type: 'object',
+              additionalProperties: { type: 'number' },
+            },
+          },
+          required: ['metrics'],
+        },
+        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+          const params = input as { metrics: Record<string, number> };
+          const result = bos.checkQuality(params.metrics);
+          return {
+            content: JSON.stringify(result, null, 2),
+            output: result,
+          };
+        },
+      });
+
+      // Tool 9: bos_get_insights
+      tools.add({
+        name: 'bos_get_insights',
+        description: 'Get high-impact insights from learning engine',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+          const params = input as { limit?: number };
+          const insights = bos.getInsights(params.limit ?? 10);
+          return {
+            content: JSON.stringify(insights, null, 2),
+            output: insights,
+          };
+        },
+      });
+
+      // Tool 10: bos_record_learning
       tools.add({
         name: 'bos_record_learning',
         description: 'Record a learning event',
@@ -297,16 +401,24 @@ export default Plugin.define({
             source: { type: 'string' },
             content: { type: 'string' },
             impact: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+            relatedMission: { type: 'string' },
           },
           required: ['type', 'source', 'content', 'impact'],
         },
         execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
-          const params = input as { type: string; source: string; content: string; impact: string };
+          const params = input as {
+            type: string;
+            source: string;
+            content: string;
+            impact: string;
+            relatedMission?: string;
+          };
           const event = bos.recordLearning({
             type: params.type as 'insight' | 'pattern' | 'fix' | 'failure' | 'optimization',
             source: params.source,
             content: params.content,
             impact: params.impact as 'low' | 'medium' | 'high' | 'critical',
+            relatedMission: params.relatedMission,
           });
           return {
             content: `Learning recorded: ${event.id}`,
@@ -315,7 +427,7 @@ export default Plugin.define({
         },
       });
 
-      // Tool 7: bos_get_status
+      // Tool 11: bos_get_status
       tools.add({
         name: 'bos_get_status',
         description: 'Get current Behavior-OS status',
@@ -329,7 +441,7 @@ export default Plugin.define({
         },
       });
 
-      // Tool 8: bos_get_state
+      // Tool 12: bos_get_state
       tools.add({
         name: 'bos_get_state',
         description: 'Get current protocol state',

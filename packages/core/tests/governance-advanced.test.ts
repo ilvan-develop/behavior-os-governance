@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { GovernanceEngine } from '../src/engine/governance-engine.js';
 
 describe('GovernanceEngine Advanced', () => {
-  const createDNA = (rules: any[]): DNA => ({
+  const createDNA = (rules: unknown[]): DNA => ({
     name: 'Test',
     version: '1.0.0',
     description: 'Test',
     personas: [],
-    governance: rules,
+    governance: rules as DNA['governance'],
     quality: [],
   });
 

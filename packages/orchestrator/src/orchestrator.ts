@@ -60,8 +60,8 @@ export class AutonomousOrchestrator {
 
     // Execute mission with governance
     const decision = await this.behaviorOS.evaluateGovernance('execute', {
+      agent: agentId,
       missionId: result.id,
-      agentId,
     });
 
     return {

@@ -1,5 +1,11 @@
 # OpenCode Run - Verificação de Teste
 
+> ⚠️ **HISTÓRICO/SUPERSEDED** — Este relatório reflete o estado antigo da integração
+> (plugin em diretório `.opencode/plugins/behavioros/`, 9 tools sem prefixo `bos_`).
+> A integração atual é um canal único de 12 tools `bos_*` via
+> `.opencode/plugins/behavioros.ts` (auto-discovery). Ver
+> [docs/OPENCODE_RUN.md](docs/OPENCODE_RUN.md) e [README.md](README.md).
+
 ## ✅ TESTE CONCLUÍDO COM SUCESSO
 
 ### Configuração Corrigida

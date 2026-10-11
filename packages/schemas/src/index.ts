@@ -8,7 +8,7 @@ export const GovernanceActionSchema = z.enum(['block', 'escalate', 'warn', 'log'
 
 export const ConditionSchema = z.object({
   type: z.string(),
-  value: z.any(),
+  value: z.unknown(),
 });
 
 export const GovernanceRuleSchema = z.object({
@@ -63,7 +63,7 @@ export const DNASchema = z.object({
   governance: z.array(GovernanceRuleSchema),
   quality: z.array(QualityGateSchema),
   workflows: z.array(WorkflowSchema).optional(),
-  metadata: z.record(z.string(), z.any()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================
@@ -174,7 +174,7 @@ export const AuditResultSchema = z.object({
   id: z.string(),
   stage: AuditStageSchema,
   status: z.enum(['passed', 'failed', 'warning', 'skipped']),
-  details: z.record(z.string(), z.any()),
+  details: z.record(z.string(), z.unknown()),
   timestamp: z.string(),
 });
 
@@ -205,7 +205,7 @@ export const LearningEventSchema = z.object({
   relatedMission: z.string().optional(),
   relatedPattern: z.string().optional(),
   timestamp: z.string(),
-  metadata: z.record(z.string(), z.any()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================
@@ -224,7 +224,7 @@ export const AgentStateSchema = z.object({
   currentStep: z.number().default(0),
   selectedDna: z.string().nullable(),
   activeMission: z.string().nullable(),
-  stepHistory: z.array(z.record(z.string(), z.any())),
+  stepHistory: z.array(z.record(z.string(), z.unknown())),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -236,7 +236,7 @@ export const AgentStateSchema = z.object({
 export const McpToolSchema = z.object({
   name: z.string().max(64),
   description: z.string(),
-  inputSchema: z.record(z.string(), z.any()),
+  inputSchema: z.record(z.string(), z.unknown()),
 });
 
 export const McpResourceSchema = z.object({

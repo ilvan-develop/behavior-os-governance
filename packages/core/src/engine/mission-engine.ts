@@ -13,13 +13,21 @@ export interface CreateMissionOptions {
 
 export class MissionEngine {
   private missions: Map<string, Mission> = new Map();
+  private readonly dna: DNA | undefined;
 
-  constructor(_dna?: DNA) {}
+  constructor(dna?: DNA) {
+    this.dna = dna;
+  }
 
   create(options: CreateMissionOptions): Mission {
+    // Derive the DNA pattern from the injected DNA when the caller did not
+    // explicitly select a pattern, so missions always carry provenance.
+    const dnaPattern = options.dnaPattern || this.dna?.name || 'default';
+
     const mission: Mission = {
       id: `mission-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       ...options,
+      dnaPattern,
       status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

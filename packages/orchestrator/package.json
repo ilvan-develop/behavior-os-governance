@@ -20,7 +20,8 @@
   },
   "packageManager": "pnpm@10.4.0",
   "scripts": {
-    "build": "echo 'Orchestrator package - see main repo'",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "test": "echo 'Tests in main behavior-os repo'"
   },
   "dependencies": {

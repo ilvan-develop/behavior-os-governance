@@ -26,8 +26,10 @@ export class BehaviorOS {
   private currentDNA: DNA | null = null;
   private agentState: AgentState;
   private agents: Map<string, Agent> = new Map();
+  private readonly config: BehaviorOSConfig;
 
-  constructor(_config: BehaviorOSConfig = {}) {
+  constructor(config: BehaviorOSConfig = {}) {
+    this.config = config;
     this.registry = new EngineRegistry();
     this.agentState = {
       currentStep: 0,
@@ -37,6 +39,27 @@ export class BehaviorOS {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    // Preload a DNA pattern when configured so the first governance/quality
+    // evaluation does not require an explicit loadDNA() call.
+    if (config.dnaPath) {
+      void this.loadDNAFromPath(config.dnaPath);
+    }
+  }
+
+  private async loadDNAFromPath(dnaPath: string): Promise<void> {
+    try {
+      const { readFileSync } = await import('node:fs');
+      const { isAbsolute, resolve } = await import('node:path');
+      const { load: yamlLoad } = await import('js-yaml');
+
+      const resolved = isAbsolute(dnaPath) ? dnaPath : resolve(process.cwd(), dnaPath);
+      const content = readFileSync(resolved, 'utf-8');
+      const dna = this.registry.getDNALoader().load(yamlLoad(content));
+      await this.loadDNA(dna);
+    } catch {
+      // DNA path is best-effort; callers can still loadDNA() explicitly.
+    }
   }
 
   // DNA Management
@@ -60,11 +83,22 @@ export class BehaviorOS {
     }
 
     const govEngine = this.registry.createGovernanceEngine(this.currentDNA);
-    return govEngine.evaluate({
+    const decision = govEngine.evaluate({
       action,
       agentId: context.agent,
       context: (context.context || {}) as Record<string, unknown>,
     });
+
+    // Governance-level policy: in lenient mode, soften hard denials into
+    // escalations so autonomous agents can proceed with awareness of the risk.
+    if (decision.verdict === 'deny' && this.config.governance?.level === 'lenient') {
+      return {
+        ...decision,
+        verdict: 'escalate',
+        reason: `${decision.reason} (softened by lenient governance level)`,
+      };
+    }
+    return decision;
   }
 
   // Quality Gates
@@ -118,13 +152,14 @@ export class BehaviorOS {
     type: string;
     priority: string;
     dnaPattern?: string;
+    createdBy?: string;
   }): Mission {
     return this.getMissionEngine().create({
       ...options,
       type: options.type as MissionType,
       priority: options.priority as MissionPriority,
       dnaPattern: options.dnaPattern ?? this.currentDNA?.name ?? 'default',
-      createdBy: 'system',
+      createdBy: options.createdBy ?? 'system',
     });
   }
 
@@ -239,6 +274,12 @@ export class BehaviorOS {
     missions: number;
     agents: number;
     state: AgentState;
+    config: {
+      governance: 'strict' | 'moderate' | 'lenient';
+      qualityEnabled: boolean;
+      auditEnabled: boolean;
+      learningEnabled: boolean;
+    };
   } {
     return {
       engine: true,
@@ -246,6 +287,12 @@ export class BehaviorOS {
       missions: this.registry.get<MissionEngine>('mission')?.list().length ?? 0,
       agents: this.agents.size,
       state: this.agentState,
+      config: {
+        governance: this.config.governance?.level ?? 'strict',
+        qualityEnabled: this.config.quality?.enabled ?? true,
+        auditEnabled: this.config.audit?.enabled ?? true,
+        learningEnabled: this.config.learning?.enabled ?? true,
+      },
     };
   }
 }

@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { QualityEngine } from '../src/engine/quality-engine.js';
 
 describe('QualityEngine', () => {
-  const createMockDNA = (gates: any[]): DNA => ({
+  const createMockDNA = (gates: unknown[]): DNA => ({
     name: 'Test DNA',
     version: '1.0.0',
     description: 'Test',
     personas: [],
     governance: [],
-    quality: gates,
+    quality: gates as DNA['quality'],
   });
 
   it('should pass when all metrics meet thresholds', () => {

@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { GovernanceEngine } from '../src/engine/governance-engine.js';
 
 describe('GovernanceEngine Edge Cases', () => {
-  const createDNA = (rules: any[]): DNA => ({
+  // `any` inputs model untyped callers (the JS runtime surface). The engine is
+  // expected to behave defensively when handed malformed values.
+  const createDNA = (rules: unknown[]): DNA => ({
     name: 'Edge Test',
     version: '1.0.0',
     description: 'Edge case tests',
     personas: [],
-    governance: rules,
+    // Deliberately untyped at runtime: governance rules arrive from YAML/JSON.
+    governance: rules as DNA['governance'],
     quality: [],
   });
 
@@ -17,7 +20,7 @@ describe('GovernanceEngine Edge Cases', () => {
     const result = engine.evaluate({
       action: 'test',
       agentId: 'agent-1',
-      context: null as any,
+      context: null as unknown as Record<string, unknown>,
     });
     expect(result.verdict).toBe('allow');
   });

@@ -46,14 +46,36 @@ try {
 
   const toolNames = addedTools.map((tool) => tool.name).sort();
 
+  const expectedTools = [
+    'bos_check_quality',
+    'bos_create_mission',
+    'bos_evaluate_governance',
+    'bos_get_insights',
+    'bos_get_state',
+    'bos_get_status',
+    'bos_list_dna',
+    'bos_list_missions',
+    'bos_record_learning',
+    'bos_run_audit',
+    'bos_select_dna',
+    'bos_start_mission',
+  ];
+
   console.log('Plugin id   :', plugin.id);
   console.log('Hooks       :', hooks.join(', '));
   console.log('Tools (%d)  : %s', toolNames.length, toolNames.join(', '));
 
   if (toolNames.length === 0) throw new Error('Plugin registered no tools');
-  if (!toolNames.includes('bos_list_dna')) throw new Error('Missing bos_list_dna tool');
-  if (!hooks.includes('tool:execute.before')) throw new Error('Missing execute.before hook');
-  if (!hooks.includes('session:context')) throw new Error('Missing session context hook');
+  const missing = expectedTools.filter((name) => !toolNames.includes(name));
+  if (missing.length > 0) {
+    throw new Error(`Missing tools: ${missing.join(', ')}`);
+  }
+  if (hooks.includes('tool:execute.before') === false) {
+    throw new Error('Missing execute.before hook');
+  }
+  if (hooks.includes('session:context') === false) {
+    throw new Error('Missing session context hook');
+  }
 } catch (error) {
   exitCode = 1;
   console.error('Plugin verification failed:', error.message);

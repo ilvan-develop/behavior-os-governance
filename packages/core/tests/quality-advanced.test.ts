@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { QualityEngine } from '../src/engine/quality-engine.js';
 
 describe('QualityEngine Advanced', () => {
-  const createDNA = (gates: any[]): DNA => ({
+  const createDNA = (gates: unknown[]): DNA => ({
     name: 'Test',
     version: '1.0.0',
     description: 'Test',
     personas: [],
     governance: [],
-    quality: gates,
+    quality: gates as DNA['quality'],
   });
 
   it('should handle missing metrics gracefully', () => {

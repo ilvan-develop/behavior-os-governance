@@ -107,16 +107,16 @@ Mission lifecycle management:
 
 ## Integration Points
 
-### MCP Server
-- 45+ tools exposed via Model Context Protocol
-- 9 resources for agent context
-- Compatible with: Claude Code, Cursor, Windsurf, OpenCode, VS Code Copilot
+### MCP Server (standalone)
+- 11 tools + 2 resources exposed via Model Context Protocol
+- Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
+- Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
-### OpenCode v2 Plugin
-- Plugin API with transforms and hooks
-- Tool execution interception
-- Session context injection
-- Protocol state management
+### OpenCode v2 Plugin (single native channel)
+- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()`
+- Governance hook on `execute.before` (write/edit/bash interception)
+- Session context hook surfacing protocol state to the model
+- DNA patterns loaded from `dnas/` and merged with built-ins
 
 ### CLI
 - Project initialization
@@ -130,7 +130,7 @@ Mission lifecycle management:
 ```
 User Request
     ↓
-MCP Server / CLI / SDK
+OpenCode Plugin / MCP Server / CLI / SDK
     ↓
 GovernanceEngine (evaluate rules)
     ↓

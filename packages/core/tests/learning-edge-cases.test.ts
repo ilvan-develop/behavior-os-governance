@@ -122,7 +122,8 @@ describe('LearningEngine Edge Cases', () => {
     const event = engine.record({
       type: 'insight',
       source: 'test',
-      content: null as any,
+      // Deliberately malformed input at the runtime boundary.
+      content: null as unknown as string,
       impact: 'medium',
     });
 

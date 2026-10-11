@@ -1,13 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "servers": {
-      "behavioros": {
-        "type": "local",
-        "command": ["node", "C:/www/behavior-os/packages/mcp-server/dist/server.js"],
-        "cwd": "."
-      }
-    }
-  },
   "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md"]
 }

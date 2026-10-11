@@ -1,5 +1,10 @@
 # OpenCode Run 测试报告
 
+> ⚠️ **历史/已过时 (SUPERSEDED)** — 本报告反映旧版集成状态
+> (`.opencode/plugins/behavioros/` 目录结构)。当前集成为单一通道：12 个 `bos_*` tools
+> 通过 `.opencode/plugins/behavioros.ts` auto-discovery 加载。
+> 见 [docs/OPENCODE_RUN.md](docs/OPENCODE_RUN.md)。
+
 ## 测试结论
 
 **结论：未能在当前环境完成 `opencode run` 实时测试，但插件已就绪**

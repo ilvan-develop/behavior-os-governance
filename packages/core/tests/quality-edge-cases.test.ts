@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { QualityEngine } from '../src/engine/quality-engine.js';
 
 describe('QualityEngine Edge Cases', () => {
-  const createDNA = (gates: any[]): DNA => ({
+  const createDNA = (gates: unknown[]): DNA => ({
     name: 'Edge Test',
     version: '1.0.0',
     description: 'Edge case tests',
     personas: [],
     governance: [],
-    quality: gates,
+    quality: gates as DNA['quality'],
   });
 
   it('should handle extremely high coverage values', () => {
@@ -57,7 +57,7 @@ describe('QualityEngine Edge Cases', () => {
       createDNA([{ id: 'coverage', type: 'test_coverage', threshold: 80 }]),
     );
 
-    const result = engine.evaluate({ test_coverage: '90' as any });
+    const result = engine.evaluate({ test_coverage: '90' as unknown as number });
     // Should handle gracefully
     expect(result).toBeDefined();
   });
@@ -111,7 +111,7 @@ describe('QualityEngine Edge Cases', () => {
       createDNA([{ id: 'coverage', type: 'test_coverage', threshold: 80 }]),
     );
 
-    const result = engine.evaluate(null as any);
+    const result = engine.evaluate(null as unknown as Record<string, number>);
     expect(result).toBeDefined();
     expect(result.passed).toBe(true);
     expect(result.failedGates).toHaveLength(0);
@@ -134,7 +134,7 @@ describe('QualityEngine Edge Cases', () => {
       createDNA([{ id: 'coverage', type: 'test_coverage', threshold: 80 }]),
     );
 
-    const result = engine.evaluate({ test_coverage: null as any });
+    const result = engine.evaluate({ test_coverage: null as unknown as number });
     expect(result).toBeDefined();
   });
 
@@ -143,7 +143,7 @@ describe('QualityEngine Edge Cases', () => {
       createDNA([{ id: 'coverage', type: 'test_coverage', threshold: 80 }]),
     );
 
-    const metrics = { test_coverage: undefined } as any;
+    const metrics = { test_coverage: undefined } as unknown as Record<string, number>;
     const result = engine.evaluate(metrics);
     expect(result).toBeDefined();
   });

@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine detects patterns & auto-applies fixes |
 | Hard to coordinate multiple agents | 7-step protocol + handoff protocol for seamless collaboration |
 | No quality gates | Lint → typecheck → security → coverage gates enforced automatically |
-| Reinventing infrastructure every project | 22 engines, 45+ MCP tools, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 6 core engines, 11 MCP tools, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -148,21 +148,19 @@ Request → DNA Match → Capability Match → Delegate → Validate
 
 Skills are matched in two stages: first by DNA pattern compatibility, then by capability signature. 24 skills registered across 6 agent types.
 
-### MCP Server — 9 Tools + 2 Resources
+### MCP Server — 11 Tools + 2 Resources
 
-Connect Behavior-OS to any AI agent platform via Model Context Protocol:
+Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
 | Category | Tools |
 |---|---|
-| **Mission** | `create-mission`, `update-progress`, `list-missions`, `list-agents`, `get-status` |
-| **Governance** | `evaluate-governance`, `bos_select_dna`, `bos_resolve_conflict`, `bos_check_escalation` |
-| **Audit** | `run-audit`, `bos_run_audit`, `bos_lsp_diagnostics`, `bos_lsp_validate` |
-| **Learning** | `record-learning`, `bos_get_insights`, `bos_resolve_truth`, `bos_list_patterns` |
-| **Pipeline** | `start-pipeline`, `get-pipeline-status`, `validate-layer`, `approve-layer` |
-| **CI/CD** | `cicd-run-audit`, `cicd-get-audit-history`, `cicd-record-learning` |
-| **Ecosystem** | `bos-ecosystem-status`, `bos-ecosystem-install`, `bos-ecosystem-doctor` |
-| **Skills** | `bos-skills-list`, `bos-skills-validate` |
-| **Agent** | `bos-agent-metrics`, `bos-agent-handoff`, `bos-autonomous-task` |
+| **Governance** | `bos_evaluate_governance`, `bos_select_dna` |
+| **Mission** | `bos_create_mission`, `bos_start_mission`, `bos_list_missions` |
+| **Quality** | `bos_check_quality`, `bos_run_audit` |
+| **Learning** | `bos_record_learning`, `bos_get_insights` |
+| **Status** | `bos_get_status`, `bos_get_state` |
+
+Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
 ### CLI Reference
 
@@ -256,30 +254,16 @@ Create `.cursor/mcp.json` with the same config as Claude Code.
 
 Create `.vscode/mcp.json` with the same config as Cursor.
 
-### OpenCode v2
+### OpenCode v2 (recommended — native plugin)
 
-Add to `opencode.json`:
-```json
-{
-  "mcpServers": {
-    "behavioros": {
-      "command": "node",
-      "args": ["packages/mcp-server/dist/server.js"],
-      "env": {
-        "BEHAVIOROS_DNA_PATH": "./dnas/enterprise-governance.yaml",
-        "BEHAVIOROS_PROJECT": "my-project",
-        "BEHAVIOROS_LOG_LEVEL": "info"
-      }
-    }
-  },
-  "plugins": [
-    {
-      "path": "./plugins/opencode-v2",
-      "enabled": true
-    }
-  ]
-}
-```
+The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It is
+auto-loaded from `.opencode/plugins/behavioros.ts` and exposes the full 12-tool
+surface (`bos_*`) plus governance hooks (`tool:execute.before`) and session
+context — no MCP server registration required.
+
+The MCP server is intentionally **not** registered inside OpenCode so sessions
+see a single, non-duplicated tool catalog. For other MCP-capable hosts use the
+sections above.
 
 ### Windsurf
 
@@ -298,11 +282,11 @@ mcpServers:
 | Package | Description | Version |
 |---|---|---|
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
-| `@behavior-os/core` | 22 engines + EngineRegistry | 2.0.0 |
+| `@behavior-os/core` | 6 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 45+ tools + 9 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 7 tools | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 11 tools + 2 resources | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 12 tools + hooks | 2.0.0 |
 
 ## License
 
