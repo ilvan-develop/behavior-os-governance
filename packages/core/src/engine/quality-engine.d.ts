@@ -13,6 +13,7 @@ export interface QualityResult {
     id: string;
     expected: number;
     actual: number;
+    type?: string;
   }>;
   metrics: QualityMetrics;
 }

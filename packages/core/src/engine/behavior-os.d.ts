@@ -29,7 +29,7 @@ export declare class BehaviorOS {
   private currentDNA;
   private agentState;
   private agents;
-  constructor(config?: BehaviorOSConfig);
+  constructor(_config?: BehaviorOSConfig);
   loadDNA(dna: DNA): Promise<void>;
   getDNA(): DNA | null;
   evaluateGovernance(
@@ -52,6 +52,8 @@ export declare class BehaviorOS {
     dnaPattern?: string;
   }): Mission;
   startMission(missionId: string): Mission | null;
+  completeMission(missionId: string): Mission | null;
+  failMission(missionId: string, reason?: string): Mission | null;
   recordLearning(options: {
     type: string;
     source: string;
@@ -67,7 +69,13 @@ export declare class BehaviorOS {
   listMissions(limit?: number): Mission[];
   getMission(missionId: string): Mission | null;
   getAgentState(): AgentState;
-  simulateAction(action: string, context: unknown): GovernanceDecision;
+  simulateAction(
+    action: string,
+    context: {
+      agent: string;
+      context?: Record<string, unknown>;
+    },
+  ): GovernanceDecision;
   compareDNAVersions(
     dna1: DNA,
     dna2: DNA,

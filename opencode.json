@@ -1,4 +1,5 @@
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcpServers": {
     "behavioros": {
       "command": "node",
@@ -10,11 +11,6 @@
       }
     }
   },
-  "plugins": [
-    {
-      "path": "./plugins/opencode-v2",
-      "enabled": true
-    }
-  ],
+  "plugins": ["./.opencode/plugins/behavioros/index.ts"],
   "instructions": ["docs/PROTOCOL.md", "docs/AGENT-PROTOCOL.md"]
 }

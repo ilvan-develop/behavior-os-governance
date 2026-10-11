@@ -2,7 +2,7 @@ import type { AuditReport, AuditStage } from '@behavior-os/schemas';
 export interface AuditOptions {
   missionId: string;
   agentId: string;
-  stages: AuditStage[];
+  stages?: AuditStage[];
   metadata?: Record<string, unknown>;
 }
 export declare class AuditEngine {

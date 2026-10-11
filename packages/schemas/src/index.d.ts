@@ -4,6 +4,7 @@ export declare const GovernanceActionSchema: z.ZodEnum<{
   escalate: 'escalate';
   warn: 'warn';
   log: 'log';
+  transform: 'transform';
 }>;
 export declare const ConditionSchema: z.ZodObject<
   {
@@ -26,6 +27,7 @@ export declare const GovernanceRuleSchema: z.ZodObject<
       escalate: 'escalate';
       warn: 'warn';
       log: 'log';
+      transform: 'transform';
     }>;
     conditions: z.ZodArray<
       z.ZodObject<
@@ -196,6 +198,7 @@ export declare const DNASchema: z.ZodObject<
             escalate: 'escalate';
             warn: 'warn';
             log: 'log';
+            transform: 'transform';
           }>;
           conditions: z.ZodArray<
             z.ZodObject<
@@ -392,6 +395,8 @@ export declare const GovernanceDecisionSchema: z.ZodObject<
     timestamp: z.ZodString;
     agentId: z.ZodString;
     missionId: z.ZodOptional<z.ZodString>;
+    transformed: z.ZodOptional<z.ZodBoolean>;
+    warnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
   },
   z.core.$strip
 >;
@@ -557,7 +562,9 @@ export type AgentType = z.infer<typeof AgentTypeSchema>;
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type Agent = z.infer<typeof AgentSchema>;
 export type GovernanceVerdict = z.infer<typeof GovernanceVerdictSchema>;
-export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema>;
+export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema> & {
+  warnings?: string[];
+};
 export type AuditStage = z.infer<typeof AuditStageSchema>;
 export type AuditResult = z.infer<typeof AuditResultSchema>;
 export type AuditReport = z.infer<typeof AuditReportSchema>;

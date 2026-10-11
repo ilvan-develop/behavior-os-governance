@@ -2,7 +2,7 @@ import { z } from 'zod';
 // ============================================================
 // DNA Pattern Schemas
 // ============================================================
-export const GovernanceActionSchema = z.enum(['block', 'escalate', 'warn', 'log']);
+export const GovernanceActionSchema = z.enum(['block', 'escalate', 'warn', 'log', 'transform']);
 export const ConditionSchema = z.object({
   type: z.string(),
   value: z.any(),
@@ -131,6 +131,8 @@ export const GovernanceDecisionSchema = z.object({
   timestamp: z.string(),
   agentId: z.string(),
   missionId: z.string().optional(),
+  transformed: z.boolean().optional(),
+  warnings: z.array(z.string()).optional(),
 });
 // ============================================================
 // Audit Schemas
