@@ -21,6 +21,24 @@ export interface BehaviorOSConfig {
   learning?: { enabled?: boolean };
 }
 
+/**
+ * The canonical 7-step agent protocol. `currentStep` tracks the next step the
+ * agent should perform (0-based index into this list), advancing monotonically
+ * as the corresponding tool is exercised.
+ */
+export const PROTOCOL_STEP_COUNT = 7;
+
+/** Tool name → step number that is completed by running that tool. */
+const PROTOCOL_TOOL_STEPS: Readonly<Record<string, number>> = {
+  bos_select_dna: 1,
+  bos_list_dna: 2,
+  bos_get_state: 3,
+  bos_create_mission: 4,
+  bos_start_mission: 5,
+  bos_run_audit: 6,
+  bos_record_learning: 7,
+};
+
 export class BehaviorOS {
   private registry: EngineRegistry;
   private currentDNA: DNA | null = null;
@@ -67,6 +85,31 @@ export class BehaviorOS {
     this.currentDNA = dna;
     this.agentState.selectedDna = dna.name;
     this.agentState.updatedAt = new Date().toISOString();
+    this.advanceProtocolStep('bos_select_dna');
+  }
+
+  // Protocol state machine --------------------------------------------------
+  /**
+   * Advances `currentStep` along the 7-step protocol when the given tool maps
+   * to a protocol step. Advancement is monotonic (never goes backwards),
+   * capped at the final step, and — except for DNA selection itself — requires
+   * an active DNA pattern so browsing tools cannot skip the selection step.
+   */
+  advanceProtocolStep(toolName: string): void {
+    const target = PROTOCOL_TOOL_STEPS[toolName];
+    if (target === undefined) return;
+    if (target > PROTOCOL_TOOL_STEPS.bos_select_dna && !this.currentDNA) return;
+
+    const next = Math.min(Math.max(this.agentState.currentStep, target), PROTOCOL_STEP_COUNT);
+    if (next > this.agentState.currentStep) {
+      this.agentState.currentStep = next;
+      this.agentState.stepHistory.push({
+        step: next,
+        tool: toolName,
+        at: new Date().toISOString(),
+      });
+      this.agentState.updatedAt = new Date().toISOString();
+    }
   }
 
   getDNA(): DNA | null {
@@ -124,10 +167,12 @@ export class BehaviorOS {
       ? options.stages
       : ['lint', 'typecheck', 'security', 'coverage'];
 
-    return auditEngine.run({
+    const report = auditEngine.run({
       ...options,
       stages: stages as import('@behavior-os/schemas').AuditStage[],
     });
+    this.advanceProtocolStep('bos_run_audit');
+    return report;
   }
 
   // Missions
@@ -154,17 +199,23 @@ export class BehaviorOS {
     dnaPattern?: string;
     createdBy?: string;
   }): Mission {
-    return this.getMissionEngine().create({
+    const mission = this.getMissionEngine().create({
       ...options,
       type: options.type as MissionType,
       priority: options.priority as MissionPriority,
       dnaPattern: options.dnaPattern ?? this.currentDNA?.name ?? 'default',
       createdBy: options.createdBy ?? 'system',
     });
+    this.advanceProtocolStep('bos_create_mission');
+    return mission;
   }
 
   startMission(missionId: string): Mission | null {
-    return this.getMissionEngine().start(missionId);
+    const mission = this.getMissionEngine().start(missionId);
+    if (mission) {
+      this.advanceProtocolStep('bos_start_mission');
+    }
+    return mission;
   }
 
   completeMission(missionId: string): Mission | null {
@@ -184,11 +235,13 @@ export class BehaviorOS {
     relatedMission?: string;
     relatedPattern?: string;
   }): LearningEvent {
-    return this.getLearningEngine().record({
+    const event = this.getLearningEngine().record({
       ...options,
       type: options.type as LearningType,
       impact: options.impact as LearningImpact,
     });
+    this.advanceProtocolStep('bos_record_learning');
+    return event;
   }
 
   getInsights(limit = 10): LearningEvent[] {

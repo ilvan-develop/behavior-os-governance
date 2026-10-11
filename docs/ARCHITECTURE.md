@@ -116,6 +116,7 @@ Mission lifecycle management:
 - 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()`
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
+- Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`
 - DNA patterns loaded from `dnas/` and merged with built-ins
 
 ### CLI

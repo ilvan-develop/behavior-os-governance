@@ -146,7 +146,7 @@ export default Plugin.define({
           },
           required: ['action', 'agent'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
             action: string;
             agent: string;
@@ -158,7 +158,6 @@ export default Plugin.define({
           });
           return {
             content: JSON.stringify(result, null, 2),
-            output: result,
           };
         },
       });
@@ -177,19 +176,17 @@ export default Plugin.define({
           },
           required: ['pattern'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { pattern: string };
           const dna = loadedDnaPatterns.get(params.pattern);
           if (!dna) {
             return {
               content: `Pattern "${params.pattern}" not found. Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
-              output: { error: `Pattern "${params.pattern}" not found` },
             };
           }
           await bos.loadDNA(dna);
           return {
             content: `DNA pattern "${params.pattern}" selected. Governance rules activated.`,
-            output: { selected: params.pattern, name: dna.name },
           };
         },
       });
@@ -199,7 +196,7 @@ export default Plugin.define({
         name: 'bos_list_dna',
         description: 'List all available DNA patterns',
         input: { type: 'object', properties: {} },
-        execute: async (): Promise<{ content: string; output: unknown }> => {
+        execute: async (): Promise<{ content: string }> => {
           const patterns = Array.from(loadedDnaPatterns.entries()).map(([key, dna]) => ({
             id: key,
             name: dna.name,
@@ -209,9 +206,9 @@ export default Plugin.define({
             personas: dna.personas.length,
             qualityGates: dna.quality.length,
           }));
+          bos.advanceProtocolStep('bos_list_dna');
           return {
             content: JSON.stringify({ patterns, total: patterns.length }, null, 2),
-            output: { patterns, total: patterns.length },
           };
         },
       });
@@ -240,7 +237,7 @@ export default Plugin.define({
           },
           required: ['title', 'type', 'priority'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: { id: string } }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { title: string; type: string; priority: string };
           const mission = bos.createMission({
             title: params.title,
@@ -256,7 +253,6 @@ export default Plugin.define({
           });
           return {
             content: `Mission created: ${mission.id}`,
-            output: { id: mission.id },
           };
         },
       });
@@ -272,18 +268,16 @@ export default Plugin.define({
           },
           required: ['missionId'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { missionId: string };
           const mission = bos.startMission(params.missionId);
           if (!mission) {
             return {
               content: `Mission "${params.missionId}" not found`,
-              output: { error: `Mission "${params.missionId}" not found` },
             };
           }
           return {
             content: `Mission "${params.missionId}" started. Status: ${mission.status}`,
-            output: mission,
           };
         },
       });
@@ -301,7 +295,7 @@ export default Plugin.define({
             limit: { type: 'number' },
           },
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
             status?: string;
             type?: string;
@@ -311,7 +305,6 @@ export default Plugin.define({
           const missions = bos.listMissions(params.limit ?? 50);
           return {
             content: JSON.stringify(missions, null, 2),
-            output: missions,
           };
         },
       });
@@ -329,7 +322,7 @@ export default Plugin.define({
           },
           required: ['missionId', 'agentId'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { missionId: string; agentId: string; stages?: string[] };
           const report = bos.runAudit({
             missionId: params.missionId,
@@ -338,7 +331,6 @@ export default Plugin.define({
           });
           return {
             content: `Audit complete: ${report.overall}`,
-            output: report,
           };
         },
       });
@@ -357,12 +349,11 @@ export default Plugin.define({
           },
           required: ['metrics'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { metrics: Record<string, number> };
           const result = bos.checkQuality(params.metrics);
           return {
             content: JSON.stringify(result, null, 2),
-            output: result,
           };
         },
       });
@@ -377,12 +368,11 @@ export default Plugin.define({
             limit: { type: 'number' },
           },
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { limit?: number };
           const insights = bos.getInsights(params.limit ?? 10);
           return {
             content: JSON.stringify(insights, null, 2),
-            output: insights,
           };
         },
       });
@@ -405,7 +395,7 @@ export default Plugin.define({
           },
           required: ['type', 'source', 'content', 'impact'],
         },
-        execute: async (input: unknown): Promise<{ content: string; output: unknown }> => {
+        execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
             type: string;
             source: string;
@@ -422,7 +412,6 @@ export default Plugin.define({
           });
           return {
             content: `Learning recorded: ${event.id}`,
-            output: event,
           };
         },
       });
@@ -432,11 +421,10 @@ export default Plugin.define({
         name: 'bos_get_status',
         description: 'Get current Behavior-OS status',
         input: { type: 'object', properties: {} },
-        execute: async (): Promise<{ content: string; output: unknown }> => {
+        execute: async (): Promise<{ content: string }> => {
           const status = bos.getStatus();
           return {
             content: JSON.stringify(status, null, 2),
-            output: status,
           };
         },
       });
@@ -446,11 +434,11 @@ export default Plugin.define({
         name: 'bos_get_state',
         description: 'Get current protocol state',
         input: { type: 'object', properties: {} },
-        execute: async (): Promise<{ content: string; output: unknown }> => {
+        execute: async (): Promise<{ content: string }> => {
+          bos.advanceProtocolStep('bos_get_state');
           const state = bos.getState();
           return {
             content: JSON.stringify(state, null, 2),
-            output: state,
           };
         },
       });
@@ -498,11 +486,12 @@ export default Plugin.define({
       if (!currentState.selectedDna) return;
 
       const nextStep: ProtocolStep | undefined = PROTOCOL_STEPS[currentState.currentStep];
+      const stepLine = nextStep
+        ? `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${nextStep.name}`
+        : `Protocol complete (${PROTOCOL_STEPS.length}/${PROTOCOL_STEPS.length})`;
       const summary = [
         `[Behavior-OS] Active DNA: ${currentState.selectedDna}`,
-        `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${
-          nextStep ? nextStep.name : 'Complete'
-        }`,
+        stepLine,
         `Available DNA patterns (${loadedDnaPatterns.size}): ${Array.from(
           loadedDnaPatterns.keys(),
         ).join(', ')}`,

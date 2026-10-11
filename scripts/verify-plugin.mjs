@@ -76,6 +76,32 @@ try {
   if (hooks.includes('session:context') === false) {
     throw new Error('Missing session context hook');
   }
+
+  // Protocol flow: selecting a DNA pattern then resolving truth must advance
+  // currentStep in the AgentState surfaced by bos_get_state (content = JSON).
+  const byName = Object.fromEntries(addedTools.map((tool) => [tool.name, tool]));
+  const runTool = async (name, input = {}) => byName[name].execute(input);
+
+  const beforeState = JSON.parse((await runTool('bos_get_state')).content);
+  if (beforeState.currentStep !== 0) {
+    throw new Error(`Expected currentStep 0 before DNA selection, got ${beforeState.currentStep}`);
+  }
+
+  await runTool('bos_select_dna', { pattern: 'surgical-team' });
+
+  const afterState = JSON.parse((await runTool('bos_get_state')).content);
+  const selectEntry = afterState.stepHistory?.find((entry) => entry.tool === 'bos_select_dna');
+  if (selectEntry?.step !== 1) {
+    throw new Error('bos_select_dna did not complete protocol step 1');
+  }
+  if (afterState.currentStep < 3) {
+    throw new Error(`Expected currentStep >= 3, got ${afterState.currentStep}`);
+  }
+  if (!afterState.selectedDna) {
+    throw new Error('No selectedDna after bos_select_dna');
+  }
+
+  console.log('Protocol flow: step 1 complete, currentStep =', afterState.currentStep);
 } catch (error) {
   exitCode = 1;
   console.error('Plugin verification failed:', error.message);
