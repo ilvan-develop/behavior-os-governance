@@ -11,7 +11,7 @@ import type {
   MissionPriority,
   MissionType,
 } from '@behavior-os/schemas';
-import { EngineRegistry, type LearningEngine, type MissionEngine } from './index';
+import { EngineRegistry, type LearningEngine, type MissionEngine } from './index.js';
 
 export interface BehaviorOSConfig {
   dnaPath?: string;
@@ -97,17 +97,29 @@ export class BehaviorOS {
   }
 
   // Missions
+  private getMissionEngine(): MissionEngine {
+    let engine = this.registry.get<MissionEngine>('mission');
+    if (!engine) {
+      engine = this.registry.createMissionEngine(this.currentDNA ?? undefined);
+    }
+    return engine;
+  }
+
+  private getLearningEngine(): LearningEngine {
+    let engine = this.registry.get<LearningEngine>('learning');
+    if (!engine) {
+      engine = this.registry.createLearningEngine();
+    }
+    return engine;
+  }
+
   createMission(options: {
     title: string;
     type: string;
     priority: string;
     dnaPattern?: string;
   }): Mission {
-    let missionEngine = this.registry.get<MissionEngine>('mission');
-    if (!missionEngine) {
-      missionEngine = this.registry.createMissionEngine(this.currentDNA ?? undefined);
-    }
-    return missionEngine.create({
+    return this.getMissionEngine().create({
       ...options,
       type: options.type as MissionType,
       priority: options.priority as MissionPriority,
@@ -117,18 +129,15 @@ export class BehaviorOS {
   }
 
   startMission(missionId: string): Mission | null {
-    const missionEngine = this.registry.get<MissionEngine>('mission')!;
-    return missionEngine.start(missionId);
+    return this.getMissionEngine().start(missionId);
   }
 
   completeMission(missionId: string): Mission | null {
-    const missionEngine = this.registry.get<MissionEngine>('mission')!;
-    return missionEngine.complete(missionId);
+    return this.getMissionEngine().complete(missionId);
   }
 
   failMission(missionId: string, reason?: string): Mission | null {
-    const missionEngine = this.registry.get<MissionEngine>('mission')!;
-    return missionEngine.fail(missionId, reason);
+    return this.getMissionEngine().fail(missionId, reason);
   }
 
   // Learning
@@ -140,11 +149,7 @@ export class BehaviorOS {
     relatedMission?: string;
     relatedPattern?: string;
   }): LearningEvent {
-    let learningEngine = this.registry.get<LearningEngine>('learning');
-    if (!learningEngine) {
-      learningEngine = this.registry.createLearningEngine();
-    }
-    return learningEngine.record({
+    return this.getLearningEngine().record({
       ...options,
       type: options.type as LearningType,
       impact: options.impact as LearningImpact,
@@ -152,8 +157,7 @@ export class BehaviorOS {
   }
 
   getInsights(limit = 10): LearningEvent[] {
-    const learningEngine = this.registry.get<LearningEngine>('learning')!;
-    return learningEngine.getInsights(limit);
+    return this.getLearningEngine().getInsights(limit);
   }
 
   // Agent Management
@@ -180,13 +184,11 @@ export class BehaviorOS {
 
   // Mission Management
   listMissions(limit = 50): Mission[] {
-    const missionEngine = this.registry.get<MissionEngine>('mission')!;
-    return missionEngine.list().slice(0, limit);
+    return this.getMissionEngine().list().slice(0, limit);
   }
 
   getMission(missionId: string): Mission | null {
-    const missionEngine = this.registry.get<MissionEngine>('mission')!;
-    return missionEngine.get(missionId);
+    return this.getMissionEngine().get(missionId);
   }
 
   getAgentState(): AgentState {

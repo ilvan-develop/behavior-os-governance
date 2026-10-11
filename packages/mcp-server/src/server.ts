@@ -369,6 +369,7 @@ server.registerTool(
         source,
         content,
         impact: impact as LearningImpact,
+        relatedMission,
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(event, null, 2) }],
@@ -535,23 +536,36 @@ server.registerResource(
 // ============================================================
 
 async function loadDNAPatterns(): Promise<Record<string, DNA>> {
-  // Load all DNA patterns from the dnas/ directory
-  const dnaPath = process.env.BEHAVIOROS_DNA_PATH || '/c/www/behavior-os/dnas';
   const fs = await import('node:fs');
   const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
   const yaml = await import('js-yaml');
+
+  // Default to the repository's dnas/ directory resolved relative to this module
+  // (packages/mcp-server/{src,dist}/server.ts -> <repo>/dnas) so the server works on
+  // any machine instead of depending on a hardcoded checkout path.
+  const defaultDnasPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../dnas',
+  );
+  const dnaPath = process.env.BEHAVIOROS_DNA_PATH || defaultDnasPath;
 
   const dnas: Record<string, DNA> = {};
 
   try {
-    const files = fs.readdirSync(dnaPath);
-    for (const file of files) {
-      if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-        const content = fs.readFileSync(path.join(dnaPath, file), 'utf-8');
-        const dna = yaml.load(content) as DNA;
-        const name = file.replace(/\.(yaml|yml)$/, '');
-        dnas[name] = dna;
-      }
+    const resolved = path.resolve(dnaPath);
+    const files = fs.statSync(resolved).isDirectory()
+      ? fs
+          .readdirSync(resolved)
+          .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
+          .map((file) => path.join(resolved, file))
+      : [resolved];
+
+    for (const filePath of files) {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const dna = yaml.load(content) as DNA;
+      const name = path.basename(filePath).replace(/\.(yaml|yml)$/, '');
+      dnas[name] = dna;
     }
   } catch {
     // Fallback to hardcoded patterns if filesystem loading fails

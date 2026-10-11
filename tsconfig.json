@@ -10,11 +10,6 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@behavior-os/core": ["packages/core/src/index"],
-      "@behavior-os/schemas": ["packages/schemas/src/index"]
-    }
+    "resolveJsonModule": true
   }
 }

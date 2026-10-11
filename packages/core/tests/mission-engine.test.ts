@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { MissionEngine } from '../src/engine/mission-engine.js';
 
 describe('MissionEngine', () => {

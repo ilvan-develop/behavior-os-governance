@@ -1,10 +1,10 @@
 import type { DNA } from '@behavior-os/schemas';
-import { AuditEngine } from './audit-engine';
-import { DNALoader } from './dna-loader';
-import { GovernanceEngine } from './governance-engine';
-import { LearningEngine } from './learning-engine';
-import { MissionEngine } from './mission-engine';
-import { QualityEngine } from './quality-engine';
+import { AuditEngine } from './audit-engine.js';
+import { DNALoader } from './dna-loader.js';
+import { GovernanceEngine } from './governance-engine.js';
+import { LearningEngine } from './learning-engine.js';
+import { MissionEngine } from './mission-engine.js';
+import { QualityEngine } from './quality-engine.js';
 
 export { AuditEngine, DNALoader, GovernanceEngine, LearningEngine, MissionEngine, QualityEngine };
 

@@ -7,7 +7,10 @@ coverage/
 .env
 .env.local
 .mcp.json
-.opencode/
+.opencode/*
+!.opencode/plugins/
+.opencode/plugins/*
+!.opencode/plugins/behavioros.ts
 .claude/
 .cursor/
 .vscode/

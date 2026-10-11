@@ -1,2 +1,2 @@
-export * from './engine/behavior-os';
-export * from './engine/index';
+export * from './engine/behavior-os.js';
+export * from './engine/index.js';

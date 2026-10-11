@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { LearningEngine } from '../src/engine/learning-engine.js';
 
 describe('LearningEngine', () => {

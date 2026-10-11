@@ -4,6 +4,7 @@ import { BehaviorOS } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
+import { load as yamlLoad } from 'js-yaml';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
@@ -41,11 +42,14 @@ async function loadDNAFromDirectory(dirPath: string): Promise<Map<string, DNA>> 
   return patterns;
 }
 
-// Simple YAML parser (for basic structures)
+// YAML parser using js-yaml (same parser as the MCP server and CLI)
 function parseYAML(content: string): Record<string, unknown> | null {
   try {
-    const yaml = require('js-yaml');
-    return yaml.load(content) as Record<string, unknown>;
+    const parsed = yamlLoad(content);
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -107,7 +111,9 @@ export default Plugin.define({
 
     // Load DNA patterns from directory
     try {
-      const dnasDir = path.join(process.cwd(), 'dnas');
+      const dnasDir = process.env.BEHAVIOROS_DNA_PATH
+        ? path.resolve(process.env.BEHAVIOROS_DNA_PATH)
+        : path.join(process.cwd(), 'dnas');
       loadedDnaPatterns = await loadDNAFromDirectory(dnasDir);
 
       // Merge with built-in patterns
@@ -374,28 +380,23 @@ export default Plugin.define({
       }
     });
 
-    // Session context hook - add BehaviorOS state to session context
-    ctx.session.hook('context', async (event: unknown): Promise<void> => {
+    // Session context hook - surface BehaviorOS state to the model
+    ctx.session.hook('context', async (event): Promise<void> => {
       const currentState = bos.getState();
       if (!currentState.selectedDna) return;
 
       const nextStep: ProtocolStep | undefined = PROTOCOL_STEPS[currentState.currentStep];
-      void nextStep;
+      const summary = [
+        `[Behavior-OS] Active DNA: ${currentState.selectedDna}`,
+        `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${
+          nextStep ? nextStep.name : 'Complete'
+        }`,
+        `Available DNA patterns (${loadedDnaPatterns.size}): ${Array.from(
+          loadedDnaPatterns.keys(),
+        ).join(', ')}`,
+      ].join('\n');
 
-      // Add behavioros context to the event
-      const eventObj = event as Record<string, unknown>;
-      if (!eventObj.context) {
-        eventObj.context = {};
-      }
-
-      (eventObj.context as Record<string, unknown>).behavioros = {
-        selectedDna: currentState.selectedDna,
-        currentStep: currentState.currentStep,
-        nextStep: nextStep ? `${nextStep.number}. ${nextStep.name}` : 'Complete',
-        protocol: PROTOCOL_STEPS,
-        availableDNAs: Array.from(loadedDnaPatterns.keys()),
-        totalDNAs: loadedDnaPatterns.size,
-      };
+      event.system.push({ type: 'text', text: summary });
     });
   },
 });
