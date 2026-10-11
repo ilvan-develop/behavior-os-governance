@@ -14,7 +14,7 @@ export interface EvaluateContext {
 
 export class GovernanceEngine {
   private rules: GovernanceRule[];
-  private decisionCache: Map<string, GovernanceDecision> = new Map();
+  private decisionCache: Map<string, GovernanceDecision & { _createdAt: number }> = new Map();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(dna: DNA) {
@@ -27,9 +27,8 @@ export class GovernanceEngine {
     // Check cache with TTL
     const cached = this.decisionCache.get(cacheKey);
     if (cached) {
-      const cachedTime = parseInt(cached.id.split('-')[1] ?? '0', 10);
-      if (Date.now() - cachedTime < this.CACHE_TTL_MS) {
-        return cached;
+      if (Date.now() - cached._createdAt < this.CACHE_TTL_MS) {
+        return this.stripInternalFields(cached);
       }
       this.decisionCache.delete(cacheKey);
     }
@@ -91,7 +90,7 @@ export class GovernanceEngine {
       ...(transformed ? { transformed: true } : {}),
     };
 
-    this.decisionCache.set(cacheKey, result);
+    this.decisionCache.set(cacheKey, { ...result, _createdAt: Date.now() });
     return result;
   }
 
@@ -137,5 +136,12 @@ export class GovernanceEngine {
 
   clearCache(): void {
     this.decisionCache.clear();
+  }
+
+  private stripInternalFields(
+    entry: GovernanceDecision & { _createdAt: number },
+  ): GovernanceDecision {
+    const { _createdAt, ...clean } = entry;
+    return clean;
   }
 }

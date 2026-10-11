@@ -14,3 +14,4 @@ coverage/
 .windsurf/
 .roo/
 .husky/_
+.behavioros/baseline.json

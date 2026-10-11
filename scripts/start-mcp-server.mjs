@@ -1,9 +1,8 @@
 import { spawn } from 'node:child_process';
-import * as http from 'node:http';
 
 const server = spawn('node', ['/c/www/behavior-os/packages/mcp-server/dist/mcp-server/server.js'], {
   stdio: 'pipe',
-  detached: false
+  detached: false,
 });
 
 server.stdout.on('data', (data) => {

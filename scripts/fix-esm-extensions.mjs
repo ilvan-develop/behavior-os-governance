@@ -4,8 +4,8 @@
  * This script adds .js extensions to relative imports in dist directories
  */
 
-import { execSync } from 'child_process';
-import { existsSync, unlinkSync } from 'fs';
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 const packages = ['core', 'mcp-server', 'schemas', 'cli', 'sdk'];
 
@@ -25,14 +25,11 @@ for (const pkg of packages) {
 
     let fixed = 0;
     for (const file of files) {
-      const content = require('fs').readFileSync(file, 'utf8');
+      const content = require('node:fs').readFileSync(file, 'utf8');
       // Match imports without extensions (not starting with @ or http)
-      const updated = content.replace(
-        /from\s+'\.\/([^'"]+)(?!\.js)'/g,
-        "from './$1.js'"
-      );
+      const updated = content.replace(/from\s+'\.\/([^'"]+)(?!\.js)'/g, "from './$1.js'");
       if (updated !== content) {
-        require('fs').writeFileSync(file, updated);
+        require('node:fs').writeFileSync(file, updated);
         fixed++;
         console.log(`  ✅ Fixed ${file.replace('packages/', '')}`);
       }

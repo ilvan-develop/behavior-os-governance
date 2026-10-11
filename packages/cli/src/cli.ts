@@ -205,9 +205,72 @@ program
   .command('diff')
   .description('Detect behavioral drift between DNA versions')
   .option('-d, --directory <path>', 'Project directory', '.')
-  .action(async (_options) => {
+  .action(async (options) => {
+    const dir = options.directory;
+    const dnasDir = join(dir, 'dnas');
+    const baselinePath = join(dir, '.behavioros', 'baseline.json');
+
     console.log(chalk.blue('Checking for behavioral drift...'));
-    console.log(chalk.gray('No drift detected.'));
+
+    if (!existsSync(dnasDir)) {
+      console.log(chalk.yellow('  No dnas/ directory found.'));
+      return;
+    }
+
+    // Load current DNA files
+    const yaml = await import('js-yaml');
+    const fs = await import('node:fs/promises');
+    const currentDNAs: Record<string, unknown> = {};
+    try {
+      const files = await fs.readdir(dnasDir);
+      for (const file of files) {
+        if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+          const content = await fs.readFile(join(dnasDir, file), 'utf-8');
+          const name = file.replace(/\.(yaml|yml)$/, '');
+          currentDNAs[name] = yaml.load(content);
+        }
+      }
+    } catch {
+      console.log(chalk.yellow('  Could not read dnas/ directory.'));
+      return;
+    }
+
+    // Load baseline
+    let baseline: Record<string, unknown> = {};
+    if (existsSync(baselinePath)) {
+      try {
+        baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
+      } catch {
+        console.log(chalk.yellow('  Invalid baseline file, skipping comparison.'));
+        return;
+      }
+    }
+
+    if (Object.keys(baseline).length === 0) {
+      console.log(chalk.green('  No baseline found. Current DNA state will be used as baseline.'));
+      await fs.writeFile(baselinePath, JSON.stringify(currentDNAs, null, 2));
+      return;
+    }
+
+    let driftDetected = false;
+    for (const [name, current] of Object.entries(currentDNAs)) {
+      const base = (baseline as Record<string, unknown>)[name];
+      if (!base) {
+        console.log(chalk.red(`  ✗ New DNA pattern detected: ${name}`));
+        driftDetected = true;
+        continue;
+      }
+      const currentStr = JSON.stringify(current);
+      const baseStr = JSON.stringify(base);
+      if (currentStr !== baseStr) {
+        console.log(chalk.yellow(`  ⚠ Drift detected in ${name}`));
+        driftDetected = true;
+      }
+    }
+
+    if (!driftDetected) {
+      console.log(chalk.green('  No drift detected. All DNA patterns match baseline.'));
+    }
   });
 
 // EMULATE command
@@ -258,40 +321,181 @@ program
 // ECOSYSTEM command
 program
   .command('ecosystem')
-  .description('Manage ecosystem components')
-  .action(() => {
+  .description('Show ecosystem status and statistics')
+  .option('-d, --directory <path>', 'Project directory', '.')
+  .action(async (options) => {
+    const dir = options.directory;
+    const dnasDir = join(dir, 'dnas');
+
+    let dnaCount = 0;
+    if (existsSync(dnasDir)) {
+      try {
+        const files = await import('node:fs/promises');
+        const entries = await files.readdir(dnasDir);
+        dnaCount = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml')).length;
+      } catch {
+        // directory may not exist
+      }
+    }
+
     console.log(chalk.blue('Behavior-OS Ecosystem'));
     console.log(chalk.gray('='.repeat(40)));
-    console.log('  Skills:     24 registered');
-    console.log('  MCP Servers: 65+ available');
-    console.log('  DNA Patterns: 12 built-in');
-    console.log('  Design Systems: 151 available');
+    console.log(`  DNA Patterns:  ${dnaCount} loaded`);
+    console.log('  MCP Tools:     9 registered');
+    console.log('  Governance:    block | escalate | warn | log | transform');
+    console.log('  Quality Gates: configurable per DNA pattern');
   });
 
 // AGENT command
 program
   .command('agent')
   .description('Manage agents')
-  .action(() => {
+  .option('-d, --directory <path>', 'Project directory', '.')
+  .action((options) => {
+    const dir = options.directory;
+    const statePath = join(dir, '.behavioros', 'state.json');
+
     console.log(chalk.blue('Behavior-OS Agents'));
     console.log(chalk.gray('='.repeat(40)));
-    console.log('  No agents registered. Use the SDK to register agents.');
+
+    if (existsSync(statePath)) {
+      try {
+        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        console.log(chalk.cyan(`  DNA Pattern: ${state.selectedDna || 'Not selected'}`));
+        console.log(chalk.cyan(`  Active Mission: ${state.activeMission || 'None'}`));
+        console.log(chalk.cyan(`  Current Step: ${state.currentStep}/7`));
+        if (state.stepHistory?.length) {
+          console.log(chalk.gray(`  Steps completed: ${state.stepHistory.length}`));
+        }
+      } catch {
+        console.log(chalk.yellow('  Invalid state file.'));
+      }
+    } else {
+      console.log(chalk.yellow("  No agents registered. Run 'behavioros init' first."));
+    }
+
+    console.log(chalk.gray('\n  Use the SDK to register and manage agents:'));
+    console.log(chalk.gray('    const bos = new BehaviorOS();'));
+    console.log(
+      chalk.gray(
+        "    bos.registerAgent({ id: 'agent-1', name: 'DevBot', type: 'developer', ... });",
+      ),
+    );
   });
 
 // AUTONOMOUS command
 program
   .command('autonomous')
-  .description('Run fully autonomous task')
+  .description('Run fully autonomous task through the 7-step protocol')
   .option('-d, --directory <path>', 'Project directory', '.')
   .option('-t, --task <task>', 'Task description')
+  .option('--dna <pattern>', 'DNA pattern to use', 'enterprise-governance')
+  .option('--priority <level>', 'Mission priority', 'medium')
   .action(async (options) => {
     if (!options.task) {
       console.error(chalk.red('Error: --task is required'));
       process.exit(1);
     }
 
-    console.log(chalk.blue(`Running autonomous task: ${options.task}`));
-    console.log(chalk.gray('This would execute the 7-step protocol automatically.'));
+    const dir = options.directory;
+    const bos = new BehaviorOS();
+
+    console.log(chalk.blue(`Autonomous task: ${options.task}`));
+    console.log(chalk.gray('='.repeat(40)));
+
+    // Step 1: Load DNA
+    console.log(chalk.cyan('\n[Step 1/7] Loading DNA pattern...'));
+    try {
+      const yaml = await import('js-yaml');
+      const fs = await import('node:fs/promises');
+      const dnaPath = join(dir, 'dnas', `${options.dna}.yaml`);
+      if (existsSync(dnaPath)) {
+        const content = await fs.readFile(dnaPath, 'utf-8');
+        const dna = yaml.load(content) as import('@behavior-os/schemas').DNA;
+        await bos.loadDNA(dna);
+        console.log(chalk.green(`  ✓ Loaded DNA: ${options.dna}`));
+      } else {
+        console.log(chalk.yellow(`  ⚠ DNA file not found: ${dnaPath}, using default`));
+        await bos.loadDNA({
+          name: options.dna,
+          version: '2.0.0',
+          description: 'Default governance',
+          personas: [],
+          governance: [],
+          quality: [],
+        });
+      }
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ Could not load DNA: ${err}`));
+    }
+
+    // Step 2: Create mission
+    console.log(chalk.cyan('\n[Step 2/7] Creating mission...'));
+    const mission = bos.createMission({
+      title: options.task,
+      type: 'feature',
+      priority: options.priority as 'critical' | 'high' | 'medium' | 'low',
+    });
+    console.log(chalk.green(`  ✓ Mission created: ${mission.id}`));
+
+    // Step 3: Evaluate governance
+    console.log(chalk.cyan('\n[Step 3/7] Evaluating governance...'));
+    const decision = bos.evaluateGovernance('execute_task', {
+      agent: 'autonomous-agent',
+      context: { task: options.task },
+    });
+    console.log(
+      chalk[decision.verdict === 'deny' ? 'red' : 'green'](
+        `  ${decision.verdict.toUpperCase()}: ${decision.reason}`,
+      ),
+    );
+
+    // Step 4: Start mission
+    bos.startMission(mission.id);
+    console.log(chalk.green('  ✓ Mission started'));
+
+    // Step 5: Run audit
+    console.log(chalk.cyan('\n[Step 5/7] Running audit...'));
+    const report = bos.runAudit({
+      missionId: mission.id,
+      agentId: 'autonomous-agent',
+      simulate: true,
+    });
+    console.log(
+      chalk[report.overall === 'pass' ? 'green' : 'yellow'](
+        `  Audit: ${report.overall.toUpperCase()} (${report.summary})`,
+      ),
+    );
+
+    // Step 6: Record learning
+    console.log(chalk.cyan('\n[Step 6/7] Recording learning...'));
+    const event = bos.recordLearning({
+      type: 'insight',
+      source: 'autonomous-task',
+      content: `Task executed: ${options.task}`,
+      impact: decision.verdict === 'deny' ? 'high' : 'medium',
+      relatedMission: mission.id,
+    });
+    console.log(chalk.green(`  ✓ Learning recorded: ${event.id}`));
+
+    // Step 7: Update state
+    console.log(chalk.cyan('\n[Step 7/7] Updating protocol state...'));
+    const statePath = join(dir, '.behavioros', 'state.json');
+    if (existsSync(statePath)) {
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      state.stepHistory = [
+        ...(state.stepHistory || []),
+        { step: 7, timestamp: new Date().toISOString(), missionId: mission.id },
+      ];
+      state.updatedAt = new Date().toISOString();
+      writeFileSync(statePath, JSON.stringify(state, null, 2));
+    }
+    console.log(chalk.green('  ✓ Protocol state updated'));
+
+    console.log(chalk.green('\n✅ Autonomous task completed.'));
+    console.log(chalk.gray(`  Mission: ${mission.id}`));
+    console.log(chalk.gray(`  Governance: ${decision.verdict}`));
+    console.log(chalk.gray(`  Audit: ${report.overall}`));
   });
 
 // PROTOCOL command
@@ -334,9 +538,50 @@ program
   .command('drift-check')
   .description('Compare current vs baseline behavior')
   .option('-d, --directory <path>', 'Project directory', '.')
-  .action(async (_options) => {
+  .action(async (options) => {
+    const dir = options.directory;
+    const statePath = join(dir, '.behavioros', 'state.json');
+    const baselinePath = join(dir, '.behavioros', 'baseline.json');
+
     console.log(chalk.blue('Checking for behavioral drift...'));
-    console.log(chalk.green('No drift detected.'));
+
+    if (!existsSync(baselinePath)) {
+      console.log(
+        chalk.yellow('  No baseline found. Create one with: behavioros diff --save-baseline'),
+      );
+      return;
+    }
+
+    if (!existsSync(statePath)) {
+      console.log(chalk.yellow("  No current state found. Run 'behavioros init' first."));
+      return;
+    }
+
+    try {
+      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+      const baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
+
+      // Compare key behavioral attributes
+      const drifts: string[] = [];
+      if (state.selectedDna !== baseline.selectedDna) {
+        drifts.push(`DNA pattern changed: ${baseline.selectedDna} → ${state.selectedDna}`);
+      }
+      if (state.currentStep !== baseline.currentStep) {
+        drifts.push(`Protocol step changed: ${baseline.currentStep} → ${state.currentStep}`);
+      }
+
+      if (drifts.length === 0) {
+        console.log(chalk.green('  No drift detected. Behavior matches baseline.'));
+      } else {
+        for (const d of drifts) {
+          console.log(chalk.yellow(`  ⚠ ${d}`));
+        }
+      }
+    } catch {
+      console.log(
+        chalk.red('  Error comparing state. Check format of state.json and baseline.json.'),
+      );
+    }
   });
 
 program.parse();

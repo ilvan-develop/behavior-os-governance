@@ -1,5 +1,5 @@
-const { readFileSync, writeFileSync } = require('fs');
-const { execSync } = require('child_process');
+const { readFileSync, writeFileSync } = require('node:fs');
+const { execSync } = require('node:child_process');
 
 const packages = ['core', 'mcp-server', 'schemas', 'cli', 'sdk'];
 
@@ -15,11 +15,8 @@ for (const pkg of packages) {
 
     let fixed = 0;
     for (const file of files) {
-      let content = readFileSync(file, 'utf8');
-      const updated = content.replace(
-        /from\s+'\.\/([^'"]+)(?!\.js)'/g,
-        "from './$1.js'"
-      );
+      const content = readFileSync(file, 'utf8');
+      const updated = content.replace(/from\s+'\.\/([^'"]+)(?!\.js)'/g, "from './$1.js'");
       if (updated !== content) {
         writeFileSync(file, updated);
         fixed++;

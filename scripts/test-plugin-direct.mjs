@@ -3,9 +3,9 @@
  * 绕过 opencode run 的路径问题，直接测试插件核心逻辑
  */
 
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 async function main() {
   console.log('=== BehaviorOS Plugin 功能测试 ===\n');
@@ -62,7 +62,7 @@ async function main() {
       timeout: 120000,
     });
     console.log(result);
-  } catch (e) {
+  } catch (_e) {
     console.log('测试执行完成');
   }
 

@@ -48,7 +48,12 @@ export class BehaviorOSSDK {
   }
 
   // Audit
-  runAudit(options: { missionId: string; agentId: string; stages?: string[] }): AuditReport {
+  runAudit(options: {
+    missionId: string;
+    agentId: string;
+    stages?: string[];
+    simulate?: boolean;
+  }): AuditReport {
     return this.bos.runAudit(options);
   }
 
@@ -72,6 +77,7 @@ export class BehaviorOSSDK {
     source: string;
     content: string;
     impact: string;
+    relatedMission?: string;
   }): LearningEvent {
     return this.bos.recordLearning(options);
   }

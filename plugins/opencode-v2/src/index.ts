@@ -44,32 +44,8 @@ async function loadDNAFromDirectory(dirPath: string): Promise<Map<string, DNA>> 
 // Simple YAML parser (for basic structures)
 function parseYAML(content: string): Record<string, unknown> | null {
   try {
-    // Use a simple approach: convert YAML to JSON-like structure
-    const lines = content.split('\n');
-    const result: Record<string, unknown> = {};
-    let currentArray: string | null = null;
-    const currentObject: Record<string, unknown> = {};
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      // Simple key-value parsing
-      if (trimmed.includes(':')) {
-        const [key, ...valueParts] = trimmed.split(':');
-        const value = valueParts.join(':').trim();
-
-        if (value.startsWith("['")) {
-          // Array value
-          currentArray = key;
-          currentObject[key] = [];
-        } else if (value) {
-          currentObject[key] = value.replace(/"/g, '');
-        }
-      }
-    }
-
-    return currentObject;
+    const yaml = require('js-yaml');
+    return yaml.load(content) as Record<string, unknown>;
   } catch {
     return null;
   }

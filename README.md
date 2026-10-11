@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-5%2C200%2B-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-268%2B-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -82,21 +82,16 @@ pnpm build
 └──────────────────────────────────────────────────────┘
 ```
 
-### 22 Engines Powering the Stack
+### 6 Core Engines Powering the Stack
 
-| Engine | Ops/s | Engine | Ops/s |
-|---|---|---|---|
-| AutonomousDecomposer | 14.6M | AuditEngine | 1.8M |
-| AITMPLAdapter | 15.9M | PipelineEngine | 1.6M |
-| DecisionEngine | 14.1M | GovernanceEngine | 1.3M |
-| QualityEngine | 14.1M | ContextRecoveryEngine | 487K |
-| LearningEngine | 13.9M | LocalRuntime | 2.9M |
-| LoggingEngine | 12.7M | Registry | 9.6M |
-| DistributedMemory | 10.9M | AIResourceManager | 9.8M |
-| DNALoader | 10.4M | CapabilityCatalog | 7.3M |
-| CognitiveIndex | 10.6M | QueueManager | 7.7M |
-| SecretsEngine | 10.0M | KnowledgeGraph | 8.6M |
-| MissionEngine | 8.4M | EvaluationEngine | 8.7M |
+| Engine | Purpose |
+|---|---|
+| GovernanceEngine | Rule-based governance evaluation with caching |
+| QualityEngine | Quality gate enforcement (gte/lte/eq/neq) |
+| AuditEngine | Multi-stage audit pipeline (real or simulated) |
+| LearningEngine | Pattern detection from learning events |
+| MissionEngine | In-memory mission lifecycle management |
+| DNALoader | YAML pattern loading with Zod validation |
 
 ## Features Deep Dive
 
@@ -128,7 +123,7 @@ quality:
     threshold: 100
 ```
 
-### The 12 DNA Patterns
+### 21 DNA Patterns
 
 | Pattern | Description | Best For |
 |---|---|---|
@@ -153,7 +148,7 @@ Request → DNA Match → Capability Match → Delegate → Validate
 
 Skills are matched in two stages: first by DNA pattern compatibility, then by capability signature. 24 skills registered across 6 agent types.
 
-### MCP Server — 45+ Tools + 9 Resources
+### MCP Server — 9 Tools + 2 Resources
 
 Connect Behavior-OS to any AI agent platform via Model Context Protocol:
 
@@ -193,7 +188,7 @@ Connect Behavior-OS to any AI agent platform via Model Context Protocol:
 | `@behavior-os/schemas` | 120 | ✅ All passing |
 | `@behavior-os/core` | ~5,000+ | ✅ All passing |
 | `@behavior-os/mcp-server` | 112 | ✅ All passing |
-| **Total** | **~5,200+** | **✅ 0 failures** |
+| **Total** | **~268+** | **✅ 0 failures** |
 | **Typecheck** | All packages | **✅ 0 errors** |
 | **Build** | ESM + CJS + DTS | **✅ <3s per package** |
 | **Coverage** | Core engine | **✅ >80%** |

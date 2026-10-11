@@ -11,17 +11,22 @@ const absoluteDir = resolve(projectDir);
 console.log(`📁 Working directory: ${absoluteDir}`);
 console.log('🧪 Running opencode run...\n');
 
-const child = spawn('cmd.exe', [
-  '/c',
-  '"C:\\Users\\waldi\\AppData\\Roaming\\npm\\opencode.cmd"',
-  'run',
-  '--standalone',
-  '--format', 'json',
-  'test behavioros governance plugin'
-], {
-  cwd: absoluteDir,
-  stdio: ['inherit', 'inherit', 'inherit']
-});
+const child = spawn(
+  'cmd.exe',
+  [
+    '/c',
+    '"C:\\Users\\waldi\\AppData\\Roaming\\npm\\opencode.cmd"',
+    'run',
+    '--standalone',
+    '--format',
+    'json',
+    'test behavioros governance plugin',
+  ],
+  {
+    cwd: absoluteDir,
+    stdio: ['inherit', 'inherit', 'inherit'],
+  },
+);
 
 child.on('close', (code) => {
   process.exit(code ?? 0);

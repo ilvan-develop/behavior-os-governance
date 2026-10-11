@@ -69,9 +69,9 @@ importers:
       commander:
         specifier: ^12.0.0
         version: 12.1.0
-      yaml:
-        specifier: ^2.4.0
-        version: 2.9.1
+      js-yaml:
+        specifier: ^5.4.3
+        version: 5.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -177,6 +177,9 @@ importers:
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
+      js-yaml:
+        specifier: ^5.4.3
+        version: 5.4.3
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

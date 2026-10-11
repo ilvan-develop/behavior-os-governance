@@ -79,7 +79,12 @@ export class BehaviorOS {
   }
 
   // Audit
-  runAudit(options: { missionId: string; agentId: string; stages?: string[] }): AuditReport {
+  runAudit(options: {
+    missionId: string;
+    agentId: string;
+    stages?: string[];
+    simulate?: boolean;
+  }): AuditReport {
     const auditEngine = this.registry.createAuditEngine();
     const stages = options.stages?.length
       ? options.stages
@@ -132,6 +137,8 @@ export class BehaviorOS {
     source: string;
     content: string;
     impact: string;
+    relatedMission?: string;
+    relatedPattern?: string;
   }): LearningEvent {
     let learningEngine = this.registry.get<LearningEngine>('learning');
     if (!learningEngine) {
