@@ -1,4 +1,9 @@
-import type { LearningEvent, LearningImpact, LearningType } from '@behavior-os/schemas';
+import type {
+  EvolutionProposal,
+  LearningEvent,
+  LearningImpact,
+  LearningType,
+} from '@behavior-os/schemas';
 
 export interface RecordOptions {
   type: LearningType;
@@ -16,6 +21,20 @@ export interface DetectedPattern {
   examples: string[];
   recommendation?: string;
 }
+
+/** Relative weight of each impact level when scoring confidence (0..1). */
+const IMPACT_WEIGHT: Record<LearningImpact, number> = {
+  low: 0.25,
+  medium: 0.5,
+  high: 0.75,
+  critical: 1,
+};
+
+/** Occurrence count at which the frequency term of the confidence saturates. */
+const SATURATION_OCCURRENCES = 5;
+
+/** Learning types that describe a problem worth preventing via governance. */
+const ACTIONABLE_TYPES: readonly LearningType[] = ['failure', 'fix'];
 
 export class LearningEngine {
   private events: LearningEvent[] = [];
@@ -76,6 +95,59 @@ export class LearningEngine {
 
   getInsights(limit = 10): LearningEvent[] {
     return this.events.filter((e) => e.impact === 'high' || e.impact === 'critical').slice(-limit);
+  }
+
+  // DNA evolution -----------------------------------------------------------
+  /**
+   * Confidence in [0, 1] that a recurring pattern is real rather than noise.
+   *
+   * `confidence = frequency * 0.6 + avgImpactWeight * 0.4` where
+   * `frequency = min(1, occurrences / 5)` and the impact weights are
+   * `{ low: 0.25, medium: 0.5, high: 0.75, critical: 1 }`. Five or more
+   * occurrences of a high-impact problem therefore reach ~0.85, which is the
+   * default bar for proposing a DNA change.
+   */
+  confidenceFor(occurrences: number, avgImpactWeight: number): number {
+    const frequency = Math.min(1, Math.max(0, occurrences) / SATURATION_OCCURRENCES);
+    const impact = Math.min(1, Math.max(0, avgImpactWeight));
+    return Math.round((frequency * 0.6 + impact * 0.4) * 1000) / 1000;
+  }
+
+  /**
+   * Derive DNA-change proposals from repeated `failure`/`fix` events. This is a
+   * pure computation: nothing is mutated here. Proposals below `minConfidence`
+   * (default 0.8) are discarded.
+   */
+  proposeEvolution(dnaName: string, minConfidence = 0.8): EvolutionProposal[] {
+    const byType = new Map<string, LearningEvent[]>();
+    for (const event of this.events) {
+      if (!ACTIONABLE_TYPES.includes(event.type)) continue;
+      const bucket = byType.get(event.type) ?? [];
+      bucket.push(event);
+      byType.set(event.type, bucket);
+    }
+
+    const proposals: EvolutionProposal[] = [];
+    for (const [pattern, events] of byType) {
+      const totalImpact = events.reduce((sum, e) => sum + IMPACT_WEIGHT[e.impact], 0);
+      const confidence = this.confidenceFor(events.length, totalImpact / events.length);
+      if (confidence < minConfidence) continue;
+
+      proposals.push({
+        id: `evo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        dnaName,
+        kind: 'governance-warn',
+        pattern,
+        ruleId: `evo-warn-${pattern}`,
+        description: `Add a warning rule for recurring "${pattern}" events (confidence ${confidence})`,
+        confidence,
+        occurrences: events.length,
+        evidence: events.slice(-5).map((e) => e.content),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return proposals.sort((a, b) => b.confidence - a.confidence);
   }
 
   /** Snapshot every learning event (JSON-serializable) for persistence. */

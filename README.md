@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 8 core engines, 14 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 8 core engines, 15 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -97,7 +97,7 @@ pnpm build
 | GovernanceEngine | Rule-based governance evaluation with caching |
 | QualityEngine | Quality gate enforcement (gte/lte/eq/neq) |
 | AuditEngine | Multi-stage audit pipeline (real or simulated) |
-| LearningEngine | Pattern detection from learning events |
+| LearningEngine | Pattern detection + confidence-scored DNA evolution proposals |
 | MissionEngine | In-memory mission lifecycle management |
 | PipelineEngine | Ordered gates with synchronous pre-execution blocking |
 | DecisionEngine | Weighted voting/quorum (majority/supermajority/unanimous) |
@@ -215,8 +215,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 43 |
-| Test cases (`it`/`test` blocks) | 390 |
+| Test files (`*.test.ts`) | 44 |
+| Test cases (`it`/`test` blocks) | 402 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |
@@ -315,7 +315,7 @@ mcpServers:
 | `@behavior-os/core` | 8 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 14 tools + 2 resources | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 15 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
 
 ## License

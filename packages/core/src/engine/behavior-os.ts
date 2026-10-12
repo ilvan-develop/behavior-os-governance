@@ -5,6 +5,7 @@ import type {
   Decision,
   DecisionPolicy,
   DNA,
+  EvolutionProposal,
   GovernanceDecision,
   LearningEvent,
   LearningImpact,
@@ -13,6 +14,7 @@ import type {
   MissionPriority,
   MissionType,
   PipelineRun,
+  Vote,
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { DecideOptions } from './decision-engine.js';
@@ -50,6 +52,24 @@ export interface BehaviorOSConfig {
   pipeline?: { enabled?: boolean; gates?: PipelineGate[] };
   /** Defaults for {@link BehaviorOS.decide} when a call omits `policy`/`quorum`. */
   decision?: { policy?: DecisionPolicy; quorum?: number };
+  /**
+   * Learning-driven DNA evolution. Proposals are always available (read-only);
+   * applying one requires `enabled: true` **and** an explicit `apply: true`
+   * call. Evolution can only add `warn` rules — never blocking ones.
+   */
+  evolution?: { enabled?: boolean; minConfidence?: number };
+}
+
+/** Outcome of {@link BehaviorOS.applyEvolution}. */
+export interface EvolutionResult {
+  /** Proposals that met the confidence bar (including already-applied ones). */
+  proposals: EvolutionProposal[];
+  /** The subset that was actually written into the active DNA. */
+  applied: EvolutionProposal[];
+  /** Whether `config.evolution.enabled` allowed writing. */
+  enabled: boolean;
+  /** Present when votes were supplied to gate the change. */
+  decision?: Decision;
 }
 
 /**
@@ -457,6 +477,89 @@ export class BehaviorOS {
 
   getInsights(limit = 10): LearningEvent[] {
     return this.getLearningEngine().getInsights(limit);
+  }
+
+  // DNA evolution (learning-driven) -----------------------------------------
+  /**
+   * Confidence-scored DNA-change proposals derived from repeated learning
+   * events. Pure read: nothing is mutated. Default `minConfidence` is 0.8.
+   */
+  proposeEvolution(
+    minConfidence = this.config.evolution?.minConfidence ?? 0.8,
+  ): EvolutionProposal[] {
+    return this.getLearningEngine().proposeEvolution(
+      this.currentDNA?.name ?? 'default',
+      minConfidence,
+    );
+  }
+
+  /**
+   * Apply evolution proposals to the active DNA. This only happens when
+   * `config.evolution.enabled` is true and the caller passes `apply: true`.
+   * When `votes` are supplied the change must first be approved by the decision
+   * engine. Only `warn` rules are ever added, so an applied proposal can never
+   * block an action.
+   */
+  applyEvolution(
+    options: {
+      minConfidence?: number;
+      apply?: boolean;
+      votes?: Vote[];
+      policy?: DecisionPolicy;
+    } = {},
+  ): EvolutionResult {
+    const minConfidence = options.minConfidence ?? this.config.evolution?.minConfidence ?? 0.8;
+    const proposals = this.proposeEvolution(minConfidence);
+    const enabled = this.config.evolution?.enabled === true;
+
+    if (options.apply !== true || !enabled || !this.currentDNA) {
+      return { proposals, applied: [], enabled };
+    }
+
+    let decision: Decision | undefined;
+    if (options.votes && options.votes.length > 0) {
+      decision = this.decide({
+        subject: `DNA evolution (${proposals.length} proposal(s))`,
+        votes: options.votes,
+        policy: options.policy,
+      });
+      if (decision.outcome !== 'approved') {
+        return { proposals, applied: [], enabled, decision };
+      }
+    }
+
+    const governance = [...this.currentDNA.governance];
+    const applied: EvolutionProposal[] = [];
+    for (const proposal of proposals) {
+      if (governance.some((rule) => rule.id === proposal.ruleId)) continue;
+      governance.push({
+        id: proposal.ruleId,
+        level: 'medium',
+        action: 'warn',
+        conditions: [{ type: 'pattern', value: proposal.pattern }],
+        description: proposal.description,
+      });
+      applied.push(proposal);
+    }
+
+    if (applied.length > 0) {
+      // New object identity so the registry rebuilds the DNA-bound engines.
+      this.currentDNA = { ...this.currentDNA, governance };
+      this.registry.createGovernanceEngine(this.currentDNA);
+      this.pipeline = null;
+      for (const proposal of applied) {
+        this.recordLearning({
+          type: 'optimization',
+          source: 'dna-evolution',
+          content: `Applied ${proposal.kind} rule ${proposal.ruleId} (confidence ${proposal.confidence})`,
+          impact: 'medium',
+          relatedPattern: proposal.pattern,
+          advanceProtocol: false,
+        });
+      }
+    }
+
+    return { proposals, applied, enabled, ...(decision ? { decision } : {}) };
   }
 
   // Decisions (voting/quorum) ----------------------------------------------

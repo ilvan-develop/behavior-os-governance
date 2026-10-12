@@ -7,26 +7,24 @@
 ## Como verificar (comandos)
 
 ```bash
-```bash
 # Motores reais (esperado: audit, behavior-os, decision, dna-loader, governance, learning, mission, pipeline, quality)
 ls packages/core/src/engine/*.ts
 
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 14) e resources (esperado: 2)
+# Tools MCP (esperado: 15) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 23 objetos)
+# Schemas Zod (esperado: 24 objetos)
 grep -c "z.object(" packages/schemas/src/index.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
 grep -ri "sqlite" packages plugins --include=*.ts
-```
 ```
 
 ## Tabela de afirmações
@@ -39,21 +37,21 @@ grep -ri "sqlite" packages plugins --include=*.ts
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **14 tools + 2 resources** (server) / **14 tools** (plugin). |
-| 29 schemas Zod | ❌ | **23** `z.object` (+22 `z.enum`). |
+| 30 tools & 7 resources MCP | ❌ | **15 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 29 schemas Zod | ❌ | **24** `z.object` (+23 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
-| SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
+| SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
 | Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
-| 7 algoritmos matemáticos | ❌ | Só contagem por tipo de evento + recomendações. |
-| Auto-evolução do DNA com confiança > 80% | ❌ | Não existe auto-apply nem limiar de confiança. |
+| 7 algoritmos matemáticos | ⚠️ parcial | Existe **1** algoritmo real de confiança (`frequency * 0.6 + avgImpact * 0.4`) + deteção de padrões por contagem. Não são 7. |
+| Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
 | 10 estágios de auditoria | ❌ | `AuditStageSchema` tem **6**; por omissão corre **4**. |
 | `authority_level: 3` | ❌ | Campo real: `authority: string` (ex.: `operator`). |
 | Gate 2 real (Biome, tsc, pnpm audit) | ⚠️ | Verdade **apenas** com `simulate: false`; por omissão é simulado e passa sempre. |
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
 | Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 14 tools + 2 resources funcionais. |
+| MCP real (não vaporware) | ✅ | 15 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
 | DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
 
@@ -104,7 +102,40 @@ ponderada:
 Limitação honesta: é contagem/voto determinístico in-process; **não** há consenso
 distribuído (Raft/Paxos) nem delegação entre agentes.
 
+## Evolução de DNA (learning-driven)
+
+`LearningEngine` (`packages/core/src/engine/learning-engine.ts`) pontua a
+confiança de um padrão recorrente:
+
+```
+confiança = min(1, ocorrências / 5) * 0.6 + pesoDeImpactoMédio * 0.4
+pesos de impacto: low 0.25 · medium 0.5 · high 0.75 · critical 1
+```
+
+`proposeEvolution(dnaName, minConfidence = 0.8)` devolve propostas **puras**
+(não muta nada) para padrões `failure`/`fix` que atinjam o limiar. Cinco falhas
+de impacto `high` chegam a **0.9**.
+
+Aplicação — três travas independentes, todas necessárias:
+
+1. `config.evolution.enabled === true`;
+2. a chamada passa explicitamente `apply: true`;
+3. se forem fornecidos `votes`, a alteração tem de ser **aprovada** pelo
+   `DecisionEngine`.
+
+A única alteração possível é acrescentar uma regra de governança `warn` com a
+condição `{ type: 'pattern', value: <tipo> }`. Como `warn` nunca altera o
+veredicto, uma proposta aplicada **nunca bloqueia** uma ação. Cada aplicação
+gera um evento de aprendizagem com `source: 'dna-evolution'`.
+
+Limitações honestas:
+- Só `failure` e `fix` geram propostas; não há minerização de texto (LLM/NLP).
+- A evolução só **acrescenta** regras `warn`; não remove nem bloqueia regras.
+- A proposta é recalculada a partir dos eventos em memória — não há histórico
+  versionado de propostas rejeitadas.
+
 ## O que ainda NÃO existe (roadmap)
 
 - Persistência em Postgres remoto (o SQLite local já existe).
-- Aplicação automática de correções pelo LearningEngine.
+- Auto-correção de código pelo LearningEngine (a evolução de DNA só acrescenta
+  regras `warn`; não edita ficheiros).

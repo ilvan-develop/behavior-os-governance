@@ -268,6 +268,26 @@ export const DecisionSchema = z.object({
 });
 
 // ============================================================
+// DNA Evolution (learning-driven) Schemas
+// ============================================================
+
+export const EvolutionProposalSchema = z.object({
+  id: z.string(),
+  dnaName: z.string(),
+  /** Only `governance-warn` is ever applied: evolution can only add warnings. */
+  kind: z.enum(['governance-warn']),
+  /** The learning-event type that motivated the proposal. */
+  pattern: z.string(),
+  ruleId: z.string(),
+  description: z.string(),
+  /** 0..1; see `LearningEngine.confidenceFor` for the exact formula. */
+  confidence: z.number(),
+  occurrences: z.number(),
+  evidence: z.array(z.string()),
+  timestamp: z.string(),
+});
+
+// ============================================================
 // Learning Schemas
 // ============================================================
 
@@ -361,6 +381,7 @@ export type Vote = z.infer<typeof VoteSchema>;
 export type DecisionPolicy = z.infer<typeof DecisionPolicySchema>;
 export type DecisionOutcome = z.infer<typeof DecisionOutcomeSchema>;
 export type Decision = z.infer<typeof DecisionSchema>;
+export type EvolutionProposal = z.infer<typeof EvolutionProposalSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;

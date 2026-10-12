@@ -493,6 +493,71 @@ server.registerTool(
 );
 
 // ============================================================
+// EVOLUTION TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_evolution',
+  {
+    description: 'Propose (and optionally apply) learning-driven DNA changes, scored by confidence',
+    inputSchema: z.object({
+      minConfidence: z
+        .number()
+        .optional()
+        .describe('Minimum confidence in [0,1] for a proposal (default 0.8)'),
+      apply: z
+        .boolean()
+        .optional()
+        .describe('Write proposals into the active DNA (requires evolution.enabled)'),
+      votes: z
+        .array(
+          z.object({
+            voterId: z.string(),
+            choice: z.enum(['approve', 'reject', 'abstain']),
+            weight: z.number().optional(),
+            reason: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe('If supplied, the change must be approved by this vote'),
+      policy: z.enum(['majority', 'supermajority', 'unanimous']).optional(),
+    }),
+    annotations: {
+      title: 'DNA evolution',
+    },
+  },
+  async ({
+    minConfidence,
+    apply,
+    votes,
+    policy,
+  }: {
+    minConfidence?: number;
+    apply?: boolean;
+    votes?: Vote[];
+    policy?: DecisionPolicy;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.applyEvolution({ minConfidence, apply, votes, policy });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // LEARNING TOOLS
 // ============================================================
 

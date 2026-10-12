@@ -91,9 +91,16 @@ Pattern detection over recorded events:
 - Record events
 - Detect recurring patterns (an event type seen ≥ 2 times)
 - Surface recommendations
+- Score the confidence of a recurring pattern and propose DNA changes:
+  `confidence = min(1, occurrences / 5) * 0.6 + avgImpactWeight * 0.4`
+  (impact weights: low 0.25, medium 0.5, high 0.75, critical 1)
 
-> Fixes are **not** applied automatically; a human/agent must act on a
-> recommendation. There is no confidence-threshold auto-apply.
+`BehaviorOS.proposeEvolution()` is a pure read. `applyEvolution()` writes a
+proposal into the active DNA only when **all** of these hold:
+`config.evolution.enabled`, the call passes `apply: true`, and — when votes are
+supplied — the decision engine approves it. The only mutation possible is adding
+a `warn` rule, so evolution can never block an action. It does **not** edit
+source files; there is no code auto-fix.
 
 ### 10. Mission Layer
 Mission lifecycle management:
@@ -110,7 +117,7 @@ only the eight below are real, and no throughput numbers are claimed.
 | GovernanceEngine | `governance-engine.ts` | Rule evaluation with TTL cache |
 | QualityEngine | `quality-engine.ts` | Quality gate enforcement (gte/lte/eq/neq) |
 | AuditEngine | `audit-engine.ts` | Multi-stage audit (simulated or real) |
-| LearningEngine | `learning-engine.ts` | Pattern detection from learning events |
+| LearningEngine | `learning-engine.ts` | Pattern detection + confidence-scored DNA evolution proposals |
 | MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
 | PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
 | DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
@@ -140,7 +147,7 @@ See `packages/core/src/persistence/sqlite-store.ts`.
 ## Integration Points
 
 ### MCP Server (standalone)
-- 14 tools + 2 resources exposed via Model Context Protocol
+- 15 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
