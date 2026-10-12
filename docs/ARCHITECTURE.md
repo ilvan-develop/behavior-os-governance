@@ -94,6 +94,9 @@ Pattern detection over recorded events:
 - Score the confidence of a recurring pattern and propose DNA changes:
   `confidence = min(1, occurrences / 5) * 0.6 + avgImpactWeight * 0.4`
   (impact weights: low 0.25, medium 0.5, high 0.75, critical 1)
+- Derive **code-fix proposals** from repeated `fix` events via
+  `LearningEngine.proposeCodeFixes()`. This is a read-only API — no files are
+  touched. MCP tool `bos_code_fixes`.
 
 `BehaviorOS.proposeEvolution()` is a pure read. `applyEvolution()` writes a
 proposal into the active DNA only when **all** of these hold:

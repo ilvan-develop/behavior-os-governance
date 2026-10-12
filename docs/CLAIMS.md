@@ -13,14 +13,14 @@ ls packages/core/src/engine/*.ts
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 15) e resources (esperado: 2)
+# Tools MCP (esperado: 16) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 24 objetos)
+# Schemas Zod (esperado: 25 objetos)
 grep -c "z.object(" packages/schemas/src/index.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
@@ -43,8 +43,8 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **15 tools + 2 resources** (server) / **14 tools** (plugin). |
-| 29 schemas Zod | ❌ | **24** `z.object` (+23 `z.enum`). |
+| 30 tools & 7 resources MCP | ❌ | **16 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 29 schemas Zod | ❌ | **25** `z.object` (+24 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
 | SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
@@ -52,13 +52,14 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
 | 7 algoritmos matemáticos | ⚠️ parcial | Existe **1** algoritmo real de confiança (`frequency * 0.6 + avgImpact * 0.4`) + deteção de padrões por contagem. Não são 7. |
 | Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
+| Propostas de correção de código | ✅ leitura | `LearningEngine.proposeCodeFixes()` gera `CodeFixProposal[]` a partir de eventos `fix` repetidos. Não edita ficheiros. MCP: `bos_code_fixes`. |
 | 10 estágios de auditoria | ❌ | `AuditStageSchema` tem **6**; por omissão corre **4**. |
 | `authority_level: 3` | ❌ | Campo real: `authority: string` (ex.: `operator`). |
 | Gate 2 real (Biome, tsc, pnpm audit) | ⚠️ | Verdade **apenas** com `simulate: false`; por omissão é simulado e passa sempre. |
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
 | Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 15 tools + 2 resources funcionais. |
+| MCP real (não vaporware) | ✅ | 16 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
 | DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
 
@@ -169,7 +170,29 @@ Limitações honestas do `PostgresStore`:
 - o `pg` **não** é declarado como dependência: a instalação é responsabilidade
   de quem usa o adaptador (`pnpm add pg`), ou passa-se `createPool` próprio.
 
+## Propostas de correção de código
+
+`LearningEngine.proposeCodeFixes(minConfidence = 0.8)` deriva propostas
+**apenas de leitura** de eventos `fix` repetidos. A confiança usa a mesma
+fórmula do motor de evolução (`frequency * 0.6 + avgImpact * 0.4`): três
+eventos `fix` de impacto `critical` atingem ~0.76 (abaixo do limiar default de
+0.8); cinco atingem 1.0.
+
+A interface não edita ficheiros — apenas devolve `CodeFixProposal[]` com
+`suggestion`, `evidence` e `confidence`. `BehaviorOS.proposeCodeFixes()` é o
+ponto de entrada; o MCP expõe `bos_code_fixes`. Uma futura iteração poderá
+adicionar `applyCodeFixes()` com as mesmas travas que `applyEvolution` (opt-in,
+quórum, warn-only).
+
+Limitações honestas:
+- só eventos do tipo `fix` geram propostas; falhas (`failure`) ficam para
+  evolução de DNA;
+- não há análise estática de ficheiros — as propostas vêm apenas do log de
+  aprendizagens;
+- não há edição automática de código.
+
 ## O que ainda NÃO existe (roadmap)
 
-- Auto-correção de código pelo LearningEngine (a evolução de DNA só acrescenta
-  regras `warn`; não edita ficheiros).
+- Aplicação de correções de código (`applyCodeFixes`): atualmente as propostas
+  são apenas leitura; aplicar mudanças em ficheiros requer as mesmas travas da
+  evolução de DNA (opt-in, quórum, warn-only).

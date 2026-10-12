@@ -287,6 +287,19 @@ export const EvolutionProposalSchema = z.object({
   timestamp: z.string(),
 });
 
+export const CodeFixProposalSchema = z.object({
+  id: z.string(),
+  /** Learning event type or extracted keyword. */
+  pattern: z.string(),
+  /** 0..1; see `LearningEngine.confidenceFor`. */
+  confidence: z.number(),
+  occurrences: z.number(),
+  suggestion: z.string(),
+  /** Up to 5 representative examples of the pattern. */
+  evidence: z.array(z.string()),
+  timestamp: z.string(),
+});
+
 // ============================================================
 // Learning Schemas
 // ============================================================
@@ -382,6 +395,7 @@ export type DecisionPolicy = z.infer<typeof DecisionPolicySchema>;
 export type DecisionOutcome = z.infer<typeof DecisionOutcomeSchema>;
 export type Decision = z.infer<typeof DecisionSchema>;
 export type EvolutionProposal = z.infer<typeof EvolutionProposalSchema>;
+export type CodeFixProposal = z.infer<typeof CodeFixProposalSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;

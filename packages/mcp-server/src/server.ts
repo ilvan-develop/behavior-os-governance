@@ -558,6 +558,45 @@ server.registerTool(
 );
 
 // ============================================================
+// CODE FIX TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_code_fixes',
+  {
+    description: 'Propose code fixes derived from repeated fix events, scored by confidence',
+    inputSchema: z.object({
+      minConfidence: z
+        .number()
+        .optional()
+        .describe('Minimum confidence in [0,1] for a proposal (default 0.8)'),
+    }),
+    annotations: {
+      title: 'Code fix proposals',
+    },
+  },
+  async ({ minConfidence }: { minConfidence?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const proposals = bos.proposeCodeFixes(minConfidence);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(proposals, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // LEARNING TOOLS
 // ============================================================
 

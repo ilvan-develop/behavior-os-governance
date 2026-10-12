@@ -159,3 +159,57 @@ describe('BehaviorOS DNA evolution', () => {
     expect(bos.getDNA()?.governance).toHaveLength(1);
   });
 });
+
+describe('LearningEngine proposeCodeFixes', () => {
+  it('proposes nothing below the confidence bar', () => {
+    const engine = new LearningEngine();
+    for (let i = 0; i < 2; i++) {
+      engine.record({ type: 'fix', source: 'a', content: `f${i}`, impact: 'medium' });
+    }
+    expect(engine.proposeCodeFixes(0.8)).toEqual([]);
+  });
+
+  it('produces a proposal for repeated critical fixes', () => {
+    const engine = new LearningEngine();
+    for (let i = 0; i < 5; i++) {
+      engine.record({ type: 'fix', source: 'ci', content: `fail-${i}`, impact: 'critical' });
+    }
+    const proposals = engine.proposeCodeFixes();
+    expect(proposals).toHaveLength(1);
+    const p = proposals[0];
+    expect(p.pattern).toBe('fix');
+    expect(p.confidence).toBe(1);
+    expect(p.occurrences).toBe(5);
+    expect(p.suggestion).toContain('fix "fix" 5 time(s)');
+    expect(p.evidence).toHaveLength(5);
+  });
+
+  it('ignores non-fix event types', () => {
+    const engine = new LearningEngine();
+    for (let i = 0; i < 5; i++) {
+      engine.record({ type: 'failure', source: 'a', content: `x${i}`, impact: 'critical' });
+    }
+    expect(engine.proposeCodeFixes()).toEqual([]);
+  });
+});
+
+describe('BehaviorOS proposeCodeFixes', () => {
+  it('delegates to LearningEngine with the configured minConfidence', () => {
+    const bos = new BehaviorOS({ evolution: { minConfidence: 0.9 } });
+    // 3 critical fixes -> frequency 0.6, impact 1.0 -> confidence 0.76
+    for (let i = 0; i < 3; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    // Below the configured default of 0.9
+    expect(bos.proposeCodeFixes()).toHaveLength(0);
+    // Explicit threshold overrides config
+    expect(bos.proposeCodeFixes(0.7)).toHaveLength(1);
+    expect(bos.proposeCodeFixes(0.7)![0].confidence).toBe(0.76);
+  });
+});

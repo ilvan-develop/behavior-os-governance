@@ -1,4 +1,5 @@
 import type {
+  CodeFixProposal,
   EvolutionProposal,
   LearningEvent,
   LearningImpact,
@@ -142,6 +143,40 @@ export class LearningEngine {
         description: `Add a warning rule for recurring "${pattern}" events (confidence ${confidence})`,
         confidence,
         occurrences: events.length,
+        evidence: events.slice(-5).map((e) => e.content),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return proposals.sort((a, b) => b.confidence - a.confidence);
+  }
+
+  /**
+   * Derive code-fix proposals from repeated `fix` events. Each proposal is a
+   * read-only suggestion — no files are touched. `minConfidence` defaults to
+   * 0.8; three `fix` events of impact `critical` reach ~0.84 and qualify.
+   */
+  proposeCodeFixes(minConfidence = 0.8): CodeFixProposal[] {
+    const byType = new Map<string, LearningEvent[]>();
+    for (const event of this.events) {
+      if (event.type !== 'fix') continue;
+      const bucket = byType.get(event.type) ?? [];
+      bucket.push(event);
+      byType.set(event.type, bucket);
+    }
+
+    const proposals: CodeFixProposal[] = [];
+    for (const [type, events] of byType) {
+      const totalImpact = events.reduce((sum, e) => sum + IMPACT_WEIGHT[e.impact], 0);
+      const confidence = this.confidenceFor(events.length, totalImpact / events.length);
+      if (confidence < minConfidence) continue;
+
+      proposals.push({
+        id: `fix-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        pattern: type,
+        confidence,
+        occurrences: events.length,
+        suggestion: `Repeat fix "${type}" ${events.length} time(s); consider a reusable template.`,
         evidence: events.slice(-5).map((e) => e.content),
         timestamp: new Date().toISOString(),
       });

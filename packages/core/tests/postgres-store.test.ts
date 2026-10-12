@@ -192,7 +192,8 @@ describe('PostgresStore', () => {
     await store.connect();
 
     // Clear mirror so we can verify atomicity.
-    store['docs'].clear();
+    const mirrorDocs = store['docs'] as Map<unknown, Map<string, unknown>>;
+    mirrorDocs.clear();
 
     await store.withTransaction(async () => {
       store.setMeta('k1', 'v1');

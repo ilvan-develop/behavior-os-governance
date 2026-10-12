@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentState,
   AuditReport,
+  CodeFixProposal,
   Decision,
   DecisionPolicy,
   DNA,
@@ -570,6 +571,15 @@ export class BehaviorOS {
     return { proposals, applied, enabled, ...(decision ? { decision } : {}) };
   }
 
+  /**
+   * Confidence-scored code-fix proposals derived from repeated `fix` events.
+   * This is a pure read — no files are touched. Default `minConfidence` is
+   * three `fix` events of impact `critical` reach ~0.84 and qualify.
+   */
+  proposeCodeFixes(minConfidence = this.config.evolution?.minConfidence ?? 0.8): CodeFixProposal[] {
+    return this.getLearningEngine().proposeCodeFixes(minConfidence);
+  }
+
   // Decisions (voting/quorum) ----------------------------------------------
   private getDecisionEngine(): DecisionEngine {
     let engine = this.registry.get<DecisionEngine>('decision');
@@ -699,11 +709,12 @@ export class BehaviorOS {
    * stores backed by connection pools.
    */
   async persistAll(): Promise<void> {
-    if (!this.store) return;
-    await this.store.withTransaction(async () => {
-      for (const mission of this.getMissionEngine().snapshot()) this.store!.saveMission(mission);
-      for (const event of this.getLearningEngine().snapshot()) this.store!.saveLearning(event);
-      for (const agent of this.agents.values()) this.store!.saveAgent(agent);
+    const store = this.store;
+    if (!store) return;
+    await store.withTransaction(async () => {
+      for (const mission of this.getMissionEngine().snapshot()) store.saveMission(mission);
+      for (const event of this.getLearningEngine().snapshot()) store.saveLearning(event);
+      for (const agent of this.agents.values()) store.saveAgent(agent);
     });
   }
 
