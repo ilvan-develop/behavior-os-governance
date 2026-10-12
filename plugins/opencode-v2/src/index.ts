@@ -20,8 +20,10 @@ import {
   GOVERNANCE_INSTANCE_ID,
   type GovernanceLogKind,
   type GovernanceLogOutcome,
+  getGovernanceChainHead,
   getGovernanceLog,
   seedGovernanceLog,
+  verifyGovernanceLog,
 } from './governance-log.js';
 import {
   detectOvertake,
@@ -771,6 +773,22 @@ export default Plugin.define({
           const entries = getGovernanceLog(params.limit ?? 50);
           return {
             content: JSON.stringify({ total: entries.length, entries }, null, 2),
+          };
+        },
+      });
+
+      // Tool 14: bos_verify_audit_trail — recompute the hash chain and report
+      // whether the retained governance log is intact (tamper-evident audit).
+      tools.add({
+        name: 'bos_verify_audit_trail',
+        description:
+          'Verify the SHA-256 hash chain of the governance log (tamper-evident audit trail)',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          const verification = verifyGovernanceLog();
+          const chain = getGovernanceChainHead();
+          return {
+            content: JSON.stringify({ ...verification, ...chain }, null, 2),
           };
         },
       });

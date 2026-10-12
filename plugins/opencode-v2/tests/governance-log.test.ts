@@ -2,9 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   appendGovernanceLog,
   clearGovernanceLog,
+  computeGovernanceHash,
+  GENESIS_HASH,
   GOVERNANCE_LOG_MAX,
+  getGovernanceChainHead,
   getGovernanceLog,
+  seedGovernanceLog,
   serializeGovernanceLog,
+  verifyGovernanceLog,
 } from '../src/governance-log.js';
 
 function sampleInput(overrides: Partial<Parameters<typeof appendGovernanceLog>[0]> = {}) {
@@ -112,5 +117,80 @@ describe('governance log module', () => {
     // Stable within a process, so concurrent instances are distinguishable.
     expect(first.instance).toBe(second.instance);
     expect(serializeGovernanceLog(first)).toContain(`inst=${first.instance}`);
+  });
+});
+
+describe('governance log hash chain (tamper-evidence)', () => {
+  afterEach(() => {
+    clearGovernanceLog();
+    vi.restoreAllMocks();
+  });
+
+  it('links each event to the previous one, starting at genesis', () => {
+    const first = appendGovernanceLog(sampleInput({ action: 'a' }));
+    const second = appendGovernanceLog(sampleInput({ action: 'b' }));
+
+    expect(first.prevHash).toBe(GENESIS_HASH);
+    expect(second.prevHash).toBe(first.hash);
+    expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.hash).not.toBe(first.hash);
+    expect(verifyGovernanceLog()).toEqual({ valid: true, checked: 2 });
+  });
+
+  it('reports the first tampered event instead of the whole chain', () => {
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    const second = appendGovernanceLog(sampleInput({ action: 'b' }));
+    appendGovernanceLog(sampleInput({ action: 'c' }));
+
+    // Simulate an out-of-band edit of a stored event.
+    second.detail = 'tampered';
+
+    const result = verifyGovernanceLog();
+    expect(result.valid).toBe(false);
+    expect(result.brokenAt).toBe(second.seq);
+  });
+
+  it('stays verifiable after the ring buffer evicts older events', () => {
+    for (let index = 0; index < GOVERNANCE_LOG_MAX + 5; index += 1) {
+      appendGovernanceLog(sampleInput({ action: `a-${index}` }));
+    }
+
+    const retained = getGovernanceLog(GOVERNANCE_LOG_MAX + 100);
+    expect(retained).toHaveLength(GOVERNANCE_LOG_MAX);
+    expect(verifyGovernanceLog(retained).valid).toBe(true);
+  });
+
+  it('exposes the chain head and anchors restored events', () => {
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    const tail = appendGovernanceLog(sampleInput({ action: 'b' }));
+    const head = getGovernanceChainHead();
+
+    expect(head.head).toBe(tail.hash);
+    expect(head.length).toBe(2);
+
+    const snapshot = getGovernanceLog(50);
+    clearGovernanceLog();
+    expect(seedGovernanceLog(snapshot)).toBe(2);
+    expect(verifyGovernanceLog().valid).toBe(true);
+    expect(getGovernanceChainHead().head).toBe(tail.hash);
+  });
+
+  it('recomputes a hashless legacy event so old snapshots still verify', () => {
+    const legacy = {
+      seq: 1,
+      at: new Date().toISOString(),
+      instance: 'legacy',
+      kind: 'tool',
+      outcome: 'info',
+      dna: null,
+      step: 0,
+      mission: null,
+      action: 'x',
+      detail: 'pre-hash snapshot',
+    };
+    expect(seedGovernanceLog([legacy])).toBe(1);
+    const [stored] = getGovernanceLog(1);
+    expect(stored.hash).toBe(computeGovernanceHash(stored));
+    expect(verifyGovernanceLog().valid).toBe(true);
   });
 });

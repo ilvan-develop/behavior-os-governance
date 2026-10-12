@@ -1,15 +1,23 @@
 // ============================================================
 // Governance log
 // ============================================================
-// Bounded, in-memory, chronological log of how DNA governance is
-// applied at runtime. It exists so users can READ governance
-// activity on screen — either via the `bos_get_log` tool inside the
-// OpenCode session, or from the server console (significant
-// outcomes are echoed as `[Behavior-OS:LOG:*]` lines).
+// Bounded, chronological, hash-chained log of how DNA governance is applied at
+// runtime. It exists so users can READ governance activity on screen — either
+// via the `bos_get_log` / `bos_verify_audit_trail` tools inside the OpenCode
+// session, or from the server console (significant outcomes are echoed as
+// `[Behavior-OS:LOG:*]` lines).
 //
-// State is intentionally module-level (like the engine singleton in
-// index.ts) and purely diagnostic: it is never persisted and never
-// influences governance decisions.
+// State is module-level (like the engine singleton in index.ts) and purely
+// diagnostic: it never influences governance decisions. A bounded tail of the
+// most recent events IS persisted (inside the snapshot envelope) so activity
+// survives a restart — see GOVERNANCE_LOG_PERSIST_LIMIT.
+//
+// Tamper-evidence: every event carries `prevHash` + `hash`, forming a SHA-256
+// chain. `verifyGovernanceLog()` recomputes it and pinpoints the first changed
+// event. This detects tampering; it is not hardware immutability, and because
+// the buffer is a ring buffer verification is anchored on the retained window.
+
+import { createHash } from 'node:crypto';
 
 export type GovernanceLogKind =
   | 'dna_selected'
@@ -53,9 +61,16 @@ export interface GovernanceLogEvent {
   action: string;
   /** Human-readable detail (reason, message, …). */
   detail: string;
+  /** `hash` of the previous event, or the genesis hash for the first event. */
+  prevHash: string;
+  /** SHA-256 over this event's canonical fields plus `prevHash`. */
+  hash: string;
 }
 
-export type GovernanceLogInput = Omit<GovernanceLogEvent, 'seq' | 'at' | 'instance'>;
+export type GovernanceLogInput = Omit<
+  GovernanceLogEvent,
+  'seq' | 'at' | 'instance' | 'prevHash' | 'hash'
+>;
 
 /** Maximum number of events kept in memory (ring buffer). */
 export const GOVERNANCE_LOG_MAX = 200;
@@ -66,6 +81,9 @@ export const GOVERNANCE_LOG_MAX = 200;
  * than the in-memory cap on purpose, to keep the envelope compact.
  */
 export const GOVERNANCE_LOG_PERSIST_LIMIT = 50;
+
+/** Hash used as the `prevHash` of the very first event in a chain. */
+export const GENESIS_HASH = '0'.repeat(64);
 
 /**
  * Short, stable identity for this plugin instance. Includes the process id so
@@ -81,11 +99,33 @@ const ECHOED_OUTCOMES: ReadonlySet<GovernanceLogOutcome> = new Set(['deny', 'esc
 
 let events: GovernanceLogEvent[] = [];
 let sequence = 0;
+/** Hash of the most recent event; the `prevHash` for the next one. */
+let lastHash = GENESIS_HASH;
+/** Hash before the retained window; the verification anchor after eviction. */
+let anchorHash = GENESIS_HASH;
+
+/** Deterministic SHA-256 over an event's canonical fields (excluding `hash`). */
+export function computeGovernanceHash(entry: Omit<GovernanceLogEvent, 'hash'>): string {
+  const payload = JSON.stringify({
+    seq: entry.seq,
+    at: entry.at,
+    instance: entry.instance,
+    kind: entry.kind,
+    outcome: entry.outcome,
+    dna: entry.dna,
+    step: entry.step,
+    mission: entry.mission,
+    action: entry.action,
+    detail: entry.detail,
+    prevHash: entry.prevHash,
+  });
+  return createHash('sha256').update(payload).digest('hex');
+}
 
 /**
- * Append an event to the ring buffer. Returns the stored entry.
- * Designated outcomes are echoed to the console in a greppable
- * `[Behavior-OS:LOG:kind:outcome]` line.
+ * Append an event to the ring buffer, linking it into the hash chain. Returns
+ * the stored entry. Designated outcomes are echoed to the console in a
+ * greppable `[Behavior-OS:LOG:kind:outcome]` line.
  */
 export function appendGovernanceLog(input: GovernanceLogInput): GovernanceLogEvent {
   const entry: GovernanceLogEvent = {
@@ -93,10 +133,17 @@ export function appendGovernanceLog(input: GovernanceLogInput): GovernanceLogEve
     at: new Date().toISOString(),
     instance: GOVERNANCE_INSTANCE_ID,
     ...input,
+    prevHash: lastHash,
+    hash: '',
   };
+  entry.hash = computeGovernanceHash(entry);
+  lastHash = entry.hash;
+
   events.push(entry);
   if (events.length > GOVERNANCE_LOG_MAX) {
-    events = events.slice(events.length - GOVERNANCE_LOG_MAX);
+    const drop = events.length - GOVERNANCE_LOG_MAX;
+    anchorHash = events[drop - 1].hash;
+    events = events.slice(drop);
   }
   if (ECHOED_OUTCOMES.has(entry.outcome)) {
     console.log(serializeGovernanceLog(entry));
@@ -110,10 +157,12 @@ export function getGovernanceLog(limit = 50): GovernanceLogEvent[] {
   return events.slice(-capped);
 }
 
-/** Wipe the log (used by tests and diagnostics). */
+/** Wipe the log and reset the chain (used by tests and diagnostics). */
 export function clearGovernanceLog(): void {
   events = [];
   sequence = 0;
+  lastHash = GENESIS_HASH;
+  anchorHash = GENESIS_HASH;
 }
 
 /**
@@ -129,8 +178,9 @@ export function exportGovernanceLog(limit = GOVERNANCE_LOG_PERSIST_LIMIT): Gover
  * Restore previously persisted events into the in-memory buffer after a
  * restart. Entries are validated defensively (the snapshot may come from an
  * older build) and the sequence counter resumes after the highest restored
- * `seq`, so freshly appended events stay monotonic. Returns how many entries
- * were restored.
+ * `seq`, so freshly appended events stay monotonic. Entries that carry a stored
+ * `hash` keep it (so tampering is detectable); entries without one are
+ * recomputed and re-linked. Returns how many entries were restored.
  */
 export function seedGovernanceLog(input: unknown): number {
   if (!Array.isArray(input) || input.length === 0) return 0;
@@ -150,13 +200,76 @@ export function seedGovernanceLog(input: unknown): number {
       mission: typeof entry.mission === 'string' ? entry.mission : null,
       action: typeof entry.action === 'string' ? entry.action : '',
       detail: entry.detail,
+      prevHash: typeof entry.prevHash === 'string' ? entry.prevHash : '',
+      hash: typeof entry.hash === 'string' ? entry.hash : '',
     });
   }
   if (restored.length === 0) return 0;
   restored.sort((a, b) => a.seq - b.seq);
   events = restored.slice(-GOVERNANCE_LOG_MAX);
-  sequence = Math.max(sequence, ...restored.map((entry) => entry.seq));
+
+  // Re-link the window: keep stored hashes, recompute legacy (hashless) entries
+  // so a snapshot written before hashing still verifies afterwards.
+  let prev = events[0].prevHash || GENESIS_HASH;
+  anchorHash = prev;
+  for (const entry of events) {
+    if (!entry.prevHash) entry.prevHash = prev;
+    if (!entry.hash) entry.hash = computeGovernanceHash(entry);
+    prev = entry.hash;
+  }
+  lastHash = prev;
+  sequence = Math.max(sequence, ...events.map((entry) => entry.seq));
   return events.length;
+}
+
+export interface ChainVerification {
+  /** True when every retained entry links and hashes correctly. */
+  valid: boolean;
+  /** Number of entries checked. */
+  checked: number;
+  /** `seq` of the first entry that failed verification, when invalid. */
+  brokenAt?: number;
+  /** Human-readable reason for the first failure. */
+  reason?: string;
+}
+
+/**
+ * Recompute and verify the hash chain over the retained events (or a supplied
+ * slice). The first entry is anchored on its own `prevHash`, so verification
+ * covers the retained window rather than the whole (evicted) history.
+ */
+export function verifyGovernanceLog(
+  entries: readonly GovernanceLogEvent[] = events,
+): ChainVerification {
+  if (entries.length === 0) return { valid: true, checked: 0 };
+  let prev = entries[0].prevHash || GENESIS_HASH;
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry.prevHash !== prev) {
+      return {
+        valid: false,
+        checked: index,
+        brokenAt: entry.seq,
+        reason: `prevHash mismatch at seq ${entry.seq}`,
+      };
+    }
+    const expected = computeGovernanceHash(entry);
+    if (entry.hash !== expected) {
+      return {
+        valid: false,
+        checked: index,
+        brokenAt: entry.seq,
+        reason: `hash mismatch at seq ${entry.seq}`,
+      };
+    }
+    prev = entry.hash;
+  }
+  return { valid: true, checked: entries.length };
+}
+
+/** Current chain head + anchor, for diagnostics and external attestation. */
+export function getGovernanceChainHead(): { head: string; anchor: string; length: number } {
+  return { head: lastHash, anchor: anchorHash, length: events.length };
 }
 
 /** Single-line rendering of an event, used for console output. */
@@ -168,6 +281,7 @@ export function serializeGovernanceLog(entry: GovernanceLogEvent): string {
     `step=${entry.step}`,
     `mission=${entry.mission ?? '-'}`,
     `action="${entry.action}"`,
+    `hash=${entry.hash.slice(0, 12)}`,
     entry.detail,
   ].join(' ');
 }

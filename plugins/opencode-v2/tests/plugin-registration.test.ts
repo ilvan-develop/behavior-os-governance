@@ -167,6 +167,7 @@ const EXPECTED_TOOLS = [
   'bos_run_audit',
   'bos_select_dna',
   'bos_start_mission',
+  'bos_verify_audit_trail',
 ];
 
 describe('behavior-os plugin registration', () => {
@@ -179,7 +180,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 13 bos_* tools', async () => {
+  it('registers exactly the 14 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -191,7 +192,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(13);
+    expect(addedTools).toHaveLength(14);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -218,7 +219,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(13);
+    expect(addedTools).toHaveLength(14);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
