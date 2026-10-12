@@ -103,4 +103,14 @@ describe('governance log module', () => {
     expect(line).toContain('action="bash"');
     expect(line).toContain('Deploy requires approval');
   });
+
+  it('stamps every event with a stable per-instance identity', () => {
+    const first = appendGovernanceLog(sampleInput({ action: 'a' }));
+    const second = appendGovernanceLog(sampleInput({ action: 'b' }));
+
+    expect(first.instance).toBeTruthy();
+    // Stable within a process, so concurrent instances are distinguishable.
+    expect(first.instance).toBe(second.instance);
+    expect(serializeGovernanceLog(first)).toContain(`inst=${first.instance}`);
+  });
 });

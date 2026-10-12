@@ -36,8 +36,9 @@ function expect(condition, message) {
 /**
  * Boot the real plugin against a stubbed OpenCode host and return the handles a
  * claim needs: the registered tools, the hooks, and the on-screen notifications.
+ * Pass a freshly imported module to simulate a second, independent instance.
  */
-async function bootPlugin() {
+async function bootPlugin(pluginModule = plugin) {
   const addedTools = [];
   const toolHooks = new Map();
   const sessionHooks = new Map();
@@ -109,7 +110,7 @@ async function bootPlugin() {
     },
   };
 
-  await plugin.setup(ctx);
+  await pluginModule.setup(ctx);
 
   const byName = Object.fromEntries(addedTools.map((tool) => [tool.name, tool]));
   const runTool = async (name, input = {}) => {
@@ -365,6 +366,53 @@ const claims = [
       expect(emitted.length > 0, 'no synthetic notification was emitted for the denial');
       expect(/blocked/i.test(emitted[0].text ?? ''), 'notification does not describe the block');
       return { status: 'PASS', evidence: `synthetic: "${emitted[0].text}"` };
+    },
+  },
+  {
+    id: 'C13',
+    category: 'CONSISTENCY',
+    promise: 'Auto-mission from a prompt leaves activeMission == the opened mission',
+    async check() {
+      // Boot a *second, independent* module instance (fresh singleton + storage)
+      // so this claim reproduces the session.prompt path in isolation.
+      const fresh = await import(
+        new URL(`../plugins/opencode-v2/dist/index.js?fresh=${Date.now()}`, import.meta.url).href
+      );
+      const env = await bootPlugin(fresh.default);
+      const event = {
+        prompt: { text: 'Fix the crash in the payment service' },
+        metadata: {},
+      };
+      await env.sessionHooks.get('prompt')(event);
+      const auto = event.metadata?.behavioros?.autoMission;
+      expect(/^mission-/.test(auto ?? ''), 'prompt hook did not auto-open a mission');
+      const state = await env.runTool('bos_get_state');
+      expect(
+        state.activeMission === auto,
+        `activeMission="${state.activeMission}" != autoMission="${auto}"`,
+      );
+      return { status: 'PASS', evidence: `autoMission=${auto} == activeMission` };
+    },
+  },
+  {
+    id: 'C14',
+    category: 'OBSERVABILITY',
+    promise: 'Log entries carry a stable instance id (cross-instance divergence visible)',
+    async check(env) {
+      const log = await env.runTool('bos_get_log', { limit: 20 });
+      expect(log.entries.length > 0, 'no log entries to inspect');
+      const ids = new Set(log.entries.map((entry) => entry.instance));
+      expect(
+        log.entries.every(
+          (entry) => typeof entry.instance === 'string' && entry.instance.length > 0,
+        ),
+        'an entry is missing its instance id',
+      );
+      expect(ids.size === 1, `instance id is not stable within a process: ${[...ids].join(',')}`);
+      return {
+        status: 'PASS',
+        evidence: `instance=${[...ids][0]} across ${log.entries.length} entries`,
+      };
     },
   },
 ];

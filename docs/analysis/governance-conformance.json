@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-12T12:29:01.672Z",
+  "generatedAt": "2026-10-12T12:36:37.768Z",
   "plugin": "behavior-os",
-  "total": 12,
-  "proven": 12,
+  "total": 14,
+  "proven": 14,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1791808141665-s7nfc32kza status=pending"
+      "evidence": "activeMission=mission-1791808597733-dp8nwze30vh status=pending"
     },
     {
       "id": "C10",
@@ -88,6 +88,20 @@
       "promise": "Deny/escalate surfaces an on-screen notification (synthetic message)",
       "status": "PASS",
       "evidence": "synthetic: \"[Behavior-OS] ⛔ Blocked \"write\" — Blocked by rule: sterile-field (Block any non-approved production changes)\""
+    },
+    {
+      "id": "C13",
+      "category": "CONSISTENCY",
+      "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
+      "status": "PASS",
+      "evidence": "autoMission=mission-1791808597766-fnn4lq9u06 == activeMission"
+    },
+    {
+      "id": "C14",
+      "category": "OBSERVABILITY",
+      "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
+      "status": "PASS",
+      "evidence": "instance=p12568-uklu5 across 14 entries"
     }
   ]
 }

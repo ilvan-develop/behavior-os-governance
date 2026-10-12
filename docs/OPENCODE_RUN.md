@@ -144,7 +144,7 @@ pnpm verify:governance
 
 O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
-(pronto para CI). Cobertura atual: **12/12 claims**.
+(pronto para CI). Cobertura atual: **14/14 claims**.
 
 | Claim | Promessa | Prova |
 | --- | --- | --- |
@@ -160,6 +160,8 @@ O relatório imprime uma tabela `claims → evidência` e grava
 | C10 | Quality gates aplicam thresholds do DNA | `bos_check_quality` |
 | C11 | Learnings surgem em insights | `bos_record_learning` → `bos_get_insights` |
 | C12 | `deny`/`escalate` emite mensagem no ecrã | `session.synthetic` |
+| C13 | Auto-missão do prompt deixa `activeMission` == missão aberta | instância isolada |
+| C14 | Cada evento do log carrega um `instance` estável | divergência entre instâncias visível |
 
 ### Limites honestos (o que *não* é 100%)
 
@@ -173,8 +175,9 @@ enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. H
   `warn`/`escalate`, mas não impede execução.
 - **Reativo (exige ator):** a progressão do protocolo, ciclo de missões e auditorias só
   avançam quando alguém invoca as tools `bos_*`. Não é autónomo por si.
-- **Não provado ainda:** que *toda* ação mutadora passe pelo hook (depende do host), e a
-  consistência entre instâncias/sessões concorrentes que partilham o mesmo estado.
+- **Não provado ainda:** que *toda* ação mutadora passe pelo hook (depende do host) e a
+  coerência entre instâncias/sessões concorrentes que partilham storage mas não memória —
+  agora **observável** (`inst=p<pid>-…` em cada evento do log) mas ainda não **impedida**.
 
 Corolário: para aumentar a cobertura, adiciona-se um claim por cada nova promessa, com a
 sua verificação — não se aumenta a prosa.

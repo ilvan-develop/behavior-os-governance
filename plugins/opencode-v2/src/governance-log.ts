@@ -35,6 +35,12 @@ export interface GovernanceLogEvent {
   seq: number;
   /** ISO timestamp of the event. */
   at: string;
+  /**
+   * Identity of the process/plugin instance that produced the event. Two OpenCode
+   * sessions served by different servers share persisted storage but NOT memory,
+   * so their state can diverge; this field makes that visible on screen.
+   */
+  instance: string;
   kind: GovernanceLogKind;
   outcome: GovernanceLogOutcome;
   /** DNA pattern governing the event, or null before any DNA is active. */
@@ -49,10 +55,19 @@ export interface GovernanceLogEvent {
   detail: string;
 }
 
-export type GovernanceLogInput = Omit<GovernanceLogEvent, 'seq' | 'at'>;
+export type GovernanceLogInput = Omit<GovernanceLogEvent, 'seq' | 'at' | 'instance'>;
 
 /** Maximum number of events kept in memory (ring buffer). */
 export const GOVERNANCE_LOG_MAX = 200;
+
+/**
+ * Short, stable identity for this plugin instance. Includes the process id so
+ * events logged by two concurrent servers/instances are distinguishable — the
+ * cheapest way to expose cross-instance state divergence.
+ */
+export const GOVERNANCE_INSTANCE_ID = `p${typeof process !== 'undefined' ? process.pid : 0}-${Math.random()
+  .toString(36)
+  .slice(2, 7)}`;
 
 /** Outcomes that are additionally echoed to the server console. */
 const ECHOED_OUTCOMES: ReadonlySet<GovernanceLogOutcome> = new Set(['deny', 'escalate', 'error']);
@@ -69,6 +84,7 @@ export function appendGovernanceLog(input: GovernanceLogInput): GovernanceLogEve
   const entry: GovernanceLogEvent = {
     seq: ++sequence,
     at: new Date().toISOString(),
+    instance: GOVERNANCE_INSTANCE_ID,
     ...input,
   };
   events.push(entry);
@@ -97,6 +113,7 @@ export function clearGovernanceLog(): void {
 export function serializeGovernanceLog(entry: GovernanceLogEvent): string {
   return [
     `[Behavior-OS:LOG:${entry.kind}:${entry.outcome}]`,
+    `inst=${entry.instance}`,
     `dna=${entry.dna ?? '-'}`,
     `step=${entry.step}`,
     `mission=${entry.mission ?? '-'}`,
