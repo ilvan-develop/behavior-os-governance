@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-12T17:05:17.204Z",
+  "generatedAt": "2026-10-12T17:51:59.670Z",
   "plugin": "behavior-os",
-  "total": 17,
-  "proven": 17,
+  "total": 19,
+  "proven": 19,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1791824717047-9wkoasr6wx status=pending"
+      "evidence": "activeMission=mission-1791827519459-xd9m6z2texd status=pending"
     },
     {
       "id": "C10",
@@ -87,21 +87,21 @@
       "category": "OBSERVABILITY",
       "promise": "Deny/escalate surfaces an on-screen notification (synthetic message)",
       "status": "PASS",
-      "evidence": "synthetic: \"[Behavior-OS] ⛔ Blocked \"write\" — Blocked by rule: sterile-field (Block any non-approved production changes)\""
+      "evidence": "synthetic: \"[Behavior-OS] ⛔ Blocked \"write\" — Blocked by rule: sterile-field (Block any non-approved production changes)\nFirm block: reshape the action so the rule no longer matches, or select another DNA pattern (this deny is final and cannot be auto-approved).\""
     },
     {
       "id": "C13",
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1791824717084-2yckb120jgr == activeMission"
+      "evidence": "autoMission=mission-1791827519508-6tclhd09gn == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p6468-rcqye across 14 entries"
+      "evidence": "instance=p1356-kdi1l across 14 entries"
     },
     {
       "id": "C15",
@@ -123,6 +123,20 @@
       "promise": "Concurrent persists in one instance are serialized (single-flight): monotonic revisions, no lost write",
       "status": "PASS",
       "evidence": "revs=[10,11,12] missions=[Conformance mission,race-a,race-b]"
+    },
+    {
+      "id": "C18",
+      "category": "OBSERVABILITY",
+      "promise": "The governance log survives a restart (persisted tail, monotonic sequence)",
+      "status": "PASS",
+      "evidence": "restored=19 seq 19->21"
+    },
+    {
+      "id": "C19",
+      "category": "CONSISTENCY",
+      "promise": "An equal-revision collision from another writer is detected (recoverable without CAS)",
+      "status": "PASS",
+      "evidence": "equal-rev foreign writer detected; nextRevision=6"
     }
   ]
 }

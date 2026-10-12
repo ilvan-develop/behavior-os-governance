@@ -144,7 +144,7 @@ pnpm verify:governance
 
 O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
-(pronto para CI). Cobertura atual: **17/17 claims**.
+(pronto para CI). Cobertura atual: **19/19 claims**.
 
 | Claim | Promessa | Prova |
 | --- | --- | --- |
@@ -165,6 +165,8 @@ O relatório imprime uma tabela `claims → evidência` e grava
 | C15 | Instâncias concorrentes fazem *adopt-then-write* | revisões monotónicas, sem clobber (`storage-sync`) |
 | C16 | Merge de conflito preserva itens locais | união por id, sem updates perdidos (`mergeSnapshots`) |
 | C17 | Persists concorrentes na mesma instância são serializados | single-flight (`persistQueue`) + verificação pós-escrita com retry (`detectOvertake`) |
+| C18 | O log de governação sobrevive a um restart | tail do log persistido no snapshot e reinjetado no arranque; sequência retomada (monotónica) |
+| C19 | Uma colisão de revisão igual (outro writer) é detetada | `detectOvertake` considera um writer estrangeiro na mesma revisão; retry com adopt+merge forçado |
 
 ### Limites honestos (o que *não* é 100%)
 
@@ -186,7 +188,7 @@ enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. H
   unidas por `id`, DNA/`activeMission` do mais recente com fallback, passo máximo
   (C16). Persists concorrentes **na mesma instância** são serializados por uma fila
   single-flight (`persistQueue`) com verificação pós-escrita e retry em caso de
-  overtake (`detectOvertake`) — C17. Falta ainda transação atómica de storage (lock/compare-and-swap real no
+  overtake (`detectOvertake`) — C17. Desde então: o log de governação é persistido e restaurado (C18) e uma colisão de revisão igual entre processos é detetada e recuperada por merge forçado (C19). Falta ainda transação atómica de storage (lock/compare-and-swap real no
   backend) e política de resolução para *mesmo* item editado concorrentemente
   (hoje ganha o snapshot mais recente).
 

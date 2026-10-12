@@ -58,6 +58,8 @@ describe('storage-sync', () => {
 
     it('keeps revisions strictly monotonic even when two writers race', () => {
       // Racing on the same revision: each write must still advance the counter.
+      // The equal-revision collision itself is recovered by the caller with a
+      // forced adopt+merge retry, so this pure decision stays strictly-newer.
       const a = planPersist({
         localRevision: 3,
         instanceId: 'inst-A',
@@ -179,6 +181,17 @@ describe('storage-sync', () => {
     it('accepts our own write and an older store', () => {
       expect(detectOvertake(4, 4).overtaken).toBe(false);
       expect(detectOvertake(5, 4).overtaken).toBe(false);
+    });
+
+    it('treats an equal revision from another writer as an overtake', () => {
+      expect(detectOvertake(5, 5, 'rival-instance', 'me').overtaken).toBe(true);
+    });
+
+    it('does not treat our own equal-revision write as an overtake', () => {
+      expect(detectOvertake(5, 5, 'me', 'me').overtaken).toBe(false);
+      // No writer recorded (legacy envelope): cannot attribute the write, so
+      // keep the conservative, pre-existing behaviour.
+      expect(detectOvertake(5, 5, null, 'me').overtaken).toBe(false);
     });
   });
 });

@@ -15,10 +15,12 @@ import {
 } from './governance.js';
 import {
   appendGovernanceLog,
+  exportGovernanceLog,
   GOVERNANCE_INSTANCE_ID,
   type GovernanceLogKind,
   type GovernanceLogOutcome,
   getGovernanceLog,
+  seedGovernanceLog,
 } from './governance-log.js';
 import {
   detectOvertake,
@@ -81,14 +83,29 @@ async function persistStateOnce(ctx: Context): Promise<void> {
     // Post-write verification: a plain get/set backend has no CAS, so a
     // concurrent instance can still overtake us between our read and write.
     const after = await storage.get(STORAGE_KEY);
-    const verify = detectOvertake(storageRevision, readStoredManifest(after).revision);
+    const storedAfter = readStoredManifest(after);
+    const verify = detectOvertake(
+      storageRevision,
+      storedAfter.revision,
+      storedAfter.writer,
+      GOVERNANCE_INSTANCE_ID,
+    );
     if (verify.overtaken) {
       logRestoreWarn(
         `Overtaken after write: wrote rev=${storageRevision}, store has rev=${verify.storedRevision}; retrying adopt+merge`,
       );
-      await writeSnapshot(storage);
+      // Force the merge: on an equal-revision collision the store holds a
+      // foreign snapshot that this pure decision would not adopt (it is not
+      // strictly newer), yet it must be merged rather than overwritten.
+      await writeSnapshot(storage, true);
       const afterRetry = await storage.get(STORAGE_KEY);
-      const retry = detectOvertake(storageRevision, readStoredManifest(afterRetry).revision);
+      const storedRetry = readStoredManifest(afterRetry);
+      const retry = detectOvertake(
+        storageRevision,
+        storedRetry.revision,
+        storedRetry.writer,
+        GOVERNANCE_INSTANCE_ID,
+      );
       if (retry.overtaken) {
         logRestoreWarn(
           `Still overtaken after retry (store rev=${retry.storedRevision}); giving up this round — backend CAS required for atomicity`,
@@ -101,7 +118,10 @@ async function persistStateOnce(ctx: Context): Promise<void> {
 }
 
 /** Read -> adopt/merge if a newer foreign snapshot exists -> write the stamp. */
-async function writeSnapshot(storage: NonNullable<Context['storage']>): Promise<void> {
+async function writeSnapshot(
+  storage: NonNullable<Context['storage']>,
+  forceAdopt = false,
+): Promise<void> {
   if (!behaviorOS) return;
   const existing = await storage.get(STORAGE_KEY);
   const manifest = readStoredManifest(existing);
@@ -111,7 +131,7 @@ async function writeSnapshot(storage: NonNullable<Context['storage']>): Promise<
     storedRevision: manifest.revision,
     storedWriter: manifest.writer,
   });
-  if (plan.adopt) {
+  if (plan.adopt || forceAdopt) {
     // Adopt the newer foreign snapshot *by merge*: item collections are
     // unioned by id so local-only work is preserved, and the newer snapshot
     // wins identical items. Never discard the local session blindly.
@@ -129,6 +149,9 @@ async function writeSnapshot(storage: NonNullable<Context['storage']>): Promise<
     ...behaviorOS.exportState(),
     revision: storageRevision,
     writer: GOVERNANCE_INSTANCE_ID,
+    // Carry a bounded tail of the governance log so observability survives a
+    // restart instead of starting blank.
+    log: exportGovernanceLog(),
   };
   await storage.set(STORAGE_KEY, toStorageJson(envelope));
 }
@@ -159,6 +182,9 @@ async function restorePersistedState(ctx: Context): Promise<boolean> {
     const restored = getBehaviorOS().importState(raw as unknown as BehaviorOSSnapshot);
     if (restored) {
       storageRevision = revision;
+      // Bring the persisted governance-log tail back into this process so the
+      // log continues across restarts.
+      seedGovernanceLog((raw as { log?: unknown }).log);
       console.log('[Behavior-OS] Restored persisted state from ctx.storage');
     }
     return restored;
@@ -170,6 +196,18 @@ async function restorePersistedState(ctx: Context): Promise<boolean> {
 
 /** Tools that can mutate state or shell out and therefore need governance. */
 const GOVERNED_TOOL = /bash|write|edit|patch|apply|shell|mcp__/i;
+
+/**
+ * User-facing guidance appended to a firm block. A deny is final (the auto
+ * flag does not override it), so the message must say what the operator can
+ * actually do.
+ */
+const BLOCK_HINT =
+  'Firm block: reshape the action so the rule no longer matches, or select another DNA pattern (this deny is final and cannot be auto-approved).';
+
+/** User-facing guidance appended to a soft gate (escalation). */
+const ASK_HINT =
+  'Soft gate: approve it in the host, or select a warn-only DNA pattern (e.g. lean-factory) to stop these prompts.';
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -791,14 +829,14 @@ export default Plugin.define({
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
           await notify(
             event.sessionID,
-            `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}`,
+            `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}\n${BLOCK_HINT}`,
           );
         } else if (decision.verdict === 'escalate' && event.effect !== 'deny') {
           event.effect = 'ask';
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
           await notify(
             event.sessionID,
-            `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}`,
+            `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}\n${ASK_HINT}`,
           );
         }
       } catch (error) {

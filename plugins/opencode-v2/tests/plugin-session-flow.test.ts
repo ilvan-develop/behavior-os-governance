@@ -352,4 +352,102 @@ describe('behavior-os session flow', () => {
     );
     expect(overtakes.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('carries the governance log across a restart', async () => {
+    const storageData = new Map<string, unknown>();
+
+    const pluginA = await loadFreshPlugin();
+    const a = createContext(storageData);
+    await pluginA.setup(a.ctx as never);
+    await runTool(a.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    await runTool(a.addedTools, 'bos_create_mission', {
+      title: 'log-carrier',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    const before = JSON.parse(
+      (await runTool(a.addedTools, 'bos_get_log', { limit: 50 })).content,
+    ) as { entries: Array<{ seq: number; instance: string }> };
+    expect(before.entries.length).toBeGreaterThan(0);
+    const previousInstances = new Set(before.entries.map((entry) => entry.instance));
+    const highestSeq = Math.max(...before.entries.map((entry) => entry.seq));
+
+    // Restart: fresh module state sharing the same storage. The persisted log
+    // tail must be restored instead of starting blank.
+    const pluginB = await loadFreshPlugin();
+    const b = createContext(storageData);
+    await pluginB.setup(b.ctx as never);
+
+    const restored = JSON.parse(
+      (await runTool(b.addedTools, 'bos_get_log', { limit: 50 })).content,
+    ) as { entries: Array<{ seq: number; instance: string }> };
+    // History written by the previous instance is visible again after restart.
+    const restoredInstances = new Set(restored.entries.map((entry) => entry.instance));
+    for (const instance of previousInstances) {
+      expect(restoredInstances.has(instance)).toBe(true);
+    }
+
+    // A new action in the restarted process appends to the restored history:
+    // its sequence number is strictly higher, proving the counter resumed.
+    await runTool(b.addedTools, 'bos_create_mission', {
+      title: 'after-restart',
+      type: 'feature',
+      priority: 'high',
+    });
+    const after = JSON.parse(
+      (await runTool(b.addedTools, 'bos_get_log', { limit: 50 })).content,
+    ) as { entries: Array<{ seq: number; instance: string }> };
+    expect(Math.max(...after.entries.map((entry) => entry.seq))).toBeGreaterThan(highestSeq);
+    const firstInstance = [...previousInstances][0];
+    expect(after.entries.some((entry) => entry.instance !== firstInstance)).toBe(true);
+  });
+
+  it('recovers from an equal-revision collision without losing the rival write', async () => {
+    const storageData = new Map<string, unknown>();
+    const pluginA = await loadFreshPlugin();
+    const a = createContext(storageData);
+    const baseSet = a.ctx.storage.set;
+    let collided = false;
+    a.ctx.storage.set = async (key, value) => {
+      await baseSet(key, value);
+      if (collided) return;
+      const envelope = value as
+        | { revision?: number; missions?: Array<{ id: string; title: string }> }
+        | undefined;
+      if (typeof envelope?.revision !== 'number') return;
+      collided = true;
+      // A rival writes at the *same* revision, with different content: only the
+      // writer stamped on the envelope reveals the collision.
+      await baseSet(key, {
+        ...envelope,
+        writer: 'rival-instance',
+        missions: [...(envelope.missions ?? []), { id: 'rival-1', title: 'from-rival' }],
+      });
+    };
+    await pluginA.setup(a.ctx as never);
+
+    await runTool(a.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    await runTool(a.addedTools, 'bos_create_mission', {
+      title: 'mine-1',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    // The retry must adopt+merge the equal-revision rival snapshot, not clobber it.
+    const stored = storageData.get(STORAGE_KEY) as {
+      missions: Array<{ title: string }>;
+      writer: string;
+    };
+    expect(stored.missions.map((mission) => mission.title).sort()).toEqual([
+      'from-rival',
+      'mine-1',
+    ]);
+    expect(stored.writer).not.toBe('rival-instance');
+
+    const log = JSON.parse((await runTool(a.addedTools, 'bos_get_log')).content) as {
+      entries: Array<{ kind: string; detail: string }>;
+    };
+    expect(log.entries.some((entry) => /Overtaken after write/.test(entry.detail))).toBe(true);
+  });
 });

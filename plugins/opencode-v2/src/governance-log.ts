@@ -61,6 +61,13 @@ export type GovernanceLogInput = Omit<GovernanceLogEvent, 'seq' | 'at' | 'instan
 export const GOVERNANCE_LOG_MAX = 200;
 
 /**
+ * Maximum number of recent events embedded in a persisted snapshot, so a
+ * restarted process can still show what happened before it started. Smaller
+ * than the in-memory cap on purpose, to keep the envelope compact.
+ */
+export const GOVERNANCE_LOG_PERSIST_LIMIT = 50;
+
+/**
  * Short, stable identity for this plugin instance. Includes the process id so
  * events logged by two concurrent servers/instances are distinguishable — the
  * cheapest way to expose cross-instance state divergence.
@@ -107,6 +114,49 @@ export function getGovernanceLog(limit = 50): GovernanceLogEvent[] {
 export function clearGovernanceLog(): void {
   events = [];
   sequence = 0;
+}
+
+/**
+ * The most recent events (oldest first) to embed in a persisted snapshot. A
+ * bounded tail keeps the envelope small while still showing recent history
+ * after a restart.
+ */
+export function exportGovernanceLog(limit = GOVERNANCE_LOG_PERSIST_LIMIT): GovernanceLogEvent[] {
+  return events.slice(-Math.max(1, Math.floor(limit)));
+}
+
+/**
+ * Restore previously persisted events into the in-memory buffer after a
+ * restart. Entries are validated defensively (the snapshot may come from an
+ * older build) and the sequence counter resumes after the highest restored
+ * `seq`, so freshly appended events stay monotonic. Returns how many entries
+ * were restored.
+ */
+export function seedGovernanceLog(input: unknown): number {
+  if (!Array.isArray(input) || input.length === 0) return 0;
+  const restored: GovernanceLogEvent[] = [];
+  for (const item of input) {
+    const entry = (item ?? {}) as Partial<GovernanceLogEvent>;
+    if (typeof entry.seq !== 'number' || typeof entry.at !== 'string') continue;
+    if (typeof entry.detail !== 'string') continue;
+    restored.push({
+      seq: entry.seq,
+      at: entry.at,
+      instance: typeof entry.instance === 'string' ? entry.instance : 'unknown',
+      kind: (entry.kind ?? 'tool') as GovernanceLogKind,
+      outcome: (entry.outcome ?? 'info') as GovernanceLogOutcome,
+      dna: typeof entry.dna === 'string' ? entry.dna : null,
+      step: typeof entry.step === 'number' ? entry.step : 0,
+      mission: typeof entry.mission === 'string' ? entry.mission : null,
+      action: typeof entry.action === 'string' ? entry.action : '',
+      detail: entry.detail,
+    });
+  }
+  if (restored.length === 0) return 0;
+  restored.sort((a, b) => a.seq - b.seq);
+  events = restored.slice(-GOVERNANCE_LOG_MAX);
+  sequence = Math.max(sequence, ...restored.map((entry) => entry.seq));
+  return events.length;
 }
 
 /** Single-line rendering of an event, used for console output. */

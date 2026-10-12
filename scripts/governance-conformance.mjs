@@ -573,6 +573,80 @@ const claims = [
       };
     },
   },
+  {
+    id: 'C18',
+    category: 'OBSERVABILITY',
+    promise: 'The governance log survives a restart (persisted tail, monotonic sequence)',
+    async check() {
+      const shared = new Map();
+      const first = await bootPlugin(plugin, shared);
+      await first.runTool('bos_select_dna', { pattern: 'surgical-team' });
+      await first.runTool('bos_create_mission', {
+        title: 'log-carrier',
+        type: 'feature',
+        priority: 'high',
+      });
+      const before = await first.runTool('bos_get_log', { limit: 50 });
+      expect(before.entries.length > 0, 'no log entries before the restart');
+      const previous = new Set(before.entries.map((entry) => entry.instance));
+      const highest = Math.max(...before.entries.map((entry) => entry.seq));
+
+      // A brand-new module instance sharing the same storage: a restart.
+      const fresh = (
+        await import(
+          new URL(`../plugins/opencode-v2/dist/index.js?restart=${Date.now()}`, import.meta.url)
+            .href
+        )
+      ).default;
+      const second = await bootPlugin(fresh, shared);
+      const restored = await second.runTool('bos_get_log', { limit: 50 });
+      const restoredInstances = new Set(restored.entries.map((entry) => entry.instance));
+      for (const instance of previous) {
+        expect(restoredInstances.has(instance), `log entry from ${instance} was lost on restart`);
+      }
+      await second.runTool('bos_create_mission', {
+        title: 'after-restart',
+        type: 'feature',
+        priority: 'high',
+      });
+      const after = await second.runTool('bos_get_log', { limit: 50 });
+      const maxSeq = Math.max(...after.entries.map((entry) => entry.seq));
+      expect(maxSeq > highest, `sequence did not advance after restart: ${maxSeq} <= ${highest}`);
+      return {
+        status: 'PASS',
+        evidence: `restored=${restored.entries.length} seq ${highest}->${maxSeq}`,
+      };
+    },
+  },
+  {
+    id: 'C19',
+    category: 'CONSISTENCY',
+    promise:
+      'An equal-revision collision from another writer is detected (recoverable without CAS)',
+    async check() {
+      const { detectOvertake, planPersist } = await import(
+        new URL('../plugins/opencode-v2/dist/storage-sync.js', import.meta.url).href
+      );
+      expect(detectOvertake(5, 6).overtaken, 'a higher stored revision was not detected');
+      expect(
+        detectOvertake(5, 5, 'rival', 'me').overtaken,
+        'equal-revision collision not detected',
+      );
+      expect(!detectOvertake(5, 5, 'me', 'me').overtaken, 'our own equal write was misflagged');
+      expect(!detectOvertake(5, 5, null, 'me').overtaken, 'a legacy stamp was misflagged');
+      const plan = planPersist({
+        localRevision: 5,
+        instanceId: 'me',
+        storedRevision: 5,
+        storedWriter: 'rival',
+      });
+      expect(plan.nextRevision === 6, 'the collision did not advance the revision');
+      return {
+        status: 'PASS',
+        evidence: `equal-rev foreign writer detected; nextRevision=${plan.nextRevision}`,
+      };
+    },
+  },
 ];
 
 function pad(value, width) {

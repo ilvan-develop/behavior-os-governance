@@ -40,7 +40,8 @@ export interface PersistPlan {
  *
  * - `adopt` is true only when the store holds a *foreign* writer's snapshot with
  *   a strictly higher revision than the local one (a newer commit we have not
- *   seen).
+ *   seen). An *equal* revision from a rival is a collision that the caller
+ *   recovers with a forced adopt+merge retry, not part of this pure decision.
  * - `nextRevision` is `max(local, stored) + 1`, so revisions are monotonic even
  *   when two writers race.
  */
@@ -70,13 +71,24 @@ export interface OvertakeReport {
  * Post-write verification over a plain get/set backend. If the store already
  * holds a *higher* revision than the one we just wrote, another instance wrote
  * inside our read→write window and the caller should retry with adopt+merge.
- * An equal revision means the store still shows our own write — an exactly
- * simultaneous equal-revision collision is indistinguishable from our own
- * write without a storage-side compare-and-swap, and that residual race is
- * documented as the irreducible limit of a get/set storage API.
+ *
+ * An equal revision written by a *different* writer means we collided with a
+ * rival at the same revision and the store now shows their value. That is
+ * detectable, and recoverable via adopt+merge, even without a storage-side
+ * compare-and-swap, so it is treated as an overtake as well. The only residual
+ * race left is a rival write that never becomes observable in our read-back
+ * window, which no get/set API can eliminate.
  */
-export function detectOvertake(wroteRevision: number, storedRevision: number): OvertakeReport {
-  return { overtaken: storedRevision > wroteRevision, storedRevision };
+export function detectOvertake(
+  wroteRevision: number,
+  storedRevision: number,
+  storedWriter: string | null = null,
+  instanceId: string | null = null,
+): OvertakeReport {
+  const higher = storedRevision > wroteRevision;
+  const collision =
+    storedRevision === wroteRevision && !!storedWriter && storedWriter !== instanceId;
+  return { overtaken: higher || collision, storedRevision };
 }
 
 // ============================================================
