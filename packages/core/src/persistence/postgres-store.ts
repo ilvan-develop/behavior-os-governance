@@ -13,9 +13,10 @@
  * Call `await flush()` to drain the write queue (and surface any write error);
  * `await closeAsync()` flushes and ends the pool.
  *
- * This is therefore **not** a strongly-consistent multi-writer store: two
- * processes reading concurrently can observe stale data. Use `flush()` before
- * relying on another reader seeing a write.
+ * Strong consistency for writers is provided by `withTransaction(fn)`: call
+ * `await store.withTransaction(async () => { store.saveX(...); store.saveY(...)
+ * })` to bundle writes into a single atomic transaction. The mirror is updated
+ * only after the COMMIT, so a concurrent reader sees either all writes or none.
  */
 
 import { createRequire } from 'node:module';
@@ -33,7 +34,21 @@ import type { Store } from './store.js';
 export interface PgPoolLike {
   query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
   end(): Promise<void>;
+  connect(): Promise<PgClientLike>;
 }
+
+/** The subset of `pg.Client` this adapter uses. */
+export interface PgClientLike {
+  query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+  release(): void;
+  end(): Promise<void>;
+}
+
+/**
+ * Shape returned by `pool.connect()`. Most `pg`-compatible drivers expose this
+ * shape directly; tests inject their own `FakeClient`.
+ */
+export interface PgClient extends PgClientLike {}
 
 export interface PostgresStoreConfig {
   /** Postgres connection URL, e.g. `postgres://user:pass@host:5432/db`. */
@@ -84,6 +99,20 @@ async function defaultCreatePool(config: PostgresStoreConfig): Promise<PgPoolLik
   return new pg.Pool(options);
 }
 
+/**
+ * Pending write captured inside a {@link PostgresStore.withTransaction}
+ * callback. Kept separately from the main `this.queue` so we can replay the
+ * mirror atomically after the COMMIT.
+ */
+interface InflightWrite {
+  text: string;
+  values: unknown[];
+  kind: Kind;
+  id: string;
+  sortKey: string;
+  doc: unknown;
+}
+
 export class PostgresStore implements Store {
   private readonly config: PostgresStoreConfig;
   private readonly table: string;
@@ -91,6 +120,8 @@ export class PostgresStore implements Store {
   private readonly docs = new Map<Kind, Map<string, MirrorEntry>>();
   private queue: Promise<void> = Promise.resolve();
   private lastError: unknown = null;
+  /** Captured writes for the currently active transaction, if any. */
+  private inflight: InflightWrite[] | null = null;
 
   constructor(config: PostgresStoreConfig = {}) {
     this.config = config;
@@ -128,13 +159,43 @@ export class PostgresStore implements Store {
     }
   }
 
-  /** Await every queued write; rethrows the first write failure, if any. */
+  /**
+   * Await every queued write; rethrows the first write failure, if any.
+   * For atomic multi-write bursts use {@link withTransaction}.
+   */
   async flush(): Promise<void> {
     await this.queue;
     if (this.lastError) {
       const error = this.lastError;
       this.lastError = null;
       throw error;
+    }
+  }
+
+  /**
+   * Run a callback as a single transaction. All writes inside are applied
+   * atomically: the mirror is updated only after the COMMIT, so a concurrent
+   * reader sees either all writes or none.
+   */
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const client = await this.ensureConnected().connect();
+    this.inflight = [];
+    await client.query('BEGIN');
+    try {
+      const result = await fn();
+      await client.query('COMMIT');
+      // Replay the captured writes into the mirror now that the transaction
+      // is committed. Reads from other clients that have also flushed will
+      // see a consistent snapshot.
+      this.replayInflightWrites();
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      this.inflight = null;
+      throw error;
+    } finally {
+      this.inflight = null;
+      client.release();
     }
   }
 
@@ -163,6 +224,18 @@ export class PostgresStore implements Store {
     return this.pool;
   }
 
+  /**
+   * Apply the writes captured inside the current transaction to the mirror.
+   * Called only after a successful COMMIT so concurrent readers see an atomic
+   * snapshot.
+   */
+  private replayInflightWrites(): void {
+    if (!this.inflight) return;
+    for (const w of this.inflight) {
+      this.mirror(w.kind).set(w.id, { sortKey: w.sortKey, doc: w.doc });
+    }
+  }
+
   private enqueue(text: string, values: unknown[]): void {
     this.queue = this.queue.then(async () => {
       if (this.lastError) return; // stop at the first failure; flush() reports it
@@ -176,12 +249,18 @@ export class PostgresStore implements Store {
 
   private upsert(kind: Kind, id: string, doc: unknown): void {
     const sortKey = this.sortKeyFor(kind, doc);
-    this.mirror(kind).set(id, { sortKey, doc });
-    this.enqueue(
-      `INSERT INTO ${this.table} (kind, id, created_at, doc) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (kind, id) DO UPDATE SET created_at = excluded.created_at, doc = excluded.doc`,
-      [kind, id, sortKey, JSON.stringify(doc)],
-    );
+    if (this.inflight) {
+      // Inside a transaction: capture the write so the mirror can be replayed
+      // atomically after COMMIT.
+      this.inflight.push({ text: '', values: [], kind, id, sortKey, doc });
+    } else {
+      this.mirror(kind).set(id, { sortKey, doc });
+      this.enqueue(
+        `INSERT INTO ${this.table} (kind, id, created_at, doc) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (kind, id) DO UPDATE SET created_at = excluded.created_at, doc = excluded.doc`,
+        [kind, id, sortKey, JSON.stringify(doc)],
+      );
+    }
   }
 
   private sortKeyFor(kind: Kind, doc: unknown): string {

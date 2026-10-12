@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BehaviorOS } from '../src/engine/behavior-os.js';
-import { type PgPoolLike, PostgresStore } from '../src/persistence/postgres-store.js';
+import {
+  type PgClient,
+  type PgPoolLike,
+  PostgresStore,
+} from '../src/persistence/postgres-store.js';
 import type { Store } from '../src/persistence/store.js';
 
 interface FakeRow {
@@ -10,15 +14,40 @@ interface FakeRow {
   doc: string;
 }
 
-/** Minimal in-memory stand-in for `pg.Pool`, so no driver or server is needed. */
+/** Minimal in-memory stand-in for `pg.Client`. */
+class FakeClient implements PgClient {
+  readonly queries: string[] = [];
+  released = false;
+  failWith: Error | null = null;
+
+  async query(text: string): Promise<{ rows: Array<Record<string, unknown>> }> {
+    this.queries.push(text);
+    const trimmed = text.trim().toUpperCase();
+    if (trimmed === 'BEGIN') return { rows: [] };
+    if (trimmed === 'COMMIT') return { rows: [] };
+    if (trimmed === 'ROLLBACK') return { rows: [] };
+    if (this.failWith) throw this.failWith;
+    return { rows: [] };
+  }
+
+  release(): void {
+    this.released = true;
+  }
+
+  async end(): Promise<void> {}
+}
+
+/** Minimal in-memory stand-in for `pg.Pool` that delegates to FakeClient. */
 class FakePool implements PgPoolLike {
   readonly rows = new Map<string, FakeRow>();
   readonly queries: string[] = [];
   ended = false;
+  client: FakeClient | null = null;
   failWith: Error | null = null;
 
   async query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
     this.queries.push(text);
+    const trimmed = text.trim().toUpperCase();
     if (this.failWith) throw this.failWith;
     if (/^\s*INSERT/i.test(text) && values) {
       const [kind, id, createdAt, doc] = values as [string, string, string, string];
@@ -29,6 +58,12 @@ class FakePool implements PgPoolLike {
       return { rows: Array.from(this.rows.values()) as unknown as Array<Record<string, unknown>> };
     }
     return { rows: [] };
+  }
+
+  async connect(): Promise<FakeClient> {
+    const client = new FakeClient();
+    this.client = client;
+    return client;
   }
 
   async end(): Promise<void> {
@@ -150,6 +185,94 @@ describe('PostgresStore', () => {
       expect(String(error)).toContain('pg');
     }
   });
+
+  it('wraps a callback in BEGIN / COMMIT and replays the mirror atomically', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    // Clear mirror so we can verify atomicity.
+    store['docs'].clear();
+
+    await store.withTransaction(async () => {
+      store.setMeta('k1', 'v1');
+      store.setMeta('k2', 'v2');
+    });
+
+    const client = pool.client!;
+    expect(client.queries).toContain('BEGIN');
+    expect(client.queries).toContain('COMMIT');
+    expect(client.released).toBe(true);
+    // Both writes are visible in the mirror after commit.
+    expect(store.getMeta('k1')).toBe('v1');
+    expect(store.getMeta('k2')).toBe('v2');
+  });
+
+  it('rolls back the transaction and does NOT expose partial writes to the mirror', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    // Seed one write outside the transaction so we can detect partial writes.
+    store.setMeta('base', 'seed');
+    await store.flush();
+    expect(store.getMeta('base')).toBe('seed');
+
+    await expect(
+      store.withTransaction(async () => {
+        store.setMeta('a', '1');
+        store.setMeta('b', '2');
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+
+    const client = pool.client!;
+    expect(client.queries).toContain('BEGIN');
+    expect(client.queries).toContain('ROLLBACK');
+    // Partial writes must NOT leak into the mirror.
+    expect(store.getMeta('a')).toBeNull();
+    expect(store.getMeta('b')).toBeNull();
+    // The base seed (written outside the transaction) must still be there.
+    expect(store.getMeta('base')).toBe('seed');
+  });
+
+  it('is the right shape for atomic multi-write bursts (missions + decisions)', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    await store.withTransaction(async () => {
+      store.saveMission(sampleMission('m1', '2026-01-01T00:00:00Z'));
+      store.saveDecision({
+        id: 'd1',
+        subject: 'ship',
+        policy: 'majority',
+        outcome: 'approved',
+        quorum: 1,
+        quorumMet: true,
+        approve: 1,
+        reject: 0,
+        abstain: 0,
+        participatingWeight: 1,
+        votes: [],
+        decidedBy: [],
+        reasons: [],
+        timestamp: new Date().toISOString(),
+      } as never);
+    });
+    // Both are visible after commit.
+    expect(store.listMissions().map((m) => m.id)).toEqual(['m1']);
+    expect(store.listDecisions().map((d) => d.id)).toEqual(['d1']);
+  });
+
+  it('implements Store.withTransaction and Store.closeAsync', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+    expect(typeof store.withTransaction).toBe('function');
+    expect(typeof store.closeAsync).toBe('function');
+    await store.closeAsync();
+  });
 });
 
 describe('BehaviorOS with an injected store', () => {
@@ -187,6 +310,22 @@ describe('BehaviorOS with an injected store', () => {
     expect(bos.hasPersistence()).toBe(true);
     bos.closeStore();
     expect(bos.hasPersistence()).toBe(false);
+  });
+
+  it('uses withTransaction inside persistAll for atomic multi-entity saves', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    const bos = new BehaviorOS({ persistence: { store } });
+    bos.createMission({ title: 'm', type: 'feature', priority: 'low' });
+    bos.registerAgent({ id: 'a1', type: 'agent', status: 'active' } as never);
+    await bos.persistAll();
+
+    // After persistAll, both entities are in the mirror.
+    expect(bos.listMissions().map((m) => m.title)).toEqual(['m']);
+    expect(bos.listAgents()).toHaveLength(1);
+    expect(pool.client?.released).toBe(true);
   });
 });
 

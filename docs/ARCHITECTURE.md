@@ -151,13 +151,18 @@ See `packages/core/src/persistence/sqlite-store.ts`.
 
 **Postgres (optional).** `PostgresStore` stores every document in one table with
 a `kind` discriminator. `pg` is **not** a dependency of this package — it is
-resolved at `connect()` time, so an SQLite-only project never installs a driver.
-Because `Store` is synchronous and Postgres is not, the adapter keeps an
-in-memory mirror: reads come from the mirror loaded at `connect()` and writes are
-written through asynchronously. `await flush()` drains the queue (and rethrows
-the first write error); `await closeAsync()` flushes and ends the pool. It is
-**not** a strongly-consistent multi-writer store — a concurrent reader can see
-stale data until you flush.
+resolved at `connect()` time via `createRequire`, so an SQLite-only project never
+installs a driver. Because `Store` is synchronous and Postgres is not, the
+adapter keeps an in-memory mirror: reads come from the mirror loaded at
+`connect()` and writes are written through asynchronously. `await flush()`
+drains the queue (and rethrows the first write error); `await closeAsync()`
+flushes and ends the pool.
+
+Strong consistency for writers is provided by `Store.withTransaction(fn)`: the
+callback runs inside `BEGIN` / `COMMIT` / `ROLLBACK` on a dedicated connection,
+and the mirror is updated *only* after the COMMIT succeeds, so a concurrent
+reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
+`withTransaction` automatically.
 
 ## Integration Points
 

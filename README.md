@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-268%2B-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-366%2B-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -165,17 +165,19 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 12 Tools + 2 Resources
+### MCP Server — 15 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
 | Category | Tools |
 |---|---|
-| **Governance** | `bos_evaluate_governance`, `bos_select_dna`, `bos_list_dna` |
+| **Governance** | `bos_select_dna`, `bos_list_dna`, `bos_evaluate_governance`, `bos_preflight` |
 | **Mission** | `bos_create_mission`, `bos_start_mission`, `bos_list_missions` |
 | **Quality** | `bos_check_quality`, `bos_run_audit` |
+| **Decision** | `bos_decide` |
+| **Evolution** | `bos_evolution` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
-| **Status** | `bos_get_status`, `bos_get_state` |
+| **Status** | `bos_get_status`, `bos_get_state`, `bos_verify_audit_trail` |
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
@@ -226,7 +228,7 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 | Metric | Value |
 |---|---|
 | Test files (`*.test.ts`) | 45 |
-| Test cases (`it`/`test` blocks) | 416 |
+| Test cases (`it`/`test` blocks) | 366 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |

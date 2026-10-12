@@ -692,12 +692,19 @@ export class BehaviorOS {
     }
   }
 
-  /** Persist all current in-memory state to the store (no-op without one). */
-  persistAll(): void {
+  /**
+   * Persist all current in-memory state to the store (no-op without one). Uses
+   * the store's {@link Store.withTransaction} so that writes are atomic when the
+   * store supports transactions (e.g. `PostgresStore`). Await this call for
+   * stores backed by connection pools.
+   */
+  async persistAll(): Promise<void> {
     if (!this.store) return;
-    for (const mission of this.getMissionEngine().snapshot()) this.store.saveMission(mission);
-    for (const event of this.getLearningEngine().snapshot()) this.store.saveLearning(event);
-    for (const agent of this.agents.values()) this.store.saveAgent(agent);
+    await this.store.withTransaction(async () => {
+      for (const mission of this.getMissionEngine().snapshot()) this.store!.saveMission(mission);
+      for (const event of this.getLearningEngine().snapshot()) this.store!.saveLearning(event);
+      for (const agent of this.agents.values()) this.store!.saveAgent(agent);
+    });
   }
 
   /** Read persisted audit reports, newest first. Empty without a store. */

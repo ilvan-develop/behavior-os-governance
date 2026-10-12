@@ -323,7 +323,26 @@ export class SqliteStore implements Store {
     return row ? String((row as { value: unknown }).value) : null;
   }
 
+  /** Run a callback as a single transaction. Wraps in BEGIN / COMMIT / ROLLBACK. */
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    this.db.exec('BEGIN');
+    try {
+      const result = await fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Flush and close immediately. For SQLite this is synchronous; callers may
+   *  also await `closeAsync()`. */
   close(): void {
     this.db.close();
+  }
+
+  async closeAsync(): Promise<void> {
+    this.close();
   }
 }

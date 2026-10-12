@@ -48,7 +48,7 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
 | SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
-| Persistência plugável + Postgres remoto | ✅ com ressalvas | Interface `Store` sincronizada; `SqliteStore` é o default. `PostgresStore` é opcional (`pg` resolvido só no `connect()`, **não** é dependência), com espelho em memória + write-through assíncrono (`flush()`/`closeAsync()`). **Não** é consistente para múltiplos escritores: um leitor concorrente pode ver dados antigos até ao `flush()`. |
+| Persistência plugável + Postgres remoto | ✅ com ressalvas | Interface `Store` sincronizada; `SqliteStore` é o default. `PostgresStore` é opcional (`pg` resolvido só no `connect()`, **não** é dependência), com espelho em memória + write-through assíncrono (`flush()`/`closeAsync()`). Forte consistência para escritores: `store.withTransaction(async () => { store.saveA(); store.saveB() })` garante COMMIT atômico — o espelho só é atualizado após o COMMIT, por isso um leitor concorrente vê tudo ou nada. |
 | Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
 | 7 algoritmos matemáticos | ⚠️ parcial | Existe **1** algoritmo real de confiança (`frequency * 0.6 + avgImpact * 0.4`) + deteção de padrões por contagem. Não são 7. |
 | Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
@@ -154,18 +154,22 @@ Limitações honestas:
 Injeção: `new BehaviorOS({ persistence: { store } })` (o `store` tem precedência
 sobre `path`).
 
+Consistência forte para escritores: `PostgresStore.withTransaction(fn)` faz
+`BEGIN` / `COMMIT` / `ROLLBACK` numa conexão dedicada e atualiza o espelho
+somente após o COMMIT, pelo que um leitor concorrente vê todas as mudanças ou
+nenhuma. O `BehaviorOS.persistAll()` já invoca automaticamente
+`withTransaction` para que missões, aprendizados e agentes sejam guardados em
+uma só transação atómica.
+
 Limitações honestas do `PostgresStore`:
-- é um **espelho em memória + write-through assíncrono**: as leituras vêm do
-  espelho carregado no `connect()`, não da base de dados em tempo real;
-- **não** há consistência forte multi-escritor; usa `await flush()` antes de
-  assumir que outro leitor vê a escrita;
-- o primeiro erro de escrita é guardado e relançado no `flush()` (a escrita
-  seguinte só é tentada depois de um `flush()` bem-sucedido);
-- o `pg` **não** é declarado como dependência: a instalação é responsabilidade de
-  quem usa o adaptador (`pnpm add pg`), ou passa-se `createPool` próprio.
+- é um **espelho em memória + write-through assíncrono**: leituras normais
+  (fora de `withTransaction`) servem o espelho, não a base de dados;
+- para garantir atomicidade de leitura, o leitor deve chamar
+  `await store.flush()` depois de operações escritoras;
+- o `pg` **não** é declarado como dependência: a instalação é responsabilidade
+  de quem usa o adaptador (`pnpm add pg`), ou passa-se `createPool` próprio.
 
 ## O que ainda NÃO existe (roadmap)
 
-- Consistência forte no `PostgresStore` (usa-se espelho + `flush()`).
 - Auto-correção de código pelo LearningEngine (a evolução de DNA só acrescenta
   regras `warn`; não edita ficheiros).

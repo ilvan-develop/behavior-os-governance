@@ -45,5 +45,22 @@ export interface Store {
   setMeta(key: string, value: string): void;
   getMeta(key: string): string | null;
 
+  /** Close any underlying resources. Synchronous for SQLite; may be async-only
+   *  for stores backed by connection pools — callers can also use `closeAsync`. */
   close(): void;
+
+  /**
+   * Run an asynchronous callback as a single unit of work. Store
+   * implementations may bundle multiple mutations across this callback into a
+   * single database transaction (e.g. `BEGIN` / `COMMIT`).
+   *
+   * This is what makes Postgres `PostgresStore` **strongly consistent** for
+   * writers: callers batch writes into `withTransaction` so a concurrent
+   * reader will see either all of them or none.
+   */
+  withTransaction<T>(fn: () => Promise<T>): Promise<T>;
+
+  /** Drain pending writes and close resources (preferred over `close()` for
+   * async-capable stores). */
+  closeAsync(): Promise<void>;
 }
