@@ -174,9 +174,15 @@ describe('behavior-os session flow', () => {
     const persisted = storageData.get(STORAGE_KEY) as {
       dna: { name: string } | null;
       agentState: { activeMission: string | null };
+      revision: number;
+      writer: string;
     };
     expect(persisted.dna?.name).toBe('Surgical Team');
     expect(persisted.agentState.activeMission).toBe(missionId);
+    // Every snapshot is stamped with a monotonic revision and the writer id.
+    expect(typeof persisted.revision).toBe('number');
+    expect(persisted.revision).toBeGreaterThan(0);
+    expect(typeof persisted.writer).toBe('string');
 
     // Restart: brand-new plugin instance (fresh module state) sharing storage.
     const pluginB = await loadFreshPlugin();
@@ -189,5 +195,11 @@ describe('behavior-os session flow', () => {
     };
     expect(state.selectedDna).toBe('Surgical Team');
     expect(state.activeMission).toBe(missionId);
+
+    // The restarted instance is a different writer and must not reuse the old
+    // revision — it writes strictly forward.
+    const afterRestart = storageData.get(STORAGE_KEY) as { revision: number; writer: string };
+    expect(afterRestart.revision).toBeGreaterThan(persisted.revision);
+    expect(afterRestart.writer).not.toBe(persisted.writer);
   });
 });

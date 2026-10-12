@@ -423,14 +423,16 @@ decisões.
 | Comportamento | Correção | Estado |
 |---|---|---|
 | Duas vias de decisão divergiam: o hook `permission` **escalava** `deploy to production` enquanto a auto-verificação `bos_evaluate_governance` respondia `allow` | A tool passa a construir o *condition bag* via `buildGovernanceContext` (igual ao hook): `tool`/`resources`/`text` + `metadata` explícitos | ✅ |
-| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 14 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
+| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 15 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
 | Divergência entre instâncias/sessões invisível | Cada evento do log ganha `instance` (`p<pid>-<rand>`) e o harness inclui C13 (auto-missão coerente numa instância isolada) e C14 (identidade estável) | ✅ |
+| Clobber entre instâncias concorrentes (last-writer-wins) | Módulo puro `storage-sync.ts`: cada snapshot leva `revision`+`writer`; `planPersist` decide **adopt-then-write** (adota snapshot mais recente de outra instância antes de escrever) e mantém revisões monotónicas; C15 prova o contrato | ✅ |
 | Limites não declarados | Secção "Limites honestos" no `OPENCODE_RUN.md` separa **Enforced** (`permission` deny) / **Advisory** (`escalate`→`ask`, não impede execução) / **Reativo** (protocolo por tools) / **Não provado** | ✅ |
 
-As 14 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
+As 15 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
 C03 escalonamento, C05 log com DNA+passo, C06 limite+monotonicidade, C07 protocolo,
 C08 persistência, C09 invariante `activeMission`, C10 quality gates, C11 learnings,
-C12 mensagem no ecrã, C13 auto-missão coerente, C14 identidade de instância.
+C12 mensagem no ecrã, C13 auto-missão coerente, C14 identidade de instância, C15
+adopt-then-write entre instâncias.
 
 ### Ficheiros novos/alterados (P0/P1/P2/P3)
 

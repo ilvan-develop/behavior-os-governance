@@ -15,14 +15,18 @@ import {
 } from './governance.js';
 import {
   appendGovernanceLog,
+  GOVERNANCE_INSTANCE_ID,
   type GovernanceLogKind,
   type GovernanceLogOutcome,
   getGovernanceLog,
 } from './governance-log.js';
+import { planPersist, readStoredManifest } from './storage-sync.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
 let loadedDnaPatterns: Map<string, DNA> = new Map();
+/** Highest snapshot revision this instance has written or adopted. */
+let storageRevision = 0;
 
 /** Storage key under which the engine snapshot is persisted. */
 const STORAGE_KEY = 'behavioros:state';
@@ -45,12 +49,46 @@ function toStorageJson(value: unknown): StorageJson {
 /**
  * Persist the current engine snapshot so state survives a restart. Best-effort:
  * a missing or failing storage domain must never break a tool call.
+ *
+ * Cross-instance guard: several OpenCode servers can share one storage backend
+ * while keeping separate in-memory engines. Every snapshot is stored with a
+ * monotonic `revision` and the `writer` instance id; before writing, an instance
+ * adopts any snapshot committed by a *different* instance at a higher revision,
+ * so a concurrent writer can never be silently clobbered (last-writer-wins
+ * becomes "adopt-then-write"). The decision itself is the pure `planPersist`.
  */
 async function persistState(ctx: Context): Promise<void> {
   const storage: Context['storage'] | undefined = ctx.storage;
   if (!storage || typeof storage.set !== 'function' || !behaviorOS) return;
   try {
-    await storage.set(STORAGE_KEY, toStorageJson(behaviorOS.exportState()));
+    const existing = await storage.get(STORAGE_KEY);
+    const manifest = readStoredManifest(existing);
+    const plan = planPersist({
+      localRevision: storageRevision,
+      instanceId: GOVERNANCE_INSTANCE_ID,
+      storedRevision: manifest.revision,
+      storedWriter: manifest.writer,
+    });
+    if (plan.adopt) {
+      behaviorOS.importState(existing as unknown as BehaviorOSSnapshot);
+      const state = behaviorOS.getState();
+      appendGovernanceLog({
+        kind: 'restore',
+        outcome: 'warn',
+        dna: state.selectedDna,
+        step: state.currentStep,
+        mission: state.activeMission,
+        action: 'storage',
+        detail: `Adopted rev=${manifest.revision} written by instance ${manifest.writer} before persisting`,
+      });
+    }
+    storageRevision = plan.nextRevision;
+    const envelope = {
+      ...behaviorOS.exportState(),
+      revision: storageRevision,
+      writer: GOVERNANCE_INSTANCE_ID,
+    };
+    await storage.set(STORAGE_KEY, toStorageJson(envelope));
   } catch (error) {
     console.warn(`[Behavior-OS] State persist failed: ${describeError(error)}`);
   }
@@ -63,8 +101,10 @@ async function restorePersistedState(ctx: Context): Promise<boolean> {
   try {
     const raw = await storage.get(STORAGE_KEY);
     if (!raw) return false;
+    const { revision } = readStoredManifest(raw);
     const restored = getBehaviorOS().importState(raw as unknown as BehaviorOSSnapshot);
     if (restored) {
+      storageRevision = revision;
       console.log('[Behavior-OS] Restored persisted state from ctx.storage');
     }
     return restored;

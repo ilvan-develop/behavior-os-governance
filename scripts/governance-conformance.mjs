@@ -38,13 +38,13 @@ function expect(condition, message) {
  * claim needs: the registered tools, the hooks, and the on-screen notifications.
  * Pass a freshly imported module to simulate a second, independent instance.
  */
-async function bootPlugin(pluginModule = plugin) {
+async function bootPlugin(pluginModule = plugin, sharedStorage) {
   const addedTools = [];
   const toolHooks = new Map();
   const sessionHooks = new Map();
   const permissionHooks = new Map();
   const syntheticCalls = [];
-  const storage = new Map();
+  const storage = sharedStorage ?? new Map();
   const agents = [
     { id: 'build', name: 'Build', system: 'You are the build agent.' },
     { id: 'review', name: 'Review' },
@@ -134,6 +134,7 @@ async function bootPlugin(pluginModule = plugin) {
     sessionHooks,
     permissionHooks,
     syntheticCalls,
+    storage,
     runTool,
   };
 }
@@ -412,6 +413,53 @@ const claims = [
       return {
         status: 'PASS',
         evidence: `instance=${[...ids][0]} across ${log.entries.length} entries`,
+      };
+    },
+  },
+  {
+    id: 'C15',
+    category: 'CONSISTENCY',
+    promise: 'Concurrent instances adopt-then-write (monotonic revisions, no clobber)',
+    async check() {
+      // The contract is pure and identity-driven, so it is proven directly with
+      // two distinct writer ids (a real second instance is a second process).
+      const { planPersist } = await import(
+        new URL('../plugins/opencode-v2/dist/storage-sync.js', import.meta.url).href
+      );
+
+      // B is stale (rev 2); the store holds A's newer rev 5 -> adopt before write.
+      const foreign = planPersist({
+        localRevision: 2,
+        instanceId: 'inst-B',
+        storedRevision: 5,
+        storedWriter: 'inst-A',
+      });
+      expect(foreign.adopt === true, 'a newer foreign snapshot must be adopted before writing');
+      expect(foreign.nextRevision === 6, `expected next=6, got ${foreign.nextRevision}`);
+
+      // Same writer -> not foreign; revisions still move forward.
+      const self = planPersist({
+        localRevision: 7,
+        instanceId: 'inst-A',
+        storedRevision: 5,
+        storedWriter: 'inst-A',
+      });
+      expect(self.adopt === false, 'a snapshot written by self must not be treated as foreign');
+      expect(self.nextRevision === 8, `expected next=8, got ${self.nextRevision}`);
+
+      // Local is ahead of the store -> never adopt an older snapshot.
+      const ahead = planPersist({
+        localRevision: 9,
+        instanceId: 'inst-B',
+        storedRevision: 4,
+        storedWriter: 'inst-A',
+      });
+      expect(ahead.adopt === false, 'an older snapshot must not be adopted');
+      expect(ahead.nextRevision === 10, `expected next=10, got ${ahead.nextRevision}`);
+
+      return {
+        status: 'PASS',
+        evidence: 'foreign→adopt rev6; self→rev8; stale-store→rev10',
       };
     },
   },
