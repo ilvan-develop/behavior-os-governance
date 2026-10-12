@@ -43,7 +43,7 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **21 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 30 tools & 7 resources MCP | ❌ | **21 tools + 2 resources** (server) / **23 tools** (plugin). |
 | 29 schemas Zod | ❌ | **25** `z.object` (+24 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |

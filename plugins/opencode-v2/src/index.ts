@@ -792,6 +792,267 @@ export default Plugin.define({
           };
         },
       });
+
+      // Tool 15: bos_preflight — synchronous pre-execution veto
+      tools.add({
+        name: 'bos_preflight',
+        description: 'Synchronously check whether an action may proceed (runs pre gates only)',
+        input: {
+          type: 'object',
+          properties: {
+            action: { type: 'string' },
+            agent: { type: 'string' },
+            context: { type: 'object' },
+          },
+          required: ['action', 'agent'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            action: string;
+            agent: string;
+            context?: Record<string, unknown>;
+          };
+          const result = bos.preflightAction(params.action, {
+            agent: params.agent,
+            context: params.context,
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      // Tool 16: bos_decide — weighted voting/quorum resolution
+      tools.add({
+        name: 'bos_decide',
+        description:
+          'Resolve a subject by weighted vote (majority/supermajority/unanimous + quorum)',
+        input: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string' },
+            votes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  voterId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['voterId', 'choice'],
+              },
+            },
+            policy: { type: 'string', enum: ['majority', 'supermajority', 'unanimous'] },
+            quorum: { type: 'number' },
+            missionId: { type: 'string' },
+          },
+          required: ['subject', 'votes'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            subject: string;
+            votes: Array<{ voterId: string; choice: string; weight?: number; reason?: string }>;
+            policy?: string;
+            quorum?: number;
+            missionId?: string;
+          };
+          const decision = bos.decide({
+            subject: params.subject,
+            votes: params.votes.map((v) => ({
+              voterId: v.voterId,
+              choice: v.choice as 'approve' | 'reject' | 'abstain',
+              weight: v.weight,
+              reason: v.reason,
+            })),
+            policy: params.policy as 'majority' | 'supermajority' | 'unanimous',
+            quorum: params.quorum,
+            missionId: params.missionId,
+          });
+          return { content: JSON.stringify(decision, null, 2) };
+        },
+      });
+
+      // Tool 17: bos_evolution — propose (and optionally apply) DNA evolution
+      tools.add({
+        name: 'bos_evolution',
+        description:
+          'Propose (and optionally apply) learning-driven DNA changes, scored by confidence',
+        input: {
+          type: 'object',
+          properties: {
+            minConfidence: { type: 'number' },
+            apply: { type: 'boolean' },
+            votes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  voterId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['voterId', 'choice'],
+              },
+            },
+            policy: { type: 'string', enum: ['majority', 'supermajority', 'unanimous'] },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            minConfidence?: number;
+            apply?: boolean;
+            votes?: Array<{ voterId: string; choice: string; weight?: number; reason?: string }>;
+            policy?: string;
+          };
+          const result = bos.applyEvolution({
+            minConfidence: params.minConfidence,
+            apply: params.apply,
+            votes: params.votes?.map((v) => ({
+              voterId: v.voterId,
+              choice: v.choice as 'approve' | 'reject' | 'abstain',
+              weight: v.weight,
+              reason: v.reason,
+            })),
+            policy: params.policy as 'majority' | 'supermajority' | 'unanimous',
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      // Tool 18: bos_code_fixes — propose code fixes from repeated fix events
+      tools.add({
+        name: 'bos_code_fixes',
+        description: 'Propose code fixes derived from repeated fix events, scored by confidence',
+        input: {
+          type: 'object',
+          properties: {
+            minConfidence: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { minConfidence?: number };
+          const proposals = bos.proposeCodeFixes(params.minConfidence);
+          return { content: JSON.stringify(proposals, null, 2) };
+        },
+      });
+
+      // Tool 19: bos_apply_code_fixes — persist code-fix results with governance
+      tools.add({
+        name: 'bos_apply_code_fixes',
+        description:
+          'Persist code-fix proposals (requires evolution.enabled + apply:true; optional votes gate)',
+        input: {
+          type: 'object',
+          properties: {
+            minConfidence: { type: 'number' },
+            apply: { type: 'boolean' },
+            votes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  voterId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['voterId', 'choice'],
+              },
+            },
+            policy: { type: 'string', enum: ['majority', 'supermajority', 'unanimous'] },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            minConfidence?: number;
+            apply?: boolean;
+            votes?: Array<{ voterId: string; choice: string; weight?: number; reason?: string }>;
+            policy?: string;
+          };
+          const result = bos.applyCodeFixes({
+            minConfidence: params.minConfidence,
+            apply: params.apply,
+            votes: params.votes?.map((v) => ({
+              voterId: v.voterId,
+              choice: v.choice as 'approve' | 'reject' | 'abstain',
+              weight: v.weight,
+              reason: v.reason,
+            })),
+            policy: params.policy as 'majority' | 'supermajority' | 'unanimous',
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      // Tool 20: bos_list_code_fixes — list persisted code-fix results
+      tools.add({
+        name: 'bos_list_code_fixes',
+        description: 'List persisted code-fix application results (CodeFixResult records)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const results = bos.listCodeFixResults(params.limit);
+          return { content: JSON.stringify(results, null, 2) };
+        },
+      });
+
+      // Tool 21: bos_list_decisions — list persisted voting/quorum decisions
+      tools.add({
+        name: 'bos_list_decisions',
+        description: 'List persisted voting/quorum decisions (requires persistence)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const decisions = bos.listDecisions(params.limit);
+          return { content: JSON.stringify(decisions, null, 2) };
+        },
+      });
+
+      // Tool 22: bos_list_pipeline_runs — list persisted gate-pipeline runs
+      tools.add({
+        name: 'bos_list_pipeline_runs',
+        description:
+          'List persisted gate-pipeline runs / blocked pre-flights (requires persistence)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const runs = bos.listPipelineRuns(params.limit);
+          return { content: JSON.stringify(runs, null, 2) };
+        },
+      });
+
+      // Tool 23: bos_list_audit_reports — list persisted audit reports
+      tools.add({
+        name: 'bos_list_audit_reports',
+        description: 'List persisted audit reports (requires persistence)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const reports = bos.listAuditReports(params.limit);
+          return { content: JSON.stringify(reports, null, 2) };
+        },
+      });
     });
 
     // --- Governed agent preamble --------------------------------------------

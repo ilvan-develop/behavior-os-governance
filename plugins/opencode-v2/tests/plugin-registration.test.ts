@@ -154,15 +154,24 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const emptyDir = path.join(repoRoot, 'plugins', 'opencode-v2', 'tests');
 
 const EXPECTED_TOOLS = [
+  'bos_apply_code_fixes',
   'bos_check_quality',
+  'bos_code_fixes',
   'bos_create_mission',
+  'bos_decide',
   'bos_evaluate_governance',
+  'bos_evolution',
   'bos_get_insights',
   'bos_get_log',
   'bos_get_state',
   'bos_get_status',
+  'bos_list_audit_reports',
+  'bos_list_code_fixes',
+  'bos_list_decisions',
   'bos_list_dna',
   'bos_list_missions',
+  'bos_list_pipeline_runs',
+  'bos_preflight',
   'bos_record_learning',
   'bos_run_audit',
   'bos_select_dna',
@@ -180,7 +189,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 14 bos_* tools', async () => {
+  it('registers exactly the 23 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -192,7 +201,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(14);
+    expect(addedTools).toHaveLength(23);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -219,7 +228,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(14);
+    expect(addedTools).toHaveLength(23);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined

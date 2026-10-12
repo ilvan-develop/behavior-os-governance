@@ -328,7 +328,7 @@ mcpServers:
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
 | `@behavior-os/mcp-server` | MCP server with 21 tools + 2 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 23 tools + hooks | 2.0.0 |
 
 ## License
 
