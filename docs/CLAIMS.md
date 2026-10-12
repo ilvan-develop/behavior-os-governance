@@ -13,7 +13,7 @@ ls packages/core/src/engine/*.ts
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 17) e resources (esperado: 2)
+# Tools MCP (esperado: 18) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
@@ -43,7 +43,7 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **17 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 30 tools & 7 resources MCP | ❌ | **18 tools + 2 resources** (server) / **14 tools** (plugin). |
 | 29 schemas Zod | ❌ | **25** `z.object` (+24 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
@@ -59,7 +59,7 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
 | Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 17 tools + 2 resources funcionais. |
+| MCP real (não vaporware) | ✅ | 18 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
 | DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
 

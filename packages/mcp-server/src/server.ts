@@ -656,6 +656,42 @@ server.registerTool(
 );
 
 // ============================================================
+// LIST CODE FIX RESULTS
+// ============================================================
+
+server.registerTool(
+  'bos_list_code_fixes',
+  {
+    description: 'List persisted code-fix application results (CodeFixResult records)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum results to return (default 50)'),
+    }),
+    annotations: {
+      title: 'List code fix results',
+    },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const results = bos.listCodeFixResults(limit);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(results, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // LEARNING TOOLS
 // ============================================================
 
