@@ -463,6 +463,48 @@ const claims = [
       };
     },
   },
+  {
+    id: 'C16',
+    category: 'CONSISTENCY',
+    promise: 'Conflict merge preserves local items (no lost update on adopt)',
+    async check() {
+      const { mergeSnapshots } = await import(
+        new URL('../plugins/opencode-v2/dist/storage-sync.js', import.meta.url).href
+      );
+
+      const merged = mergeSnapshots(
+        {
+          missions: [
+            { id: 'm1', title: 'local-edit' },
+            { id: 'm2', title: 'local-only' },
+          ],
+        },
+        {
+          missions: [
+            { id: 'm1', title: 'foreign-edit' },
+            { id: 'm3', title: 'foreign-only' },
+          ],
+        },
+      );
+      const titles = merged.missions.map((m) => m.title).sort();
+      expect(
+        titles.join(',') === 'foreign-edit,foreign-only,local-only',
+        `an item was lost in the merge: [${titles.join(',')}]`,
+      );
+      expect(merged.missions.length === 3, `expected 3 missions, got ${merged.missions.length}`);
+
+      const mergedLearnings = mergeSnapshots(
+        { learnings: [{ id: 'l1', content: 'local' }] },
+        { learnings: [{ id: 'l2', content: 'foreign' }] },
+      );
+      expect(mergedLearnings.learnings.length === 2, 'a learning was lost in the merge');
+
+      return {
+        status: 'PASS',
+        evidence: `missions=[${titles.join(',')}] learnings=2 (same id → foreign/newer wins)`,
+      };
+    },
+  },
 ];
 
 function pad(value, width) {

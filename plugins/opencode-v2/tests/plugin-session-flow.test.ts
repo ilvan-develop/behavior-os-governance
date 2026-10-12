@@ -202,4 +202,62 @@ describe('behavior-os session flow', () => {
     expect(afterRestart.revision).toBeGreaterThan(persisted.revision);
     expect(afterRestart.writer).not.toBe(persisted.writer);
   });
+
+  it('merges concurrent mission updates from another instance instead of losing them', async () => {
+    const storageData = new Map<string, unknown>();
+
+    const pluginA = await loadFreshPlugin();
+    const a = createContext(storageData);
+    await pluginA.setup(a.ctx as never);
+    await runTool(a.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    await runTool(a.addedTools, 'bos_create_mission', {
+      title: 'merge-a1',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    // Second instance restores the shared state and adds its own mission.
+    const pluginB = await loadFreshPlugin();
+    const b = createContext(storageData);
+    await pluginB.setup(b.ctx as never);
+    await runTool(b.addedTools, 'bos_create_mission', {
+      title: 'merge-b1',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    // A advances the shared snapshot while B is mid-work...
+    await runTool(a.addedTools, 'bos_create_mission', {
+      title: 'merge-a2',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    // ...and B persists later: the guard must merge by id, not clobber.
+    await runTool(b.addedTools, 'bos_create_mission', {
+      title: 'merge-b2',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    const stored = storageData.get(STORAGE_KEY) as {
+      missions: Array<{ title: string }>;
+      revision: number;
+    };
+    const titles = stored.missions.map((m) => m.title).sort();
+    expect(titles).toEqual(['merge-a1', 'merge-a2', 'merge-b1', 'merge-b2']);
+    expect(new Set(titles).size).toBe(4);
+    expect(typeof stored.revision).toBe('number');
+
+    // The merge surfaced in the governance log of the conflicting writer.
+    const log = JSON.parse((await runTool(b.addedTools, 'bos_get_log')).content) as {
+      entries: Array<{ kind: string; detail: string }>;
+    };
+    const adopted = log.entries.find(
+      (entry) => entry.kind === 'restore' && /Adopted rev=/.test(entry.detail),
+    );
+    expect(adopted).toBeTruthy();
+    if (!adopted) throw new Error('expected an "Adopted rev=..." governance log entry');
+    expect(adopted.detail).toContain('merged 4 missions');
+  });
 });

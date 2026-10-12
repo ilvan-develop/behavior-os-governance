@@ -20,7 +20,12 @@ import {
   type GovernanceLogOutcome,
   getGovernanceLog,
 } from './governance-log.js';
-import { planPersist, readStoredManifest } from './storage-sync.js';
+import {
+  mergeSnapshots,
+  planPersist,
+  readStoredManifest,
+  type SnapshotLike,
+} from './storage-sync.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
@@ -70,7 +75,14 @@ async function persistState(ctx: Context): Promise<void> {
       storedWriter: manifest.writer,
     });
     if (plan.adopt) {
-      behaviorOS.importState(existing as unknown as BehaviorOSSnapshot);
+      // Adopt the newer foreign snapshot *by merge*: item collections are
+      // unioned by id so local-only work is preserved, and the newer snapshot
+      // wins identical items. Never discard the local session blindly.
+      const merged = mergeSnapshots(
+        behaviorOS.exportState() as unknown as SnapshotLike,
+        existing as unknown as SnapshotLike,
+      );
+      behaviorOS.importState(merged as unknown as BehaviorOSSnapshot);
       const state = behaviorOS.getState();
       appendGovernanceLog({
         kind: 'restore',
@@ -79,7 +91,7 @@ async function persistState(ctx: Context): Promise<void> {
         step: state.currentStep,
         mission: state.activeMission,
         action: 'storage',
-        detail: `Adopted rev=${manifest.revision} written by instance ${manifest.writer} before persisting`,
+        detail: `Adopted rev=${manifest.revision} written by instance ${manifest.writer} before persisting (merged ${behaviorOS.listMissions().length} missions)`,
       });
     }
     storageRevision = plan.nextRevision;

@@ -144,7 +144,7 @@ pnpm verify:governance
 
 O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
-(pronto para CI). Cobertura atual: **15/15 claims**.
+(pronto para CI). Cobertura atual: **16/16 claims**.
 
 | Claim | Promessa | Prova |
 | --- | --- | --- |
@@ -163,6 +163,7 @@ O relatório imprime uma tabela `claims → evidência` e grava
 | C13 | Auto-missão do prompt deixa `activeMission` == missão aberta | instância isolada |
 | C14 | Cada evento do log carrega um `instance` estável | divergência entre instâncias visível |
 | C15 | Instâncias concorrentes fazem *adopt-then-write* | revisões monotónicas, sem clobber (`storage-sync`) |
+| C16 | Merge de conflito preserva itens locais | união por id, sem updates perdidos (`mergeSnapshots`) |
 
 ### Limites honestos (o que *não* é 100%)
 
@@ -179,10 +180,12 @@ enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. H
 - **Não provado ainda:** que *toda* ação mutadora passe pelo hook (depende do host).
 - **Atenuado, não resolvido:** a coerência entre instâncias/sessões concorrentes que
   partilham storage mas não memória. Cada snapshot leva `revision` + `writer`
-  (`storage-sync`), e um escritor **adota** um snapshot mais recente de outra instância
-  antes de escrever (adopt-then-write, provado em C15) — pelo que uma atualização já não é
-  silenciosamente destruída. Falta ainda *merge* de alterações concorrentes e transação
-  atómica de storage (lock/compare-and-swap real no backend).
+  (`storage-sync`); um escritor **adota** um snapshot mais recente de outra instância
+  antes de escrever (adopt-then-write, C15) e **faz merge por item** — missões/learnings
+  unidas por `id`, DNA/`activeMission` do mais recente com fallback, passo máximo
+  (C16). Falta ainda transação atómica de storage (lock/compare-and-swap real no
+  backend) e política de resolução para *mesmo* item editado concorrentemente
+  (hoje ganha o snapshot mais recente).
 
 Corolário: para aumentar a cobertura, adiciona-se um claim por cada nova promessa, com a
 sua verificação — não se aumenta a prosa.

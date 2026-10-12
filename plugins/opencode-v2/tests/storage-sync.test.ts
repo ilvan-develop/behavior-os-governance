@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planPersist, readStoredManifest } from '../src/storage-sync.js';
+import { mergeSnapshots, planPersist, readStoredManifest } from '../src/storage-sync.js';
 
 describe('storage-sync', () => {
   describe('readStoredManifest', () => {
@@ -80,6 +80,89 @@ describe('storage-sync', () => {
       });
       expect(plan.adopt).toBe(false);
       expect(plan.nextRevision).toBe(5);
+    });
+  });
+
+  describe('mergeSnapshots', () => {
+    const mission = (id: string, title: string) => ({ id, title });
+
+    it('unions missions by id, foreign (newer) wins on collision', () => {
+      const merged = mergeSnapshots(
+        { missions: [mission('m1', 'local-edit'), mission('m2', 'local-only')] },
+        { missions: [mission('m1', 'foreign-edit'), mission('m3', 'foreign-only')] },
+      );
+      const titles = merged.missions.map((m) => m.title).sort();
+      expect(titles).toEqual(['foreign-edit', 'foreign-only', 'local-only']);
+      expect(merged.missions).toHaveLength(3);
+    });
+
+    it('unions learnings by id', () => {
+      const merged = mergeSnapshots(
+        { learnings: [{ id: 'l1', content: 'local' }] },
+        { learnings: [{ id: 'l2', content: 'foreign' }] },
+      );
+      expect(merged.learnings.map((l) => l.id).sort()).toEqual(['l1', 'l2']);
+    });
+
+    it('prefers the foreign DNA but keeps a local one when foreign has none', () => {
+      const foreign = mergeSnapshots(
+        { dna: undefined, agentState: { selectedDna: 'A' } },
+        { dna: undefined, agentState: { selectedDna: 'B' } },
+      );
+      expect(foreign.agentState.selectedDna).toBe('B');
+
+      const fallback = mergeSnapshots(
+        { dna: undefined, agentState: { selectedDna: 'A' } },
+        { dna: undefined, agentState: { selectedDna: null } },
+      );
+      expect(fallback.agentState.selectedDna).toBe('A');
+    });
+
+    it('keeps the maximum protocol step and unions the history', () => {
+      const merged = mergeSnapshots(
+        {
+          agentState: {
+            currentStep: 2,
+            stepHistory: [
+              { step: 1, tool: 'bos_select_dna' },
+              { step: 2, tool: 'bos_create_mission' },
+            ],
+          },
+        },
+        {
+          agentState: {
+            currentStep: 4,
+            stepHistory: [
+              { step: 1, tool: 'bos_select_dna' },
+              { step: 3, tool: 'bos_start_mission' },
+              { step: 4, tool: 'bos_b' },
+            ],
+          },
+        },
+      );
+      expect(merged.agentState.currentStep).toBe(4);
+      expect(merged.agentState.stepHistory).toHaveLength(4);
+    });
+
+    it('prefers the foreign active mission, preserving the local as fallback', () => {
+      const withForeign = mergeSnapshots(
+        { agentState: { activeMission: 'local-mission' } },
+        { agentState: { activeMission: 'foreign-mission' } },
+      );
+      expect(withForeign.agentState.activeMission).toBe('foreign-mission');
+
+      const fallback = mergeSnapshots(
+        { agentState: { activeMission: 'local-mission' } },
+        { agentState: { activeMission: null } },
+      );
+      expect(fallback.agentState.activeMission).toBe('local-mission');
+    });
+
+    it('tolerates missing or malformed inputs', () => {
+      const merged = mergeSnapshots(null, undefined);
+      expect(merged.missions).toEqual([]);
+      expect(merged.agentState.selectedDna).toBeNull();
+      expect(merged.dna).toBeNull();
     });
   });
 });

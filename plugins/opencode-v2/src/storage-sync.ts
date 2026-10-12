@@ -60,3 +60,113 @@ export function planPersist(params: {
     nextRevision: Math.max(params.localRevision, params.storedRevision) + 1,
   };
 }
+
+// ============================================================
+// Conflict merge (adopt-then-write with no lost updates)
+// ============================================================
+// Adopting a newer foreign snapshot wholesale would discard local-only items
+// (e.g. a mission the local engine created since the snapshot it last saw).
+// `mergeSnapshots` unions item collections by `id` (same id -> the foreign,
+// newer snapshot wins) and keeps the healthiest scalar values: DNA and the
+// active mission from the newer snapshot when present, else the local ones,
+// and the maximum protocol step.
+
+export interface SnapshotLike {
+  version?: string;
+  dna?: unknown | null;
+  agentState?: {
+    selectedDna?: string | null;
+    activeMission?: string | null;
+    currentStep?: number;
+    stepHistory?: Array<{ step?: number; tool?: string }>;
+    [key: string]: unknown;
+  } | null;
+  missions?: Array<{ id?: string; [key: string]: unknown }>;
+  learnings?: Array<{ id?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+function unionById<T extends { id?: string }>(a: T[] | undefined, b: T[] | undefined): T[] {
+  const byId = new Map<string, T>();
+  for (const item of a ?? []) if (item.id) byId.set(item.id, item);
+  for (const item of b ?? []) if (item.id) byId.set(item.id, item); // foreign (newer) wins
+  return [...byId.values()];
+}
+
+/** Union protocol steps by their step number (history entries carry no id). */
+function unionStepHistory(
+  a: Array<{ step?: number; tool?: string }> | undefined,
+  b: Array<{ step?: number; tool?: string }> | undefined,
+): Array<{ step?: number; tool?: string }> {
+  const byStep = new Map<number, { step?: number; tool?: string }>();
+  for (const entry of a ?? []) if (typeof entry.step === 'number') byStep.set(entry.step, entry);
+  for (const entry of b ?? []) if (typeof entry.step === 'number') byStep.set(entry.step, entry);
+  return [...byStep.values()];
+}
+
+function maxStep(stepHistory: Array<{ step?: number }> | undefined): number {
+  return (stepHistory ?? []).reduce(
+    (max, entry) => (typeof entry.step === 'number' && entry.step > max ? entry.step : max),
+    0,
+  );
+}
+
+/**
+ * Shape of a merged snapshot: the item collections and the agent state are
+ * always present (possibly empty), so consumers never need null checks.
+ */
+export interface MergedSnapshot {
+  version?: string;
+  dna: unknown | null;
+  agentState: {
+    selectedDna: string | null;
+    activeMission: string | null;
+    currentStep: number;
+    stepHistory: Array<{ step?: number; tool?: string }>;
+    [key: string]: unknown;
+  };
+  missions: Array<{ id?: string; [key: string]: unknown }>;
+  learnings: Array<{ id?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Merge the local snapshot with a newer foreign one so no item is lost.
+ * `foreign` is the snapshot kept by another instance at a higher revision;
+ * identical items are resolved in its favour (it is newer), while items that
+ * only exist locally are preserved.
+ */
+export function mergeSnapshots(
+  local: SnapshotLike | null | undefined,
+  foreign: SnapshotLike | null | undefined,
+): MergedSnapshot {
+  const a = local ?? {};
+  const b = foreign ?? {};
+  const aState = a.agentState ?? {};
+  const bState = b.agentState ?? {};
+
+  const mergedStepHistory = unionStepHistory(aState.stepHistory, bState.stepHistory);
+  const currentStep = Math.max(
+    maxStep(aState.stepHistory),
+    maxStep(bState.stepHistory),
+    typeof aState.currentStep === 'number' ? aState.currentStep : 0,
+    typeof bState.currentStep === 'number' ? bState.currentStep : 0,
+  );
+
+  return {
+    ...a,
+    ...b,
+    version: a.version ?? b.version,
+    dna: b.dna ?? a.dna ?? null,
+    agentState: {
+      ...aState,
+      ...bState,
+      selectedDna: bState.selectedDna ?? aState.selectedDna ?? null,
+      activeMission: bState.activeMission ?? aState.activeMission ?? null,
+      currentStep,
+      stepHistory: mergedStepHistory,
+    },
+    missions: unionById(a.missions, b.missions),
+    learnings: unionById(a.learnings, b.learnings),
+  };
+}
