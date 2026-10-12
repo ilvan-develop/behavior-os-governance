@@ -32,6 +32,9 @@ const yaml = requireFromPlugin('js-yaml');
 const { BehaviorOS } = await import(
   pathToFileURL(path.join(repoRoot, 'packages', 'core', 'dist', 'index.js')).href
 );
+const { buildGovernanceContext } = await import(
+  pathToFileURL(path.join(pluginDir, 'dist', 'governance.js')).href
+);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -77,19 +80,31 @@ function hasBlockRule(dna) {
   return (dna.governance ?? []).some((r) => r.action === 'block');
 }
 
+// Representative risky action the plugin heuristics can classify (a production
+// deploy). Part A measures whether each caller can reach the DNA's rules.
+const PLUGIN_ACTION_TEXT = 'deploy to production';
+
 function evaluate(provider, bos, tool, flags) {
-  // These mirror the exact call shapes used by each caller today.
   if (provider === 'plugin') {
-    // plugins/opencode-v2/src/index.ts: context only contains { action }.
-    return bos.evaluateGovernance(tool, { agent: 'opencode-agent', context: { action: tool } });
+    // Fixed: the plugin derives a condition bag from the concrete action via
+    // buildGovernanceContext, then enforces it through the permission hook.
+    const context = buildGovernanceContext({ tool, action: tool, text: PLUGIN_ACTION_TEXT });
+    return bos.evaluateGovernance(tool, { agent: 'opencode-agent', context });
   }
   if (provider === 'mcp') {
-    // packages/mcp-server/src/server.ts: `...context` spreads flags at the top
-    // level, so `context.context` (the condition bag the engine reads) is undefined.
-    return bos.evaluateGovernance(tool, { agent: 'mcp-client', scope: undefined, ...flags });
+    // Fixed: the caller's condition bag is nested under `context.context` and
+    // always carries the action.
+    return bos.evaluateGovernance(tool, {
+      agent: 'mcp-client',
+      scope: undefined,
+      context: { action: tool, ...flags },
+    });
   }
   // caller-correct: nested condition context, as the engine and tests expect.
-  return bos.evaluateGovernance(tool, { agent: 'correct-client', context: { ...flags } });
+  return bos.evaluateGovernance(tool, {
+    agent: 'correct-client',
+    context: { action: tool, ...flags },
+  });
 }
 
 async function partA() {
@@ -121,8 +136,8 @@ async function partA() {
             verdict,
             reason,
             dnaHasBlockRule: blockRule,
-            pluginBlocks: false, // provable: the hook swallows its own throw + never matches
-            gap: blockRule && verdict === 'allow' && provider !== 'caller-correct',
+            pluginBlocks: provider === 'plugin' && verdict === 'deny',
+            gap: blockRule && verdict === 'allow',
           });
         }
       }
@@ -192,10 +207,16 @@ async function runPhase(phase, tool, dnaSelected) {
   switch (phase) {
     case 'user_prompt': {
       const registered = typeof sessionHooks.prompt === 'function';
+      const event = {
+        prompt: { text: 'Review the patient record handling for HIPAA' },
+        metadata: {},
+      };
+      if (registered) await sessionHooks.prompt(event);
+      const autoSelected = Boolean(event.metadata?.behavioros?.autoSelectedDna);
       return {
         hookRegistered: registered,
         effect: registered
-          ? 'prompt hook ran'
+          ? `prompt hook ran (autoSelectedDna=${autoSelected})`
           : 'no prompt hook — message has no Behavior-OS effect',
         gap: !registered,
       };
@@ -210,12 +231,12 @@ async function runPhase(phase, tool, dnaSelected) {
         effect: injected
           ? 'injected Behavior-OS state into system prompt'
           : 'no injection — model sees no Behaviour-OS guidance',
-        gap: dnaselected(dnaSelected) ? !injected : !injected,
+        gap: !injected,
       };
     }
     case 'tool_execute_before': {
       const registered = typeof toolHooks['execute.before'] === 'function';
-      let blocked = false;
+      let threw = false;
       if (registered) {
         try {
           await toolHooks['execute.before']({
@@ -227,31 +248,53 @@ async function runPhase(phase, tool, dnaSelected) {
             id: 'c',
           });
         } catch {
-          blocked = true;
+          threw = true;
         }
       }
+      // The before hook is intentionally advisory — enforcement is the
+      // permission hook's job — so it must never throw.
       return {
         hookRegistered: registered,
-        effect: blocked ? 'BLOCKED (hook threw)' : 'allowed — no block',
-        gap: registered ? !blocked : true,
+        effect: registered
+          ? threw
+            ? 'before hook threw (unexpected)'
+            : 'advisory only — enforcement handled by permission hook'
+          : 'no before hook',
+        gap: registered ? threw : true,
       };
     }
     case 'tool_execute_after': {
       const registered = typeof toolHooks['execute.after'] === 'function';
+      if (registered) {
+        await toolHooks['execute.after']({
+          tool,
+          status: 'error',
+          error: { message: 'simulated failure' },
+          sessionID: 's',
+        });
+      }
       return {
         hookRegistered: registered,
-        effect: registered ? 'after hook ran' : 'no after hook — no post-action audit/learning',
+        effect: registered ? 'after hook ran (learning captured)' : 'no after hook',
         gap: !registered,
       };
     }
     case 'permission_evaluate': {
       const registered = typeof permissionHooks.evaluate === 'function';
+      const event = {
+        action: tool,
+        resources: ['deploy to production'],
+        agent: 'analysis-agent',
+        effect: 'allow',
+      };
+      if (registered) await permissionHooks.evaluate(event);
+      const enforced = event.effect === 'deny' || event.effect === 'ask';
       return {
         hookRegistered: registered,
         effect: registered
-          ? 'permission hook ran'
+          ? `permission hook ran (effect=${event.effect})`
           : 'no permission hook — cannot deny via the official mechanism',
-        gap: !registered,
+        gap: registered ? dnaSelected && !enforced : true,
       };
     }
     default:
@@ -259,13 +302,10 @@ async function runPhase(phase, tool, dnaSelected) {
   }
 }
 
-// small helper kept explicit for readability
-function dnaselected(v) {
-  return v === true;
-}
-
 async function partB() {
   const rows = [];
+  const originalLog = console.log;
+  console.log = () => {};
   for (const phase of PHASES) {
     for (const dnaSelected of [true, false]) {
       for (const tool of TOOLS_B) {
@@ -285,11 +325,11 @@ async function partB() {
   }
 
   const extras = [
-    ['user_prompt', false, '(any)', 'cold session, first user message'],
-    ['model_context', false, '(any)', 'no DNA selected => no governed prompt at all'],
-    ['tool_execute_before', true, 'bash', 'surgical-team + "deploy to production"'],
-    ['permission_evaluate', true, 'write', 'write to a protected path'],
-    ['tool_execute_after', true, 'edit', 'capture learning after an edit'],
+    ['user_prompt', false, '(any)', 'cold session, first user message => auto-select DNA'],
+    ['model_context', false, '(any)', 'no DNA selected => cold-start guidance injected'],
+    ['tool_execute_before', true, 'bash', 'surgical-team + "deploy to production" (advisory)'],
+    ['permission_evaluate', true, 'write', 'surgical-team + "deploy to production" => deny'],
+    ['tool_execute_after', true, 'edit', 'capture learning after a failing edit'],
   ];
   for (const [phase, dnaSelected, tool, note] of extras) {
     const result = await runPhase(phase, tool, dnaSelected);
@@ -305,6 +345,7 @@ async function partB() {
       note,
     });
   }
+  console.log = originalLog;
   return rows;
 }
 
@@ -379,7 +420,12 @@ const summary = {
     permissionHookRegistered: b.filter((r) => r.phase === 'permission_evaluate' && r.hookRegistered)
       .length,
     toolExecuteBeforeBlocks: b.filter(
-      (r) => r.phase === 'tool_execute_before' && r.effect.includes('BLOCKED'),
+      (r) => r.phase === 'tool_execute_before' && r.effect.includes('threw'),
+    ).length,
+    permissionEnforced: b.filter(
+      (r) =>
+        r.phase === 'permission_evaluate' &&
+        (r.effect.includes('effect=deny') || r.effect.includes('effect=ask')),
     ).length,
     modelContextInjected: b.filter(
       (r) => r.phase === 'model_context' && r.effect.includes('injected'),
@@ -409,7 +455,8 @@ console.log(
   '  Block-rule-but-allowed :',
   summary.partA.scenariosWhereBlockRuleExistsButVerdictAllows,
 );
-console.log('  tool.execute.before blocks:', summary.partB.toolExecuteBeforeBlocks);
+console.log('  tool.execute.before threw   :', summary.partB.toolExecuteBeforeBlocks);
+console.log('  permission enforced         :', summary.partB.permissionEnforced);
 console.log('  context injections     :', summary.partB.modelContextInjected);
 console.log('  prompt hooks registered :', summary.partB.promptHookRegistered);
 console.log('  after hooks registered  :', summary.partB.afterHookRegistered);

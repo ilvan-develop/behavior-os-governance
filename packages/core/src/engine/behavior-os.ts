@@ -234,13 +234,21 @@ export class BehaviorOS {
     impact: string;
     relatedMission?: string;
     relatedPattern?: string;
+    /**
+     * Whether recording this event should advance the 7-step protocol. Internal
+     * automation (e.g. the OpenCode hook capturing tool failures) passes `false`
+     * so only agent-driven calls move the protocol forward. Defaults to `true`.
+     */
+    advanceProtocol?: boolean;
   }): LearningEvent {
     const event = this.getLearningEngine().record({
       ...options,
       type: options.type as LearningType,
       impact: options.impact as LearningImpact,
     });
-    this.advanceProtocolStep('bos_record_learning');
+    if (options.advanceProtocol !== false) {
+      this.advanceProtocolStep('bos_record_learning');
+    }
     return event;
   }
 

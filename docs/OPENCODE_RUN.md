@@ -58,6 +58,42 @@ behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 > selecionar DNA → listar DNA → resolver estado → criar/iniciar missão → auditoria →
 > aprendizagem. O hook de contexto mostra sempre o próximo passo.
 
+## Governação ativa (hooks do v2)
+
+O plugin registou os hooks (para além das 12 tools):
+
+- **`permission.evaluate`** — **bloqueia de facto**. Constrói uma bolsa de condições a
+  partir da ação/recursos e define `effect: "deny"`/`"ask"` conforme as regras do DNA.
+  É o único caminho tipado de bloqueio do v2; um `deny` explícito **não** é sobreposto
+  por `--auto`.
+- **`session.prompt`** — classifica a intenção da mensagem e **auto-seleciona** o DNA
+  quando ainda não há nenhum (ex.: menção a "patient/HIPAA" → `healthcare-hipaa`).
+- **`session.context`** — injeta **sempre** orientação governada (mesmo sem DNA).
+- **`tool.execute.before`** — apenas *advisory* (log de escalonamento); não bloqueia.
+- **`tool.execute.after`** — regista falhas no learning engine (sem avançar o protocolo).
+
+Exemplo de bloqueio real:
+
+```powershell
+opencode run --session ses-x "Use bos_select_dna com 'surgical-team' e responda OK"
+opencode run --session ses-x --auto "Execute: echo deploy to production"
+# => permission.rejected: [Behavior-OS:Surgical Team] Blocked by rule: sterile-field
+```
+
+> ⚠️ O estado (DNA ativo) é **global ao servidor** e partilhado por todas as sessões
+> desse servidor/diretório. Um DNA restritivo (ex.: `surgical-team`) bloqueia qualquer
+> ferramenta — incluindo `write`/`edit` do próprio agente — enquanto estiver ativo.
+> Para voltar a um modo não-bloqueante, seleciona um padrão só-`warn` (ex.:
+> `bos_select_dna lean-factory`).
+
+## Skill governada
+
+Além do prompt injetado, existe uma **skill `behavior-os`** em
+`.opencode/skills/behavior-os/SKILL.md`. O v2 descobre-a e o agente carrega-a com a tool
+`skill` (ou mencionando `@behavior-os`) quando o pedido envolve governação, DNA, missões,
+auditorias ou mudanças de produção. A skill documenta o protocolo de 7 passos, o mapa
+intenção→DNA e como interpretar um bloqueio `[Behavior-OS:…]`.
+
 ## DNA Patterns Disponíveis
 21 padrões carregados dinamicamente:
 surgical-team, enterprise-governance, military-operations, lean-factory, devops-pipeline, financial-compliance, healthcare-hipaa, startup-agile, enterprise-sox, research-lab, gaming-studio, iot-embedded, ai-ml-pipeline, blockchain-web3, mobile-app, cloud-native, legacy-modernization, open-source, data-engineering, fintech-trading, quantum-computing

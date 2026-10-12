@@ -6,6 +6,7 @@ import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
 import { load as yamlLoad } from 'js-yaml';
+import { buildGovernanceContext, classifyDNA } from './governance.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
@@ -16,6 +17,17 @@ function getBehaviorOS(): BehaviorOS {
     behaviorOS = new BehaviorOS();
   }
   return behaviorOS;
+}
+
+/** Tools that can mutate state or shell out and therefore need governance. */
+const GOVERNED_TOOL = /bash|write|edit|patch|apply|shell|mcp__/i;
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
 // Load DNA patterns from YAML files
@@ -453,60 +465,131 @@ export default Plugin.define({
       });
     });
 
-    // Governance hook for write/edit/bash tools
-    await ctx.tool.hook('execute.before', async (event: unknown): Promise<void> => {
-      const eventTyped = event as {
-        tool?: string;
-        agent?: string;
-        input?: Record<string, unknown>;
-      };
+    // --- Governance enforcement ---------------------------------------------
+    // OpenCode v2's only typed denial mechanism is the permission hook. We set
+    // `effect` to deny/ask (never force `allow`), so configured denials stay final.
+    await ctx.permission.hook('evaluate', async (event): Promise<void> => {
       const currentState = bos.getState();
-
       if (!currentState.selectedDna) return;
 
-      const toolName = typeof eventTyped.tool === 'string' ? eventTyped.tool.toLowerCase() : '';
-      const governanceTools = ['bash', 'write', 'edit', 'mcp__'];
-      const isGoverned = governanceTools.some((t) => toolName.includes(t));
-
-      if (!isGoverned) return;
-
       try {
-        const decision = bos.evaluateGovernance(toolName, {
-          agent: eventTyped.agent ?? 'opencode-agent',
-          context: { action: (eventTyped.input?.command as string | undefined) || toolName },
+        const context = buildGovernanceContext({
+          tool: event.action,
+          action: event.action,
+          resources: event.resources,
+          metadata: event.metadata,
+        });
+        const decision = bos.evaluateGovernance(event.action, {
+          agent: event.agent ?? 'opencode-agent',
+          context,
         });
 
         if (decision.verdict === 'deny') {
-          throw new Error(`Governance blocked: ${decision.reason}`);
-        }
-
-        if (decision.verdict === 'escalate') {
-          console.warn(`[Behavior-OS] Escalation required: ${decision.reason}`);
+          event.effect = 'deny';
+          event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
+        } else if (decision.verdict === 'escalate' && event.effect !== 'deny') {
+          event.effect = 'ask';
+          event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn(`[Behavior-OS] Governance error: ${errorMessage}`);
+        console.warn(`[Behavior-OS] Permission evaluation error: ${describeError(error)}`);
       }
     });
 
-    // Session context hook - surface BehaviorOS state to the model
-    await ctx.session.hook('context', async (event): Promise<void> => {
+    // Observability hook: advise on escalations before a governed tool runs.
+    // It never throws — enforcement is the permission hook's responsibility.
+    await ctx.tool.hook('execute.before', async (event: unknown): Promise<void> => {
+      const eventTyped = event as { tool?: string; agent?: string; input?: unknown };
       const currentState = bos.getState();
       if (!currentState.selectedDna) return;
 
-      const nextStep: ProtocolStep | undefined = PROTOCOL_STEPS[currentState.currentStep];
-      const stepLine = nextStep
-        ? `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${nextStep.name}`
-        : `Protocol complete (${PROTOCOL_STEPS.length}/${PROTOCOL_STEPS.length})`;
-      const summary = [
-        `[Behavior-OS] Active DNA: ${currentState.selectedDna}`,
-        stepLine,
-        `Available DNA patterns (${loadedDnaPatterns.size}): ${Array.from(
-          loadedDnaPatterns.keys(),
-        ).join(', ')}`,
-      ].join('\n');
+      const toolName = typeof eventTyped.tool === 'string' ? eventTyped.tool.toLowerCase() : '';
+      if (!GOVERNED_TOOL.test(toolName)) return;
 
-      event.system.push({ type: 'text', text: summary });
+      try {
+        const context = buildGovernanceContext({
+          tool: toolName,
+          metadata: asRecord(eventTyped.input),
+        });
+        const decision = bos.evaluateGovernance(toolName, {
+          agent: eventTyped.agent ?? 'opencode-agent',
+          context,
+        });
+        if (decision.verdict === 'escalate') {
+          console.warn(`[Behavior-OS] Escalation advised: ${decision.reason}`);
+        }
+      } catch (error) {
+        console.warn(`[Behavior-OS] Governance error: ${describeError(error)}`);
+      }
+    });
+
+    // Capture tool failures as learning events (without advancing the protocol).
+    await ctx.tool.hook('execute.after', async (event): Promise<void> => {
+      if (event.status !== 'error') return;
+      const currentState = bos.getState();
+      if (!currentState.selectedDna) return;
+      try {
+        bos.recordLearning({
+          type: 'failure',
+          source: `tool:${event.tool}`,
+          content: event.error.message,
+          impact: 'medium',
+          relatedPattern: currentState.selectedDna,
+          advanceProtocol: false,
+        });
+      } catch (error) {
+        console.warn(`[Behavior-OS] Learning capture error: ${describeError(error)}`);
+      }
+    });
+
+    // Intelligent DNA selection: classify the user's prompt and auto-select a
+    // matching pattern when none is active yet.
+    await ctx.session.hook('prompt', async (event): Promise<void> => {
+      const text = event.prompt?.text?.trim() ?? '';
+      if (!text) return;
+      if (bos.getState().selectedDna) return;
+
+      const match = classifyDNA(text, loadedDnaPatterns.keys());
+      if (!match) return;
+      const dna = loadedDnaPatterns.get(match);
+      if (!dna) return;
+
+      await bos.loadDNA(dna);
+      event.metadata = { ...(event.metadata ?? {}), behavioros: { autoSelectedDna: match } };
+      console.log(`[Behavior-OS] Auto-selected DNA "${match}" from prompt intent`);
+    });
+
+    // Session context hook - surface BehaviorOS state to the model. Always
+    // injects guidance so cold-start agents are governed too.
+    await ctx.session.hook('context', async (event): Promise<void> => {
+      const currentState = bos.getState();
+      const patterns = Array.from(loadedDnaPatterns.keys()).join(', ');
+
+      if (currentState.selectedDna) {
+        const nextStep: ProtocolStep | undefined = PROTOCOL_STEPS[currentState.currentStep];
+        const stepLine = nextStep
+          ? `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${nextStep.name} (use ${nextStep.tool})`
+          : `Protocol complete (${PROTOCOL_STEPS.length}/${PROTOCOL_STEPS.length})`;
+        event.system.push({
+          type: 'text',
+          text: [
+            `[Behavior-OS] Active DNA: ${currentState.selectedDna}`,
+            stepLine,
+            `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
+          ].join('\n'),
+        });
+        return;
+      }
+
+      event.system.push({
+        type: 'text',
+        text: [
+          '[Behavior-OS] No DNA pattern selected yet.',
+          'Before mutating files or running risky commands, call bos_select_dna with the pattern that best matches the task.',
+          `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
+          'Then follow the 7-step protocol: select DNA -> list DNA -> get state -> create mission -> start mission -> run audit -> record learning.',
+        ].join('\n'),
+      });
     });
   },
 });

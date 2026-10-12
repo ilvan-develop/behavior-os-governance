@@ -51,10 +51,13 @@ server.registerTool(
   async ({ action, agent, scope, context }) => {
     try {
       const bos = getBehaviorOS();
+      // `context` is the condition bag the engine matches rule conditions
+      // against, so it must be nested under `context.context` (and always carry
+      // the action). Spreading it at the top level silently matched no rules.
       const decision = bos.evaluateGovernance(action, {
         agent,
         scope,
-        ...context,
+        context: { action, ...(context ?? {}) },
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(decision, null, 2) }],
@@ -107,6 +110,45 @@ server.registerTool(
       await bos.loadDNA(dna);
       return {
         content: [{ type: 'text', text: `DNA pattern "${pattern}" selected successfully.` }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_dna',
+  {
+    description: 'List all available DNA patterns',
+    inputSchema: z.object({}),
+    annotations: {
+      readOnlyHint: true,
+      title: 'List DNA Patterns',
+    },
+  },
+  async () => {
+    try {
+      const dnas = await loadDNAPatterns();
+      const patterns = Object.entries(dnas).map(([key, dna]) => ({
+        key,
+        name: dna.name,
+        version: dna.version,
+        description: dna.description,
+        governanceRules: dna.governance?.length ?? 0,
+      }));
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ total: patterns.length, patterns }, null, 2) },
+        ],
       };
     } catch (error) {
       return {
@@ -509,26 +551,27 @@ server.registerResource(
   'behavioros://dna/catalog',
   'behavioros://dna/catalog',
   { mimeType: 'application/json', description: 'DNA Catalog' },
-  async () => ({
-    contents: [
-      {
-        uri: 'behavioros://dna/catalog',
-        text: JSON.stringify(
-          {
-            available: [
-              'surgical-team',
-              'enterprise-governance',
-              'military-operations',
-              'lean-factory',
-            ],
-            default: 'enterprise-governance',
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  }),
+  async () => {
+    const dnas = await loadDNAPatterns();
+    const available = Object.keys(dnas).sort();
+    return {
+      contents: [
+        {
+          uri: 'behavioros://dna/catalog',
+          text: JSON.stringify(
+            {
+              available,
+              default: available.includes('enterprise-governance')
+                ? 'enterprise-governance'
+                : available[0],
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  },
 );
 
 // ============================================================

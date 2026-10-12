@@ -11,6 +11,9 @@ coverage/
 !.opencode/plugins/
 .opencode/plugins/*
 !.opencode/plugins/behavioros.ts
+!.opencode/skills/
+.opencode/skills/*
+!.opencode/skills/behavior-os/
 .claude/
 .cursor/
 .vscode/

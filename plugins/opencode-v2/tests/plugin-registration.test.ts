@@ -20,12 +20,25 @@ interface FakeContext {
   session: {
     hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
   };
+  permission: {
+    hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
+  };
+}
+
+interface FakePermissionEvent {
+  action: string;
+  resources?: string[];
+  agent?: string;
+  metadata?: Record<string, unknown>;
+  effect?: 'allow' | 'ask' | 'deny';
+  message?: string;
 }
 
 function createFakeContext(locationDirectory: string) {
   const addedTools: CapturedTool[] = [];
   const toolHooks: Record<string, unknown> = {};
   const sessionHooks: Record<string, unknown> = {};
+  const permissionHooks: Record<string, unknown> = {};
 
   const ctx: FakeContext = {
     location: { directory: locationDirectory },
@@ -52,9 +65,25 @@ function createFakeContext(locationDirectory: string) {
         return { dispose: async () => {} };
       },
     },
+    permission: {
+      hook: async (name, cb) => {
+        permissionHooks[name] = cb;
+        return { dispose: async () => {} };
+      },
+    },
   };
 
-  return { ctx, addedTools, toolHooks, sessionHooks };
+  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks };
+}
+
+async function runTool(
+  addedTools: CapturedTool[],
+  name: string,
+  input: Record<string, unknown> = {},
+): Promise<{ content: string }> {
+  const tool = addedTools.find((t) => t.name === name);
+  if (!tool?.execute) throw new Error(`tool ${name} not registered`);
+  return tool.execute(input) as Promise<{ content: string }>;
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -135,24 +164,96 @@ describe('behavior-os plugin registration', () => {
     expect(enumValues).toContain('surgical-team');
   });
 
-  it('registers the execute.before governance hook and the session context hook', async () => {
-    const { ctx, toolHooks, sessionHooks } = createFakeContext(repoRoot);
+  it('registers the tool, session and permission hooks', async () => {
+    const { ctx, toolHooks, sessionHooks, permissionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(Object.keys(toolHooks)).toContain('execute.before');
-    expect(Object.keys(sessionHooks)).toContain('context');
+    expect(Object.keys(toolHooks)).toEqual(
+      expect.arrayContaining(['execute.before', 'execute.after']),
+    );
+    expect(Object.keys(sessionHooks)).toEqual(expect.arrayContaining(['context', 'prompt']));
+    expect(Object.keys(permissionHooks)).toContain('evaluate');
     expect(typeof toolHooks['execute.before']).toBe('function');
+    expect(typeof toolHooks['execute.after']).toBe('function');
     expect(typeof sessionHooks.context).toBe('function');
+    expect(typeof sessionHooks.prompt).toBe('function');
+    expect(typeof permissionHooks.evaluate).toBe('function');
   });
 
-  it('governance hook is a no-op when no DNA is selected', async () => {
-    const { ctx, toolHooks } = createFakeContext(repoRoot);
+  it('injects cold-start guidance into the session context even without a DNA', async () => {
+    const { ctx, sessionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    const hook = toolHooks['execute.before'] as (event: unknown) => Promise<void>;
+    const event = { system: [] as Array<{ type: string; text: string }> };
+    await (sessionHooks.context as (e: unknown) => Promise<void>)(event);
+
+    expect(event.system).toHaveLength(1);
+    expect(event.system[0].text).toContain('No DNA pattern selected');
+    expect(event.system[0].text).toContain('bos_select_dna');
+  });
+
+  it('governance and permission hooks are a no-op when no DNA is selected', async () => {
+    const { ctx, toolHooks, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const before = toolHooks['execute.before'] as (event: unknown) => Promise<void>;
     await expect(
-      hook({ tool: 'bash', agent: 'test', input: { command: 'echo hi' } }),
+      before({ tool: 'bash', agent: 'test', input: { command: 'echo hi' } }),
     ).resolves.toBeUndefined();
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = { action: 'bash', resources: ['deploy to production'] };
+    await expect(permission(event)).resolves.toBeUndefined();
+    expect(event.effect).toBeUndefined();
+  });
+
+  it('auto-selects a DNA pattern from the prompt intent', async () => {
+    const { ctx, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const event = {
+      prompt: { text: 'Update the patient record handling for HIPAA compliance' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+
+    expect(event.metadata.behavioros).toEqual({ autoSelectedDna: 'healthcare-hipaa' });
+  });
+
+  it('denies a production change through the permission hook once a DNA is selected', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    expect(event.effect).toBe('deny');
+    expect(event.message).toMatch(/surgical/i);
+  });
+
+  it('escalates (ask) a deployment through the permission hook under devops-pipeline', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'devops-pipeline' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    expect(event.effect).toBe('ask');
+    expect(event.message).toMatch(/behavior-os/i);
   });
 });
 

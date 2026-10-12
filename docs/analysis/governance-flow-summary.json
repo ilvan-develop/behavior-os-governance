@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-12T10:05:53.213Z",
+  "generatedAt": "2026-10-12T10:37:32.546Z",
   "totalScenarios": 1000,
   "partA": {
     "scenarios": 945,
@@ -7,10 +7,14 @@
     "dnasWithBlockRule": 19,
     "verdictsByProvider": {
       "plugin": {
-        "allow": 315
+        "allow": 261,
+        "escalate": 44,
+        "deny": 10
       },
       "mcp": {
-        "allow": 315
+        "deny": 190,
+        "escalate": 110,
+        "allow": 15
       },
       "caller-correct": {
         "deny": 190,
@@ -18,17 +22,18 @@
         "allow": 15
       }
     },
-    "scenariosWhereBlockRuleExistsButVerdictAllows": 570,
-    "gapScenarios": 570
+    "scenariosWhereBlockRuleExistsButVerdictAllows": 231,
+    "gapScenarios": 231
   },
   "partB": {
     "scenarios": 55,
-    "promptHookRegistered": 0,
-    "afterHookRegistered": 0,
-    "permissionHookRegistered": 0,
+    "promptHookRegistered": 11,
+    "afterHookRegistered": 11,
+    "permissionHookRegistered": 11,
     "toolExecuteBeforeBlocks": 0,
-    "modelContextInjected": 5,
-    "modelContextWithoutDnaInjected": 0,
-    "gapScenarios": 50
+    "permissionEnforced": 6,
+    "modelContextInjected": 11,
+    "modelContextWithoutDnaInjected": 6,
+    "gapScenarios": 0
   }
 }

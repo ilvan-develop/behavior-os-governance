@@ -8,9 +8,14 @@ Artefactos: `docs/analysis/governance-flow-scenarios.csv` (1000 linhas),
 `docs/analysis/governance-flow-summary.json`, gerados por
 `scripts/analyze-governance-flow.mjs`.
 
+> **Atualização (mesma data) — P0 implementado e verificado.**
+> A governação agora **bloqueia de facto**. Ver §8 para o estado de cada finding, o
+> mapeamento para os ficheiros alterados e as provas E2E (`opencode run`). Os números
+> da Parte A/B em §4 foram regenerados após a correção.
+
 ---
 
-## 0. Sumário executivo (TL;DR)
+## 0. Sumário executivo (TL;DR — diagnóstico **antes** da correção)
 
 **O comportamento dos agentes NÃO está a ser governado hoje.** Os mecanismos existem,
 mas nenhum deles bloqueia efetivamente:
@@ -242,29 +247,36 @@ Curiosidade: `ctx.storage` (durabilidade por plugin) está disponível e não é
 
 ## 4. Resultados da matriz (1000 cenários)
 
+> Os valores abaixo são os **pós-correção** (regenerados com o plugin/core atuais).
+> A coluna "antes" fica como referência do diagnóstico.
+
 ### Parte A — alcançabilidade da governação (945)
 
-| Fornecedor | allow | escalate | deny |
-|---|---:|---:|---:|
-| **plugin** (como está) | **315** | 0 | 0 |
-| **mcp** (como está) | **315** | 0 | 0 |
-| **caller-correct** (contexto aninhado) | 15 | 110 | 190 |
+| Fornecedor | allow | escalate | deny | *(antes)* |
+|---|---:|---:|---:|---:|
+| **plugin** (corrigido) | 261 | 44 | 10 | *315 allow* |
+| **mcp** (corrigido) | 15 | 110 | 190 | *315 allow* |
+| **caller-correct** | 15 | 110 | 190 | *15 / 110 / 190* |
 
 - **19/21** DNAs definem regra de *block*; **20/21** definem *escalate*; só `lean-factory`
   é só-`warn` (0 deny, 0 escalate).
-- **570** cenários em que existe regra de *block* e o contexto era satisfazível, mas os
-  canais instalados devolvem `allow`.
+- O plugin aplica heurísticas genéricas (`deploy`/`production`/`destrutivo`/PII…) e por
+  isso bloqueia/escala mudanças de produção, mas **não** classifica flags de domínio
+  (`no-monitoring`, `invalid-circuit`, …). Por isso ainda há **231** cenários
+  block-rule-mas-allow **no plugin** (era 570 no total). O MCP passou a igualar a chamada
+  correta: o **caller** é que fornece a bolsa de condições.
 
 ### Parte B — fluxo (55)
 
-| Métrica | Valor |
-|---|---:|
-| `session.prompt` registados | **0** |
-| `tool.execute.after` registados | **0** |
-| `permission.evaluate` registados | **0** |
-| Bloqueios via `execute.before` | **0** |
-| Injeções de contexto (com DNA / sem DNA) | **5 / 0** |
-| Cenários com gap | **50** |
+| Métrica | Antes | Agora |
+|---|---:|---:|
+| `session.prompt` registados | 0 | **11** |
+| `tool.execute.after` registados | 0 | **11** |
+| `permission.evaluate` registados | 0 | **11** |
+| Bloqueios via `execute.before` (throw) | 0 | 0 (passou a advisory) |
+| Ações **efetivamente** negadas/escaladas via `permission.evaluate` | 0 | **6** |
+| Injeções de contexto (com DNA / sem DNA) | 5 / 0 | **11 / 6** |
+| Cenários com gap (plugin, flags de domínio) | 50 | 231 |
 
 ---
 
@@ -335,3 +347,73 @@ node scripts/analyze-governance-flow.mjs
 
 > Os números acima foram reproduzidos a partir do build atual (`dist/`). Sempre que o
 > plugin/core mudar, correr `pnpm build` e repetir o analisador.
+
+---
+
+## 8. Estado de implementação (P0 feito · P1 parcial · P2 pendente)
+
+Implementado e verificado. Cada correção tem testes que a provam.
+
+### P0 — governação real ✅
+
+| Finding | Correção | Ficheiro | Prova |
+|---|---|---|---|
+| **F1** nunca bloqueia | Enforcement passou para o hook **`permission.evaluate`**; o contexto é construído de facto a partir de `action`/`resources`/`metadata`; `execute.before` deixou de lançar (é *advisory*) | `plugins/opencode-v2/src/index.ts` | `permission.effect = "deny"` em `verify:plugin`, testes, **E2E** |
+| **F2** mecanismo errado | Hook `permission.hook("evaluate")` registado; mapeia `deny`/`escalate` → `effect: "deny"`/`"ask"` + `message` | `index.ts` | `permissionHooks.evaluate` presente (11 cenários) |
+| **F3** bug de contexto no MCP | `context.context` aninhado + `action` | `packages/mcp-server/src/server.ts` | `smoke:mcp` → `escalate` por `change-control` |
+| **F5** cold start mudo | `session.context` injeta sempre (com ou sem DNA) | `index.ts` | injeções **11 / 6** (era 5 / 0) |
+
+### P1 — inteligência de fluxo 🔶
+
+| Finding | Correção | Estado |
+|---|---|---|
+| **F4** sem hook de mensagem | `session.prompt` classifica a intenção e **auto-seleciona** o DNA (ex.: "patient/HIPAA" → `healthcare-hipaa`) | ✅ |
+| **F6** seleção não inteligente | `classifyDNA` (21 padrões × palavras-chave, com desempate por pontuação) | ✅ |
+| **F7** sem `execute.after` | Hook regista `failure` no learning engine (sem avançar o protocolo — `recordLearning({ advanceProtocol: false })`) | ✅ |
+| **F7** missão não automática | Criação automática de missão **não** implementada (evita spam por mensagem) | ⏳ |
+| **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2) | ✅ |
+| **F9** estado só em memória | Persistência via `ctx.storage` **não** implementada | ⏳ |
+
+### P2 — robustez 🔶
+
+| Finding | Correção | Estado |
+|---|---|---|
+| **F12** paridade MCP | `bos_list_dna` adicionado (MCP passou de 11 → **12** tools) + catálogo `behavioros://dna/catalog` dinâmico | ✅ |
+| **F10** subconjunto de tools no before | `GOVERNED_TOOL = /bash\|write\|edit\|patch\|apply\|shell\|mcp__/i` (advisory) | ✅ |
+| **F11** cache de governação | Ainda recria o engine por chamada | ⏳ |
+
+### Ficheiros novos/alterados (P0/P1)
+
+- `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA` + `buildGovernanceContext`
+  (helpers puros, sem imports do OpenCode; usados pelo plugin e pela análise).
+- `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`,
+  `session.context` (sempre ativo), `tool.execute.before` (advisory),
+  `tool.execute.after` (learning).
+- `packages/core/src/engine/behavior-os.ts` — `recordLearning({ advanceProtocol?: boolean })`.
+- `packages/mcp-server/src/server.ts` — contexto aninhado + `bos_list_dna` + catálogo dinâmico.
+- `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
+- `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
+- `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
+- `plugins/opencode-v2/tests/governance.test.ts` **(novo, 13 testes)** e
+  `plugin-registration.test.ts` (15 testes, +4).
+- `.opencode/skills/behavior-os/SKILL.md` **(novo)** — skill governada (protocolo de 7
+  passos, mapa intenção→DNA, explicação de bloqueios), descoberta automaticamente pelo v2.
+
+### Provas end-to-end (`opencode run`, harness real)
+
+1. `bos_select_dna(surgical-team)` executado via `opencode run` → *"Governance rules activated."*
+2. `opencode run --auto "…echo deploy to production"` →
+   **`permission.rejected`: `[Behavior-OS:Surgical Team] Blocked by rule: sterile-field`**.
+   O `--auto` **não** sobrepõe um `deny` explícito — o bloqueio é real.
+3. Nota observada: durante esta sessão, os próprios `edit`/`write` do agente passaram a ser
+   negados enquanto o DNA `surgical-team` estava ativo no servidor de fundo (partilhado),
+   confirmando que o hook governa **qualquer** ferramenta, não só as tools `bos_*`.
+
+### Como reproduzir
+
+```powershell
+pnpm build; pnpm test; pnpm lint:check; pnpm typecheck
+pnpm verify:plugin      # hooks + deny real
+pnpm smoke:mcp          # 12 tools + match de contexto
+pnpm analyze:flow       # regenera os 1000 cenários
+```
