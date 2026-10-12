@@ -9,6 +9,7 @@
 import type {
   Agent,
   AuditReport,
+  CodeFixResult,
   Decision,
   LearningEvent,
   Mission,
@@ -40,6 +41,10 @@ export interface Store {
   // Voting/quorum decisions
   saveDecision(decision: Decision): void;
   listDecisions(limit?: number): Decision[];
+
+  // Code-fix results (persisted by applyCodeFixes)
+  saveCodeFixResult(result: CodeFixResult): void;
+  listCodeFixResults(limit?: number): CodeFixResult[];
 
   // Key/value metadata
   setMeta(key: string, value: string): void;

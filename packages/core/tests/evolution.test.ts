@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DNA } from '@behavior-os/schemas';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BehaviorOS } from '../src/engine/behavior-os.js';
 import { LearningEngine } from '../src/engine/learning-engine.js';
 
@@ -210,6 +213,147 @@ describe('BehaviorOS proposeCodeFixes', () => {
     expect(bos.proposeCodeFixes()).toHaveLength(0);
     // Explicit threshold overrides config
     expect(bos.proposeCodeFixes(0.7)).toHaveLength(1);
-    expect(bos.proposeCodeFixes(0.7)![0].confidence).toBe(0.76);
+    expect(bos.proposeCodeFixes(0.7)?.[0].confidence).toBe(0.76);
+  });
+});
+
+describe('BehaviorOS applyCodeFixes', () => {
+  let dir: string;
+  let dbPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'bos-codefix-'));
+    dbPath = join(dir, 'state.db');
+  });
+
+  afterEach(() => {
+    // Best-effort cleanup; rmSync may fail on Windows if handles are still open.
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+  it('never applies without the opt-in flag', async () => {
+    const bos = new BehaviorOS({ persistence: { path: dbPath } });
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    const result = bos.applyCodeFixes({ apply: true });
+    expect(result.enabled).toBe(false);
+    expect(result.applied).toEqual([]);
+    expect(result.proposals).toHaveLength(1);
+    bos.closeStore();
+  });
+
+  it('proposes (read-only) without mutating state', async () => {
+    const bos = new BehaviorOS();
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    expect(bos.proposeCodeFixes()).toHaveLength(1);
+    expect(bos.listCodeFixResults()).toHaveLength(0);
+  });
+
+  it('persists applied proposals when enabled', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true }, persistence: { path: dbPath } });
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    const result = bos.applyCodeFixes({ apply: true });
+    expect(result.applied).toHaveLength(1);
+    expect(result.proposals).toHaveLength(1);
+    expect(bos.listCodeFixResults()).toHaveLength(1);
+    const saved = bos.listCodeFixResults()[0];
+    expect(saved.pattern).toBe('fix');
+    expect(saved.confidence).toBe(1);
+    expect(saved.applied).toBe(true);
+    bos.closeStore();
+  });
+
+  it('requires approval when votes are supplied', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true }, persistence: { path: dbPath } });
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+
+    const rejected = bos.applyCodeFixes({
+      apply: true,
+      votes: [{ voterId: 'a', choice: 'reject' }],
+    });
+    expect(rejected.decision?.outcome).toBe('rejected');
+    expect(rejected.applied).toEqual([]);
+    expect(bos.listCodeFixResults()).toHaveLength(0);
+
+    const approved = bos.applyCodeFixes({
+      apply: true,
+      votes: [{ voterId: 'a', choice: 'approve' }],
+    });
+    expect(approved.decision?.outcome).toBe('approved');
+    expect(approved.applied).toHaveLength(1);
+    expect(approved.applied[0].voteOutcome).toBe('approved');
+    bos.closeStore();
+  });
+
+  it('records an auditable learning event per applied proposal', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true }, persistence: { path: dbPath } });
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    bos.applyCodeFixes({ apply: true });
+    const learnings = bos.exportState().learnings;
+    expect(learnings.some((l) => l.source === 'code-fix-evolution')).toBe(true);
+    bos.closeStore();
+  });
+
+  it('is idempotent on the proposal id (already-applied proposals are skipped)', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true }, persistence: { path: dbPath } });
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'fix',
+        source: 'ci',
+        content: `f${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+    expect(bos.applyCodeFixes({ apply: true }).applied).toHaveLength(1);
+    // Second call with same events should propose but not re-apply
+    // (proposeCodeFixes recalculates from events; apply records results keyed by pattern)
+    const second = bos.applyCodeFixes({ apply: true });
+    // Same pattern -> already persisted -> not re-applied
+    expect(second.applied).toHaveLength(0);
+    expect(bos.listCodeFixResults()).toHaveLength(1);
+    bos.closeStore();
   });
 });

@@ -47,7 +47,6 @@ class FakePool implements PgPoolLike {
 
   async query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
     this.queries.push(text);
-    const trimmed = text.trim().toUpperCase();
     if (this.failWith) throw this.failWith;
     if (/^\s*INSERT/i.test(text) && values) {
       const [kind, id, createdAt, doc] = values as [string, string, string, string];
@@ -191,16 +190,13 @@ describe('PostgresStore', () => {
     const store = newPostgres(pool);
     await store.connect();
 
-    // Clear mirror so we can verify atomicity.
-    const mirrorDocs = store['docs'] as Map<unknown, Map<string, unknown>>;
-    mirrorDocs.clear();
-
     await store.withTransaction(async () => {
       store.setMeta('k1', 'v1');
       store.setMeta('k2', 'v2');
     });
 
-    const client = pool.client!;
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
     expect(client.queries).toContain('BEGIN');
     expect(client.queries).toContain('COMMIT');
     expect(client.released).toBe(true);
@@ -227,7 +223,8 @@ describe('PostgresStore', () => {
       }),
     ).rejects.toThrow('boom');
 
-    const client = pool.client!;
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
     expect(client.queries).toContain('BEGIN');
     expect(client.queries).toContain('ROLLBACK');
     // Partial writes must NOT leak into the mirror.

@@ -596,6 +596,65 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'bos_apply_code_fixes',
+  {
+    description:
+      'Persist code-fix proposals (requires evolution.enabled + apply:true; optional votes gate via decision engine)',
+    inputSchema: z.object({
+      minConfidence: z.number().optional().describe('Minimum confidence in [0,1] (default 0.8)'),
+      apply: z
+        .boolean()
+        .optional()
+        .describe('Write proposals to the store (requires evolution.enabled)'),
+      votes: z
+        .array(
+          z.object({
+            voterId: z.string(),
+            choice: z.enum(['approve', 'reject', 'abstain']),
+            weight: z.number().optional(),
+            reason: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe('If supplied, the change must be approved by this vote'),
+      policy: z.enum(['majority', 'supermajority', 'unanimous']).optional(),
+    }),
+    annotations: {
+      title: 'Apply code fixes',
+    },
+  },
+  async ({
+    minConfidence,
+    apply,
+    votes,
+    policy,
+  }: {
+    minConfidence?: number;
+    apply?: boolean;
+    votes?: Vote[];
+    policy?: DecisionPolicy;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.applyCodeFixes({ minConfidence, apply, votes, policy });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // ============================================================
 // LEARNING TOOLS
 // ============================================================

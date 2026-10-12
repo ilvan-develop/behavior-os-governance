@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-420+-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-426+-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 8 core engines, 16 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 8 core engines, 17 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -165,7 +165,7 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 16 Tools + 2 Resources
+### MCP Server — 17 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
@@ -228,7 +228,7 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 | Metric | Value |
 |---|---|
 | Test files (`*.test.ts`) | 45 |
-| Test cases (`it`/`test` blocks) | 420 |
+| Test cases (`it`/`test` blocks) | 426 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |
@@ -327,7 +327,7 @@ mcpServers:
 | `@behavior-os/core` | 8 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 16 tools + 2 resources | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 17 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
 
 ## License

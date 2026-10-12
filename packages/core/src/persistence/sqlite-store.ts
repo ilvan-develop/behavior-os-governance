@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import type {
   Agent,
   AuditReport,
+  CodeFixResult,
   Decision,
   LearningEvent,
   Mission,
@@ -124,6 +125,18 @@ export class SqliteStore implements Store {
         subject TEXT,
         policy TEXT,
         outcome TEXT,
+        mission_id TEXT,
+        created_at TEXT,
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS code_fix_results (
+        id TEXT PRIMARY KEY,
+        proposal_id TEXT,
+        pattern TEXT,
+        confidence REAL,
+        applied INTEGER,
+        vote_outcome TEXT,
+        vote_tally TEXT,
         mission_id TEXT,
         created_at TEXT,
         json TEXT NOT NULL
@@ -306,6 +319,44 @@ export class SqliteStore implements Store {
       .prepare('SELECT json FROM decisions ORDER BY created_at DESC LIMIT ?')
       .all(limit);
     return this.parseRows<Decision>(rows);
+  }
+
+  // Code fix results (applyCodeFixes) --------------------------------------
+  saveCodeFixResult(result: CodeFixResult): void {
+    this.db
+      .prepare(
+        `INSERT INTO code_fix_results (id, proposal_id, pattern, confidence, applied, vote_outcome, vote_tally, mission_id, created_at, json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           proposal_id = excluded.proposal_id,
+           pattern = excluded.pattern,
+           confidence = excluded.confidence,
+           applied = excluded.applied,
+           vote_outcome = excluded.vote_outcome,
+           vote_tally = excluded.vote_tally,
+           mission_id = excluded.mission_id,
+           created_at = excluded.created_at,
+           json = excluded.json`,
+      )
+      .run(
+        result.id,
+        result.proposalId,
+        result.pattern,
+        result.confidence,
+        result.applied ? 1 : 0,
+        result.voteOutcome ?? null,
+        result.voteTally ? JSON.stringify(result.voteTally) : null,
+        result.missionId ?? null,
+        result.timestamp,
+        JSON.stringify(result),
+      );
+  }
+
+  listCodeFixResults(limit = 50): CodeFixResult[] {
+    const rows = this.db
+      .prepare('SELECT json FROM code_fix_results ORDER BY created_at DESC LIMIT ?')
+      .all(limit);
+    return this.parseRows<CodeFixResult>(rows);
   }
 
   // Key/value metadata -----------------------------------------------------

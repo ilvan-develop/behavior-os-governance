@@ -23,6 +23,7 @@ import { createRequire } from 'node:module';
 import type {
   Agent,
   AuditReport,
+  CodeFixResult,
   Decision,
   LearningEvent,
   Mission,
@@ -68,6 +69,7 @@ type Kind =
   | 'audit_report'
   | 'pipeline_run'
   | 'decision'
+  | 'code_fix_result'
   | 'meta';
 
 interface MirrorEntry {
@@ -342,6 +344,15 @@ export class PostgresStore implements Store {
 
   listDecisions(limit = 50): Decision[] {
     return this.list<Decision>('decision', limit);
+  }
+
+  // Code-fix results -------------------------------------------------------
+  saveCodeFixResult(result: CodeFixResult): void {
+    this.upsert('code_fix_result', result.id, result);
+  }
+
+  listCodeFixResults(limit = 50): CodeFixResult[] {
+    return this.list<CodeFixResult>('code_fix_result', limit);
   }
 
   // Key/value metadata -----------------------------------------------------

@@ -3,7 +3,9 @@ import type {
   AgentState,
   AuditReport,
   CodeFixProposal,
+  CodeFixResult,
   Decision,
+  DecisionOutcome,
   DecisionPolicy,
   DNA,
   EvolutionProposal,
@@ -68,6 +70,18 @@ export interface EvolutionResult {
   proposals: EvolutionProposal[];
   /** The subset that was actually written into the active DNA. */
   applied: EvolutionProposal[];
+  /** Whether `config.evolution.enabled` allowed writing. */
+  enabled: boolean;
+  /** Present when votes were supplied to gate the change. */
+  decision?: Decision;
+}
+
+/** Outcome of {@link BehaviorOS.applyCodeFixes}. */
+export interface CodeFixApplyResult {
+  /** Proposals that met the confidence bar (including already-applied ones). */
+  proposals: CodeFixProposal[];
+  /** The subset that was persisted as {@link CodeFixResult} records. */
+  applied: CodeFixResult[];
   /** Whether `config.evolution.enabled` allowed writing. */
   enabled: boolean;
   /** Present when votes were supplied to gate the change. */
@@ -578,6 +592,84 @@ export class BehaviorOS {
    */
   proposeCodeFixes(minConfidence = this.config.evolution?.minConfidence ?? 0.8): CodeFixProposal[] {
     return this.getLearningEngine().proposeCodeFixes(minConfidence);
+  }
+
+  /**
+   * Apply code-fix proposals to persistent storage. Three independent locks must
+   * all be satisfied (same design as `applyEvolution`):
+   * 1. `config.evolution.enabled === true`;
+   * 2. the call passes `apply: true`;
+   * 3. when `votes` are supplied, the decision engine approves them.
+   *
+   * Unlike `applyEvolution`, this does **not** mutate the active DNA — it only
+   * records each accepted proposal so the agent can act on it later.
+   */
+  applyCodeFixes(
+    options: {
+      minConfidence?: number;
+      apply?: boolean;
+      votes?: Vote[];
+      policy?: DecisionPolicy;
+    } = {},
+  ): CodeFixApplyResult {
+    const minConfidence = options.minConfidence ?? this.config.evolution?.minConfidence ?? 0.8;
+    const proposals = this.proposeCodeFixes(minConfidence);
+    const enabled = this.config.evolution?.enabled === true;
+
+    if (options.apply !== true || !enabled) {
+      return { proposals, applied: [], enabled };
+    }
+
+    let decision: Decision | undefined;
+    let voteOutcome: DecisionOutcome | undefined;
+    let voteTally: { approve: number; reject: number; abstain: number } | undefined;
+    if (options.votes && options.votes.length > 0) {
+      decision = this.decide({
+        subject: `Code fix evolution (${proposals.length} proposal(s))`,
+        votes: options.votes,
+        policy: options.policy,
+      });
+      voteOutcome = decision.outcome;
+      voteTally = { approve: decision.approve, reject: decision.reject, abstain: decision.abstain };
+      if (decision.outcome !== 'approved') {
+        return { proposals, applied: [], enabled, decision };
+      }
+    }
+
+    const applied: CodeFixResult[] = [];
+    const existingPatterns = new Set(this.listCodeFixResults().map((r) => r.pattern));
+    for (const proposal of proposals) {
+      if (existingPatterns.has(proposal.pattern)) continue;
+      const result: CodeFixResult = {
+        id: `fixr-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        proposalId: proposal.id,
+        pattern: proposal.pattern,
+        confidence: proposal.confidence,
+        applied: true,
+        ...(voteOutcome ? { voteOutcome, voteTally } : {}),
+        timestamp: new Date().toISOString(),
+        missionId: this.agentState.activeMission ?? undefined,
+      };
+      this.store?.saveCodeFixResult(result);
+      this.recordLearning({
+        type: 'optimization',
+        source: 'code-fix-evolution',
+        content: `Applied code-fix proposal ${result.id} (confidence ${result.confidence})`,
+        impact: 'medium',
+        relatedPattern: proposal.pattern,
+        advanceProtocol: false,
+      });
+      applied.push(result);
+    }
+
+    return { proposals, applied, enabled, ...(decision ? { decision } : {}) };
+  }
+
+  /**
+   * Read persisted code-fix results, newest first. Empty without a store.
+   */
+  listCodeFixResults(limit = 50): CodeFixResult[] {
+    return this.store?.listCodeFixResults(limit) ?? [];
   }
 
   // Decisions (voting/quorum) ----------------------------------------------

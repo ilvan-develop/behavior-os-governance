@@ -396,6 +396,21 @@ export type DecisionOutcome = z.infer<typeof DecisionOutcomeSchema>;
 export type Decision = z.infer<typeof DecisionSchema>;
 export type EvolutionProposal = z.infer<typeof EvolutionProposalSchema>;
 export type CodeFixProposal = z.infer<typeof CodeFixProposalSchema>;
+export const CodeFixResultSchema = z.object({
+  id: z.string(),
+  /** The originating proposal id returned by `proposeCodeFixes`. */
+  proposalId: z.string(),
+  pattern: z.string(),
+  confidence: z.number(),
+  applied: z.boolean(),
+  /** Present when votes were supplied — mirrors DecisionOutcome. */
+  voteOutcome: z.enum(['approved', 'rejected', 'no_quorum']).optional(),
+  /** Vote tally at the time of application. */
+  voteTally: z.object({ approve: z.number(), reject: z.number(), abstain: z.number() }).optional(),
+  timestamp: z.string(),
+  missionId: z.string().optional(),
+});
+export type CodeFixResult = z.infer<typeof CodeFixResultSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;
