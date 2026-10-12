@@ -130,7 +130,7 @@ All data is validated through Zod v4.4.3 schemas:
 - JSON-RPC protocol support
 
 ### OpenCode v2 Plugin (single native channel)
-- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()`
+- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - `execute.before` governance hook intercepting write/edit/bash actions
 - Session context hook injecting protocol state
 - DNA patterns loaded from `dnas/` and merged with built-ins

@@ -113,7 +113,7 @@ Mission lifecycle management:
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
-- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()`
+- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`

@@ -52,6 +52,8 @@ behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 
 > **Nota**: usa `opencode run --agent <agent>` para a sessão carregar o plugin.
 > Sem `--agent`, a sessão corre sem agente e as tools `bos_*` podem não aparecer.
+> As tools são registadas como **directas** (`options.codemode: false`), pelo que o
+> agente as invoca **pelo nome** — não é preciso envolvê-las em `execute`/Code Mode.
 > O `currentStep` do protocolo avança automaticamente (monotónico, de 1 a 7):
 > selecionar DNA → listar DNA → resolver estado → criar/iniciar missão → auditoria →
 > aprendizagem. O hook de contexto mostra sempre o próximo passo.
