@@ -1,22 +1,65 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { BehaviorOS } from '@behavior-os/core';
+import { BehaviorOS, type BehaviorOSSnapshot } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
 import { load as yamlLoad } from 'js-yaml';
-import { buildGovernanceContext, classifyDNA } from './governance.js';
+import { buildGovernanceContext, classifyDNA, classifyMissionIntent } from './governance.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
 let loadedDnaPatterns: Map<string, DNA> = new Map();
+
+/** Storage key under which the engine snapshot is persisted. */
+const STORAGE_KEY = 'behavioros:state';
 
 function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
     behaviorOS = new BehaviorOS();
   }
   return behaviorOS;
+}
+
+/** Value type accepted by `ctx.storage.set`. */
+type StorageJson = Parameters<Context['storage']['set']>[1];
+
+/** JSON-round-trip a snapshot so only persistable values reach storage. */
+function toStorageJson(value: unknown): StorageJson {
+  return JSON.parse(JSON.stringify(value)) as StorageJson;
+}
+
+/**
+ * Persist the current engine snapshot so state survives a restart. Best-effort:
+ * a missing or failing storage domain must never break a tool call.
+ */
+async function persistState(ctx: Context): Promise<void> {
+  const storage: Context['storage'] | undefined = ctx.storage;
+  if (!storage || typeof storage.set !== 'function' || !behaviorOS) return;
+  try {
+    await storage.set(STORAGE_KEY, toStorageJson(behaviorOS.exportState()));
+  } catch (error) {
+    console.warn(`[Behavior-OS] State persist failed: ${describeError(error)}`);
+  }
+}
+
+/** Restore a persisted snapshot, if any. Returns whether state was restored. */
+async function restorePersistedState(ctx: Context): Promise<boolean> {
+  const storage: Context['storage'] | undefined = ctx.storage;
+  if (!storage || typeof storage.get !== 'function') return false;
+  try {
+    const raw = await storage.get(STORAGE_KEY);
+    if (!raw) return false;
+    const restored = getBehaviorOS().importState(raw as unknown as BehaviorOSSnapshot);
+    if (restored) {
+      console.log('[Behavior-OS] Restored persisted state from ctx.storage');
+    }
+    return restored;
+  } catch (error) {
+    console.warn(`[Behavior-OS] State restore failed: ${describeError(error)}`);
+    return false;
+  }
 }
 
 /** Tools that can mutate state or shell out and therefore need governance. */
@@ -145,6 +188,10 @@ export default Plugin.define({
       }
     }
 
+    // Restore any state persisted by a previous process so protocol progress,
+    // the selected DNA, missions and learnings survive a restart.
+    await restorePersistedState(ctx);
+
     await ctx.tool.transform((editor) => {
       // Register every bos_* tool as a direct (non-Code-Mode) tool. In v2,
       // tools default to Code Mode exposure (options.codemode defaults to true)
@@ -206,6 +253,7 @@ export default Plugin.define({
             };
           }
           await bos.loadDNA(dna);
+          await persistState(ctx);
           return {
             content: `DNA pattern "${params.pattern}" selected. Governance rules activated.`,
           };
@@ -228,6 +276,7 @@ export default Plugin.define({
             qualityGates: dna.quality.length,
           }));
           bos.advanceProtocolStep('bos_list_dna');
+          await persistState(ctx);
           return {
             content: JSON.stringify({ patterns, total: patterns.length }, null, 2),
           };
@@ -272,6 +321,7 @@ export default Plugin.define({
               | 'incident',
             priority: params.priority as 'critical' | 'high' | 'medium' | 'low',
           });
+          await persistState(ctx);
           return {
             content: `Mission created: ${mission.id}`,
           };
@@ -297,6 +347,7 @@ export default Plugin.define({
               content: `Mission "${params.missionId}" not found`,
             };
           }
+          await persistState(ctx);
           return {
             content: `Mission "${params.missionId}" started. Status: ${mission.status}`,
           };
@@ -350,6 +401,7 @@ export default Plugin.define({
             agentId: params.agentId,
             stages: params.stages,
           });
+          await persistState(ctx);
           return {
             content: `Audit complete: ${report.overall}`,
           };
@@ -431,6 +483,7 @@ export default Plugin.define({
             impact: params.impact as 'low' | 'medium' | 'high' | 'critical',
             relatedMission: params.relatedMission,
           });
+          await persistState(ctx);
           return {
             content: `Learning recorded: ${event.id}`,
           };
@@ -457,6 +510,7 @@ export default Plugin.define({
         input: { type: 'object', properties: {} },
         execute: async (): Promise<{ content: string }> => {
           bos.advanceProtocolStep('bos_get_state');
+          await persistState(ctx);
           const state = bos.getState();
           return {
             content: JSON.stringify(state, null, 2),
@@ -537,26 +591,59 @@ export default Plugin.define({
           relatedPattern: currentState.selectedDna,
           advanceProtocol: false,
         });
+        await persistState(ctx);
       } catch (error) {
         console.warn(`[Behavior-OS] Learning capture error: ${describeError(error)}`);
       }
     });
 
-    // Intelligent DNA selection: classify the user's prompt and auto-select a
-    // matching pattern when none is active yet.
+    // Intelligent DNA selection + auto-mission: classify the user's prompt,
+    // auto-select a matching pattern when none is active yet, and open a mission
+    // so `activeMission` reflects the work in progress.
     await ctx.session.hook('prompt', async (event): Promise<void> => {
       const text = event.prompt?.text?.trim() ?? '';
       if (!text) return;
-      if (bos.getState().selectedDna) return;
 
-      const match = classifyDNA(text, loadedDnaPatterns.keys());
-      if (!match) return;
-      const dna = loadedDnaPatterns.get(match);
-      if (!dna) return;
+      const behavioros: Record<string, unknown> = {};
 
-      await bos.loadDNA(dna);
-      event.metadata = { ...(event.metadata ?? {}), behavioros: { autoSelectedDna: match } };
-      console.log(`[Behavior-OS] Auto-selected DNA "${match}" from prompt intent`);
+      // 1) Auto-select a DNA pattern when none is active yet.
+      if (!bos.getState().selectedDna) {
+        const match = classifyDNA(text, loadedDnaPatterns.keys());
+        const dna = match ? loadedDnaPatterns.get(match) : undefined;
+        if (match && dna) {
+          await bos.loadDNA(dna);
+          behavioros.autoSelectedDna = match;
+          console.log(`[Behavior-OS] Auto-selected DNA "${match}" from prompt intent`);
+        }
+      }
+
+      // 2) Auto-create + start a mission so `activeMission` is never left null.
+      // Only when a DNA is active and no mission is currently active, which
+      // prevents per-message mission spam: the mission stays active until it is
+      // completed, failed, or the persisted state is cleared.
+      const state = bos.getState();
+      if (state.selectedDna && !state.activeMission) {
+        const intent = classifyMissionIntent(text);
+        if (intent) {
+          const mission = bos.createMission({
+            ...intent,
+            createdBy: 'behavior-os:auto',
+            // Auto-missions must not advance the protocol: progress still
+            // reflects the steps the agent performs explicitly.
+            advanceProtocol: false,
+          });
+          bos.startMission(mission.id, { advanceProtocol: false });
+          behavioros.autoMission = mission.id;
+          console.log(
+            `[Behavior-OS] Auto-created mission "${mission.id}" (${intent.type}/${intent.priority})`,
+          );
+        }
+      }
+
+      if (Object.keys(behavioros).length > 0) {
+        event.metadata = { ...(event.metadata ?? {}), behavioros };
+        await persistState(ctx);
+      }
     });
 
     // Session context hook - surface BehaviorOS state to the model. Always

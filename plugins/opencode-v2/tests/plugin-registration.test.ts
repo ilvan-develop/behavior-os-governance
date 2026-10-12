@@ -23,6 +23,12 @@ interface FakeContext {
   permission: {
     hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
   };
+  storage: {
+    get: (key: string) => Promise<unknown>;
+    set: (key: string, value: unknown) => Promise<void>;
+    remove: (key: string) => Promise<void>;
+    scan: () => Promise<unknown>;
+  };
 }
 
 interface FakePermissionEvent {
@@ -39,6 +45,7 @@ function createFakeContext(locationDirectory: string) {
   const toolHooks: Record<string, unknown> = {};
   const sessionHooks: Record<string, unknown> = {};
   const permissionHooks: Record<string, unknown> = {};
+  const storageData = new Map<string, unknown>();
 
   const ctx: FakeContext = {
     location: { directory: locationDirectory },
@@ -71,9 +78,19 @@ function createFakeContext(locationDirectory: string) {
         return { dispose: async () => {} };
       },
     },
+    storage: {
+      get: async (key) => storageData.get(key),
+      set: async (key, value) => {
+        storageData.set(key, value);
+      },
+      remove: async (key) => {
+        storageData.delete(key);
+      },
+      scan: async () => ({ entries: [] }),
+    },
   };
 
-  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks };
+  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks, storageData };
 }
 
 async function runTool(
@@ -207,7 +224,7 @@ describe('behavior-os plugin registration', () => {
     expect(event.effect).toBeUndefined();
   });
 
-  it('auto-selects a DNA pattern from the prompt intent', async () => {
+  it('auto-selects a DNA pattern and opens a single mission from the prompt intent', async () => {
     const { ctx, sessionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -217,7 +234,18 @@ describe('behavior-os plugin registration', () => {
     };
     await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
 
-    expect(event.metadata.behavioros).toEqual({ autoSelectedDna: 'healthcare-hipaa' });
+    expect(event.metadata.behavioros).toMatchObject({ autoSelectedDna: 'healthcare-hipaa' });
+    expect((event.metadata.behavioros as { autoMission?: string }).autoMission).toMatch(
+      /^mission-/,
+    );
+
+    // A second prompt must not spawn another mission while one is active.
+    const second = {
+      prompt: { text: 'Now deploy the changes to production' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(second);
+    expect(second.metadata.behavioros).toBeUndefined();
   });
 
   it('denies a production change through the permission hook once a DNA is selected', async () => {

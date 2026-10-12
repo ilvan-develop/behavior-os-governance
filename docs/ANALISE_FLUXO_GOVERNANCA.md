@@ -35,6 +35,9 @@ mas nenhum deles bloqueia efetivamente:
 | **F11** | 🟢 Baixo | `evaluateGovernance` cria um engine novo por chamada → cache de 5 min nunca é usada | `behavior-os.ts:128` |
 | **F12** | 🟢 Baixo | MCP tem 11 tools vs 12 do plugin (falta `bos_list_dna`) | `server.ts` |
 
+> **Pós-correção (ver §8):** F1–F3, F5–F12 resolvidos ou implementados. O estado agora
+> **persiste** via `ctx.storage` (F9) e o cache de governação é **reutilizado** (F11).
+
 **Resumo da matriz:** de 570 cenários em que a DNA define uma regra de *block* e o
 contexto era satisfazível, **0 bloquearam** pelos canais instalados (plugin e MCP).
 Só a chamada "correta" (aninhando `context.context`) produz `deny`/`escalate`.
@@ -233,6 +236,11 @@ state first: always check `.behavioros/state.json`" e "Write state after" — **
 implementado**. O estado vive num singleton do processo do plugin e perde-se no restart.
 Curiosidade: `ctx.storage` (durabilidade por plugin) está disponível e não é usado.
 
+> **Corrigido (P2):** `BehaviorOS.exportState()` / `importState()` serializam o estado
+> completo (protocolo, DNA, missões, aprendizagens). O plugin persiste em `ctx.storage`
+> (chave `behavioros:state`) após cada mutação e **restaura no `setup`**, sobrevivendo a
+> um restart. `docs/PROTOCOL.md` foi atualizado para o mecanismo real.
+
 ### F10/F11/F12 — 🟢 Menores
 
 - **F10:** `governanceTools = ['bash','write','edit','mcp__']` com `toolName.includes(t)`
@@ -241,6 +249,9 @@ Curiosidade: `ctx.storage` (durabilidade por plugin) está disponível e não é
 - **F11:** `evaluateGovernance` faz `registry.createGovernanceEngine(...)` a cada chamada
   (behavior-os.ts:128); o `decisionCache` de 5 min do engine (governance-engine.ts:17)
   nunca é reutilizado entre chamadas.
+  > **Corrigido:** `EngineRegistry.createGovernanceEngine` já reutiliza o engine enquanto a
+  > referência do DNA não muda → o `decisionCache` de 5 min passa a ser efetivamente usado
+  > (coberto por `governance-cache.test.ts` e `persistence.test.ts`).
 - **F12:** MCP expõe 11 tools (falta `bos_list_dna`); plugin expõe 12.
 
 ---
@@ -370,9 +381,9 @@ Implementado e verificado. Cada correção tem testes que a provam.
 | **F4** sem hook de mensagem | `session.prompt` classifica a intenção e **auto-seleciona** o DNA (ex.: "patient/HIPAA" → `healthcare-hipaa`) | ✅ |
 | **F6** seleção não inteligente | `classifyDNA` (21 padrões × palavras-chave, com desempate por pontuação) | ✅ |
 | **F7** sem `execute.after` | Hook regista `failure` no learning engine (sem avançar o protocolo — `recordLearning({ advanceProtocol: false })`) | ✅ |
-| **F7** missão não automática | Criação automática de missão **não** implementada (evita spam por mensagem) | ⏳ |
+| **F7** missão não automática | `session.prompt` cria **e** inicia uma missão (`classifyMissionIntent` → tipo/prioridade) quando há DNA ativo e nenhuma missão ativa; **não** avança o protocolo e **não** repete por mensagem | ✅ |
 | **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2) | ✅ |
-| **F9** estado só em memória | Persistência via `ctx.storage` **não** implementada | ⏳ |
+| **F9** estado só em memória | `BehaviorOS.exportState()/importState()` + persistência automática via **`ctx.storage`** (chave `behavioros:state`); restauro no `setup` | ✅ |
 
 ### P2 — robustez 🔶
 
@@ -380,22 +391,27 @@ Implementado e verificado. Cada correção tem testes que a provam.
 |---|---|---|
 | **F12** paridade MCP | `bos_list_dna` adicionado (MCP passou de 11 → **12** tools) + catálogo `behavioros://dna/catalog` dinâmico | ✅ |
 | **F10** subconjunto de tools no before | `GOVERNED_TOOL = /bash\|write\|edit\|patch\|apply\|shell\|mcp__/i` (advisory) | ✅ |
-| **F11** cache de governação | Ainda recria o engine por chamada | ⏳ |
+| **F11** cache de governação | Efetivamente resolvido: o registry reutiliza o engine enquanto a referência do DNA não muda → `decisionCache` de 5 min ativo | ✅ |
 
-### Ficheiros novos/alterados (P0/P1)
+### Ficheiros novos/alterados (P0/P1/P2)
 
-- `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA` + `buildGovernanceContext`
-  (helpers puros, sem imports do OpenCode; usados pelo plugin e pela análise).
-- `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`,
-  `session.context` (sempre ativo), `tool.execute.before` (advisory),
-  `tool.execute.after` (learning).
-- `packages/core/src/engine/behavior-os.ts` — `recordLearning({ advanceProtocol?: boolean })`.
+- `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA`, `buildGovernanceContext`
+  e `classifyMissionIntent` (helpers puros, sem imports do OpenCode).
+- `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`
+  (auto-DNA + **auto-missão**), `session.context` (sempre ativo), `tool.execute.before`
+  (advisory), `tool.execute.after` (learning); **persistência** via `ctx.storage`.
+- `packages/core/src/engine/behavior-os.ts` — `recordLearning({ advanceProtocol? })`,
+  `createMission`/`startMission({ advanceProtocol? })`, **`activeMission`** (set no start,
+  clear no complete/fail), `exportState()`/`importState()` + `BehaviorOSSnapshot`.
+- `packages/core/src/engine/mission-engine.ts` / `learning-engine.ts` — `snapshot()`/`restore()`.
 - `packages/mcp-server/src/server.ts` — contexto aninhado + `bos_list_dna` + catálogo dinâmico.
 - `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
 - `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
 - `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
-- `plugins/opencode-v2/tests/governance.test.ts` **(novo, 13 testes)** e
-  `plugin-registration.test.ts` (15 testes, +4).
+- `plugins/opencode-v2/tests/governance.test.ts` (**21 testes**),
+  `plugin-registration.test.ts` (15), `plugin-session-flow.test.ts` **(novo, 3)**.
+- `packages/core/tests/persistence.test.ts` **(novo, 8)** — round-trip de estado,
+  `activeMission`, `advanceProtocol:false` e reutilização do cache.
 - `.opencode/skills/behavior-os/SKILL.md` **(novo)** — skill governada (protocolo de 7
   passos, mapa intenção→DNA, explicação de bloqueios), descoberta automaticamente pelo v2.
 

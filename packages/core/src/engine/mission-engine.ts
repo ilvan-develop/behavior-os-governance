@@ -97,4 +97,15 @@ export class MissionEngine {
     mission.updatedAt = new Date().toISOString();
     return mission;
   }
+
+  /** Snapshot every mission as a plain array (JSON-serializable) for persistence. */
+  snapshot(): Mission[] {
+    return Array.from(this.missions.values());
+  }
+
+  /** Replace all in-memory missions with a previously snapshotted array. */
+  restore(missions: readonly Mission[]): void {
+    const entries = Array.isArray(missions) ? missions : [];
+    this.missions = new Map(entries.map((mission) => [mission.id, mission]));
+  }
 }

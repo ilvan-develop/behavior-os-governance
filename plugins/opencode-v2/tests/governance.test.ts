@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildGovernanceContext, classifyDNA, DNA_KEYWORDS } from '../src/governance';
+import {
+  buildGovernanceContext,
+  classifyDNA,
+  classifyMissionIntent,
+  DNA_KEYWORDS,
+} from '../src/governance';
 
 describe('classifyDNA', () => {
   it('maps healthcare language to healthcare-hipaa', () => {
@@ -88,5 +93,53 @@ describe('buildGovernanceContext', () => {
     expect(() =>
       buildGovernanceContext({ resources: [undefined as unknown as string, 'deploy'] }),
     ).not.toThrow();
+  });
+});
+
+describe('classifyMissionIntent', () => {
+  it('classifies an outage as a critical incident', () => {
+    const intent = classifyMissionIntent('Investigate the production outage right now');
+    expect(intent).not.toBeNull();
+    expect(intent?.type).toBe('incident');
+    expect(intent?.priority).toBe('critical');
+  });
+
+  it('classifies a crash fix as a high-priority bugfix', () => {
+    const intent = classifyMissionIntent('Fix the crash in the payment service');
+    expect(intent?.type).toBe('bugfix');
+    expect(intent?.priority).toBe('high');
+  });
+
+  it('classifies a rollout as a deployment', () => {
+    const intent = classifyMissionIntent('Rollout the new service to the staging environment');
+    expect(intent?.type).toBe('deployment');
+  });
+
+  it('classifies an investigation as research', () => {
+    const intent = classifyMissionIntent('Investigate how the matching engine behaves under load');
+    expect(intent?.type).toBe('research');
+  });
+
+  it('defaults substantive prose to a medium feature mission', () => {
+    const intent = classifyMissionIntent('We should think carefully about the onboarding journey');
+    expect(intent).toMatchObject({ type: 'feature', priority: 'medium' });
+  });
+
+  it('returns null for greetings and acknowledgements', () => {
+    expect(classifyMissionIntent('hi')).toBeNull();
+    expect(classifyMissionIntent('thanks')).toBeNull();
+    expect(classifyMissionIntent('ok')).toBeNull();
+  });
+
+  it('returns null for short, non-descriptive input', () => {
+    expect(classifyMissionIntent('do it')).toBeNull();
+    expect(classifyMissionIntent('hey there')).toBeNull();
+  });
+
+  it('truncates long prompts to a bounded title', () => {
+    const intent = classifyMissionIntent(`Implement ${'very detailed requirement '.repeat(10)}`);
+    expect(intent).not.toBeNull();
+    expect(intent?.title.length).toBeLessThanOrEqual(80);
+    expect(intent?.title.endsWith('...')).toBe(true);
   });
 });

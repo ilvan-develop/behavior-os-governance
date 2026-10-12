@@ -67,10 +67,26 @@ O plugin registou os hooks (para além das 12 tools):
   É o único caminho tipado de bloqueio do v2; um `deny` explícito **não** é sobreposto
   por `--auto`.
 - **`session.prompt`** — classifica a intenção da mensagem e **auto-seleciona** o DNA
-  quando ainda não há nenhum (ex.: menção a "patient/HIPAA" → `healthcare-hipaa`).
+  quando ainda não há nenhum (ex.: menção a "patient/HIPAA" → `healthcare-hipaa`). Cria
+  **e inicia automaticamente uma missão** (`classifyMissionIntent` → tipo/prioridade) quando
+  há DNA ativo e nenhuma missão ativa — assim `activeMission` deixa de ficar sempre `null`.
+  **Não** avança o protocolo e **não** cria mais de uma missão por sessão (evita spam).
 - **`session.context`** — injeta **sempre** orientação governada (mesmo sem DNA).
 - **`tool.execute.before`** — apenas *advisory* (log de escalonamento); não bloqueia.
 - **`tool.execute.after`** — regista falhas no learning engine (sem avançar o protocolo).
+
+## Persistência (o estado sobrevive a restart)
+
+O estado do motor (protocolo, DNA selecionado, missões e aprendizagens) é **persistido
+automaticamente** em `ctx.storage` (chave `behavioros:state`) após cada mutação `bos_*` e
+restaurado no arranque do plugin:
+
+- `BehaviorOS.exportState()` → snapshot versionado e JSON-serializável
+  (`{ version, exportedAt, agentState, dna, missions, learnings }`).
+- `BehaviorOS.importState(snapshot)` → restaura e **revincula** os engines de
+  governance/quality ao DNA restaurado (evita cache de decisões de um DNA anterior).
+- Um restart do servidor **não perde** o DNA ativo nem a missão em curso; um snapshot com
+  versão incompatível é ignorado sem tocar no estado atual.
 
 Exemplo de bloqueio real:
 

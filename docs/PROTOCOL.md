@@ -37,8 +37,11 @@ bos_record_learning --type insight --source "post-mortem" --content "<insight>" 
 
 ## Critical Rules
 
-1. **Read state first**: Always check `.behavioros/state.json` at session start
-2. **Write state after**: Update state after each protocol step
+1. **Read state first**: At session start, call `bos_get_state`. The OpenCode plugin
+   also restores persisted state automatically from `ctx.storage` (key `behavioros:state`).
+2. **Write state after**: Update state after each protocol step — the plugin persists
+   automatically after every `bos_*` mutation. The core exposes `BehaviorOS.exportState()`
+   / `importState()` for hosts that persist state themselves.
 3. **DNA selection**: Must call `bos_select_dna` before every task
 4. **Display DNA**: Show DNA block to human for verification
 5. **No direct edits**: Always delegate file operations

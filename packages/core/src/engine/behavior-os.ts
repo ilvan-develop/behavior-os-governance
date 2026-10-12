@@ -39,6 +39,29 @@ const PROTOCOL_TOOL_STEPS: Readonly<Record<string, number>> = {
   bos_record_learning: 7,
 };
 
+/** Current schema version of the persisted {@link BehaviorOSSnapshot}. */
+export const BEHAVIOROS_SNAPSHOT_VERSION = 1;
+
+/**
+ * Complete, JSON-serializable snapshot of the engine state. Hosts (e.g. the
+ * OpenCode plugin) persist this and feed it back to {@link BehaviorOS.importState}
+ * so protocol progress, the selected DNA, missions and learnings survive a
+ * process restart.
+ */
+export interface BehaviorOSSnapshot {
+  version: typeof BEHAVIOROS_SNAPSHOT_VERSION;
+  exportedAt: string;
+  agentState: AgentState;
+  dna: DNA | null;
+  missions: Mission[];
+  learnings: LearningEvent[];
+}
+
+/** Deep-clone via JSON so a snapshot only ever contains persistable values. */
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export class BehaviorOS {
   private registry: EngineRegistry;
   private currentDNA: DNA | null = null;
@@ -198,6 +221,12 @@ export class BehaviorOS {
     priority: string;
     dnaPattern?: string;
     createdBy?: string;
+    /**
+     * Whether creating this mission should advance the 7-step protocol. The
+     * plugin's auto-mission passes `false` so protocol progress still reflects
+     * work the agent performed explicitly. Defaults to `true`.
+     */
+    advanceProtocol?: boolean;
   }): Mission {
     const mission = this.getMissionEngine().create({
       ...options,
@@ -206,24 +235,41 @@ export class BehaviorOS {
       dnaPattern: options.dnaPattern ?? this.currentDNA?.name ?? 'default',
       createdBy: options.createdBy ?? 'system',
     });
-    this.advanceProtocolStep('bos_create_mission');
+    if (options.advanceProtocol !== false) {
+      this.advanceProtocolStep('bos_create_mission');
+    }
     return mission;
   }
 
-  startMission(missionId: string): Mission | null {
+  startMission(missionId: string, options: { advanceProtocol?: boolean } = {}): Mission | null {
     const mission = this.getMissionEngine().start(missionId);
     if (mission) {
-      this.advanceProtocolStep('bos_start_mission');
+      // Starting a mission makes it the single active mission for the session.
+      this.agentState.activeMission = mission.id;
+      this.agentState.updatedAt = new Date().toISOString();
+      if (options.advanceProtocol !== false) {
+        this.advanceProtocolStep('bos_start_mission');
+      }
     }
     return mission;
   }
 
   completeMission(missionId: string): Mission | null {
-    return this.getMissionEngine().complete(missionId);
+    const mission = this.getMissionEngine().complete(missionId);
+    if (mission && this.agentState.activeMission === missionId) {
+      this.agentState.activeMission = null;
+      this.agentState.updatedAt = new Date().toISOString();
+    }
+    return mission;
   }
 
   failMission(missionId: string, reason?: string): Mission | null {
-    return this.getMissionEngine().fail(missionId, reason);
+    const mission = this.getMissionEngine().fail(missionId, reason);
+    if (mission && this.agentState.activeMission === missionId) {
+      this.agentState.activeMission = null;
+      this.agentState.updatedAt = new Date().toISOString();
+    }
+    return mission;
   }
 
   // Learning
@@ -289,6 +335,51 @@ export class BehaviorOS {
 
   getAgentState(): AgentState {
     return this.agentState;
+  }
+
+  // Persistence -------------------------------------------------------------
+  /**
+   * Export the complete engine state as a JSON-serializable snapshot. Callers
+   * (e.g. the OpenCode plugin via `ctx.storage`) persist the result and restore
+   * it later with {@link importState} so state survives a process restart.
+   */
+  exportState(): BehaviorOSSnapshot {
+    return cloneJson({
+      version: BEHAVIOROS_SNAPSHOT_VERSION,
+      exportedAt: new Date().toISOString(),
+      agentState: this.agentState,
+      dna: this.currentDNA,
+      missions: this.getMissionEngine().snapshot(),
+      learnings: this.getLearningEngine().snapshot(),
+    });
+  }
+
+  /**
+   * Restore engine state from a snapshot produced by {@link exportState}.
+   * Returns `true` on success and `false` for a missing or incompatible
+   * snapshot, leaving the current state untouched in that case.
+   */
+  importState(snapshot: BehaviorOSSnapshot | null | undefined): boolean {
+    if (!snapshot || snapshot.version !== BEHAVIOROS_SNAPSHOT_VERSION) return false;
+    try {
+      if (snapshot.agentState && typeof snapshot.agentState === 'object') {
+        this.agentState = cloneJson(snapshot.agentState);
+      }
+      this.currentDNA = snapshot.dna ?? null;
+
+      // Rebind the DNA-scoped engines to the restored DNA so a decision cached
+      // under a previous pattern can never leak into the restored session.
+      if (this.currentDNA) {
+        this.registry.createGovernanceEngine(this.currentDNA);
+        this.registry.createQualityEngine(this.currentDNA);
+      }
+
+      this.getMissionEngine().restore(snapshot.missions ?? []);
+      this.getLearningEngine().restore(snapshot.learnings ?? []);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   simulateAction(

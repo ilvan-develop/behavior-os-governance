@@ -5,6 +5,8 @@
  * tested in isolation and reused by the CLI or MCP server.
  */
 
+import type { MissionPriority, MissionType } from '@behavior-os/schemas';
+
 /** Tools whose execution mutates state and therefore counts as a `change`. */
 const MUTATING_TOOL = /write|edit|patch|bash|shell|apply|create|delete|move/i;
 
@@ -275,4 +277,96 @@ export function classifyDNA(text: string, available?: Iterable<string>): string 
   }
 
   return best;
+}
+
+/** Maximum length of an auto-generated mission title. */
+const MISSION_TITLE_MAX = 80;
+
+/** First-match-wins mission type heuristics, ordered from most to least urgent. */
+const MISSION_TYPE_KEYWORDS: ReadonlyArray<readonly [MissionType, readonly string[]]> = [
+  ['incident', ['incident', 'outage', 'sev1', 'sev2', 'hotfix', 'production down', 'page on-call']],
+  ['deployment', ['deploy', 'release', 'rollout', 'publish', 'ship to']],
+  [
+    'bugfix',
+    ['bug', 'fix', 'error', 'crash', 'broken', 'regression', 'fails', 'failing', 'exception'],
+  ],
+  [
+    'refactor',
+    ['refactor', 'cleanup', 'clean up', 'rename', 'restructure', 'migrate', 'tech debt'],
+  ],
+  ['audit', ['audit', 'review', 'compliance', 'security scan', 'lint', 'vulnerab']],
+  [
+    'research',
+    ['research', 'investigate', 'explore', 'analyze', 'analyse', 'spike', 'evaluate', 'compare'],
+  ],
+  [
+    'feature',
+    ['add', 'implement', 'create', 'build', 'support', 'introduce', 'develop', 'feature'],
+  ],
+];
+
+/** Priority heuristics, scanned in order; the first hit wins. */
+const MISSION_PRIORITY_KEYWORDS: ReadonlyArray<readonly [MissionPriority, readonly string[]]> = [
+  [
+    'critical',
+    ['production', 'prod', 'outage', 'incident', 'sev1', 'urgent', 'asap', 'critical', 'data loss'],
+  ],
+  ['high', ['security', 'vulnerab', 'bug', 'crash', 'broken', 'regression', 'hotfix']],
+  ['low', ['docs', 'documentation', 'readme', 'typo', 'comment', 'chore', 'cleanup']],
+];
+
+/** Short social replies that should never spawn a mission. */
+const SOCIAL_REPLY =
+  /^(hi|hello|hey|yo|thanks|thank you|ok|okay|yes|no|sure|please|go on|continue)[\s!.?]*$/i;
+
+/** A lightweight, auto-derived mission. */
+export interface MissionIntent {
+  title: string;
+  type: MissionType;
+  priority: MissionPriority;
+}
+
+function buildMissionTitle(text: string): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= MISSION_TITLE_MAX) return singleLine;
+  return `${singleLine.slice(0, MISSION_TITLE_MAX - 3).trimEnd()}...`;
+}
+
+/**
+ * Classify a user prompt into a mission intent so an auto-created mission is
+ * meaningful rather than a generic placeholder.
+ *
+ * @returns The derived intent, or `null` when the prompt clearly does not
+ *   describe work (greetings, acknowledgements, or very short input).
+ */
+export function classifyMissionIntent(text: string): MissionIntent | null {
+  const trimmed = text.trim();
+  if (trimmed.length < 12) return null;
+  if (SOCIAL_REPLY.test(trimmed)) return null;
+
+  const haystack = ` ${trimmed.toLowerCase()} `;
+  const hasWord = (word: string): boolean => new RegExp(`\\b${word}\\b`).test(haystack);
+  const hasAny = (words: readonly string[]): boolean => words.some((word) => hasWord(word));
+
+  let type: MissionType = 'feature';
+  let matched = false;
+  for (const [candidate, keywords] of MISSION_TYPE_KEYWORDS) {
+    if (hasAny(keywords)) {
+      type = candidate;
+      matched = true;
+      break;
+    }
+  }
+  // With no explicit work verb, only treat as work if the prompt is substantive.
+  if (!matched && trimmed.length < 24) return null;
+
+  let priority: MissionPriority = 'medium';
+  for (const [candidate, keywords] of MISSION_PRIORITY_KEYWORDS) {
+    if (hasAny(keywords)) {
+      priority = candidate;
+      break;
+    }
+  }
+
+  return { title: buildMissionTitle(trimmed), type, priority };
 }

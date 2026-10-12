@@ -78,6 +78,18 @@ export class LearningEngine {
     return this.events.filter((e) => e.impact === 'high' || e.impact === 'critical').slice(-limit);
   }
 
+  /** Snapshot every learning event (JSON-serializable) for persistence. */
+  snapshot(): LearningEvent[] {
+    return [...this.events];
+  }
+
+  /** Replace all learning events and recompute the derived patterns. */
+  restore(events: readonly LearningEvent[]): void {
+    this.events = Array.isArray(events) ? [...events] : [];
+    this.patterns.clear();
+    this.detectPatterns();
+  }
+
   private generateRecommendation(type: string, count: number): string {
     const recommendations: Record<string, string> = {
       failure: `Detected ${count} failures. Review error patterns and add guardrails.`,
