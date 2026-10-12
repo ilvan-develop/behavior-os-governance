@@ -27,6 +27,7 @@
     "mcp:start": "pnpm --filter @behavior-os/mcp-server start",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "verify:plugin": "node scripts/verify-plugin.mjs",
+    "analyze:flow": "node scripts/analyze-governance-flow.mjs",
     "cli:init": "pnpm --filter @behavior-os/cli run init",
     "docs:build": "typedoc",
     "benchmark": "tsx scripts/benchmark.ts"

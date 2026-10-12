@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-10-12T10:05:53.213Z",
+  "totalScenarios": 1000,
+  "partA": {
+    "scenarios": 945,
+    "dnas": 21,
+    "dnasWithBlockRule": 19,
+    "verdictsByProvider": {
+      "plugin": {
+        "allow": 315
+      },
+      "mcp": {
+        "allow": 315
+      },
+      "caller-correct": {
+        "deny": 190,
+        "escalate": 110,
+        "allow": 15
+      }
+    },
+    "scenariosWhereBlockRuleExistsButVerdictAllows": 570,
+    "gapScenarios": 570
+  },
+  "partB": {
+    "scenarios": 55,
+    "promptHookRegistered": 0,
+    "afterHookRegistered": 0,
+    "permissionHookRegistered": 0,
+    "toolExecuteBeforeBlocks": 0,
+    "modelContextInjected": 5,
+    "modelContextWithoutDnaInjected": 0,
+    "gapScenarios": 50
+  }
+}
