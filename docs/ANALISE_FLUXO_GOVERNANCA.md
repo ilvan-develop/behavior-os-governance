@@ -361,7 +361,7 @@ node scripts/analyze-governance-flow.mjs
 
 ---
 
-## 8. Estado de implementação (P0 feito · P1 parcial · P2 pendente)
+## 8. Estado de implementação (P0, P1 e P2 implementados)
 
 Implementado e verificado. Cada correção tem testes que a provam.
 
@@ -374,7 +374,7 @@ Implementado e verificado. Cada correção tem testes que a provam.
 | **F3** bug de contexto no MCP | `context.context` aninhado + `action` | `packages/mcp-server/src/server.ts` | `smoke:mcp` → `escalate` por `change-control` |
 | **F5** cold start mudo | `session.context` injeta sempre (com ou sem DNA) | `index.ts` | injeções **11 / 6** (era 5 / 0) |
 
-### P1 — inteligência de fluxo 🔶
+### P1 — inteligência de fluxo ✅
 
 | Finding | Correção | Estado |
 |---|---|---|
@@ -382,10 +382,10 @@ Implementado e verificado. Cada correção tem testes que a provam.
 | **F6** seleção não inteligente | `classifyDNA` (21 padrões × palavras-chave, com desempate por pontuação) | ✅ |
 | **F7** sem `execute.after` | Hook regista `failure` no learning engine (sem avançar o protocolo — `recordLearning({ advanceProtocol: false })`) | ✅ |
 | **F7** missão não automática | `session.prompt` cria **e** inicia uma missão (`classifyMissionIntent` → tipo/prioridade) quando há DNA ativo e nenhuma missão ativa; **não** avança o protocolo e **não** repete por mensagem | ✅ |
-| **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2) | ✅ |
+| **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2); **preâmbulo governado** anexado ao `system` de cada agente via `ctx.agent.transform` | ✅ |
 | **F9** estado só em memória | `BehaviorOS.exportState()/importState()` + persistência automática via **`ctx.storage`** (chave `behavioros:state`); restauro no `setup` | ✅ |
 
-### P2 — robustez 🔶
+### P2 — robustez ✅
 
 | Finding | Correção | Estado |
 |---|---|---|
@@ -395,11 +395,13 @@ Implementado e verificado. Cada correção tem testes que a provam.
 
 ### Ficheiros novos/alterados (P0/P1/P2)
 
-- `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA`, `buildGovernanceContext`
-  e `classifyMissionIntent` (helpers puros, sem imports do OpenCode).
+- `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA`, `buildGovernanceContext`,
+  `classifyMissionIntent` e `buildGovernedPreamble`/`GOVERNED_PREAMBLE_MARKER` (helpers puros,
+  sem imports do OpenCode).
 - `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`
   (auto-DNA + **auto-missão**), `session.context` (sempre ativo), `tool.execute.before`
-  (advisory), `tool.execute.after` (learning); **persistência** via `ctx.storage`.
+  (advisory), `tool.execute.after` (learning); **persistência** via `ctx.storage`;
+  **preâmbulo governado nos agentes** via `ctx.agent.transform`.
 - `packages/core/src/engine/behavior-os.ts` — `recordLearning({ advanceProtocol? })`,
   `createMission`/`startMission({ advanceProtocol? })`, **`activeMission`** (set no start,
   clear no complete/fail), `exportState()`/`importState()` + `BehaviorOSSnapshot`.
@@ -408,8 +410,8 @@ Implementado e verificado. Cada correção tem testes que a provam.
 - `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
 - `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
 - `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
-- `plugins/opencode-v2/tests/governance.test.ts` (**21 testes**),
-  `plugin-registration.test.ts` (15), `plugin-session-flow.test.ts` **(novo, 3)**.
+- `plugins/opencode-v2/tests/governance.test.ts` (**24 testes**),
+  `plugin-registration.test.ts` (16), `plugin-session-flow.test.ts` **(novo, 3)**.
 - `packages/core/tests/persistence.test.ts` **(novo, 8)** — round-trip de estado,
   `activeMission`, `advanceProtocol:false` e reutilização do cache.
 - `.opencode/skills/behavior-os/SKILL.md` **(novo)** — skill governada (protocolo de 7
@@ -424,6 +426,12 @@ Implementado e verificado. Cada correção tem testes que a provam.
 3. Nota observada: durante esta sessão, os próprios `edit`/`write` do agente passaram a ser
    negados enquanto o DNA `surgical-team` estava ativo no servidor de fundo (partilhado),
    confirmando que o hook governa **qualquer** ferramenta, não só as tools `bos_*`.
+4. Auto-missão e persistência provadas **ao vivo** (`opencode run --standalone`): após
+   *"Fix the crash in the payment service"*, `bos_get_state` devolveu
+   `{"selectedDna":"Financial Compliance","activeMission":"mission-…","currentStep":3}`; um
+   **segundo processo** restaurou o mesmo `activeMission` a partir de `ctx.storage`.
+5. `pnpm verify:plugin` confirma o **preâmbulo governado nos agentes**
+   (`Agents: governed preamble applied to build, review`).
 
 ### Como reproduzir
 

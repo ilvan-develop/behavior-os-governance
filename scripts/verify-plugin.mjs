@@ -35,9 +35,28 @@ try {
   const toolHooks = new Map();
   const sessionHooks = new Map();
   const permissionHooks = new Map();
+  const agents = [
+    { id: 'build', name: 'Build', system: 'You are the build agent.' },
+    { id: 'review', name: 'Review' },
+  ];
 
   const ctx = {
     location: { directory: process.cwd() },
+    agent: {
+      transform(callback) {
+        callback({
+          list: () => agents,
+          get: (id) => agents.find((agent) => agent.id === id),
+          default() {},
+          update(id, update) {
+            const agent = agents.find((candidate) => candidate.id === id);
+            if (agent) update(agent);
+          },
+          remove() {},
+        });
+        return { dispose: async () => {} };
+      },
+    },
     tool: {
       transform(callback) {
         return callback({
@@ -105,6 +124,13 @@ try {
   if (!sessionHooks.has('context')) fail('Missing session context hook');
   if (!sessionHooks.has('prompt')) fail('Missing session prompt hook');
   if (!permissionHooks.has('evaluate')) fail('Missing permission evaluate hook');
+
+  // Governed agent preamble: every agent's system prompt carries the marker.
+  for (const agent of agents) {
+    if (!agent.system?.includes('<!-- behavior-os:governed -->')) {
+      fail(`Agent "${agent.id}" did not receive the governed preamble`);
+    }
+  }
 
   // Protocol flow: selecting a DNA pattern then resolving truth must advance
   // currentStep in the AgentState surfaced by bos_get_state (content = JSON).
@@ -176,6 +202,7 @@ try {
   }
 
   console.log('Protocol flow: step 1 complete, currentStep =', afterState.currentStep);
+  console.log('Agents: governed preamble applied to', agents.map((a) => a.id).join(', '));
   console.log('Governance: "deploy to production" denied under surgical-team');
   console.log('Skill: .opencode/skills/behavior-os/SKILL.md present and advertised');
 } catch (error) {

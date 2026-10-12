@@ -6,7 +6,13 @@ import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
 import { load as yamlLoad } from 'js-yaml';
-import { buildGovernanceContext, classifyDNA, classifyMissionIntent } from './governance.js';
+import {
+  buildGovernanceContext,
+  buildGovernedPreamble,
+  classifyDNA,
+  classifyMissionIntent,
+  GOVERNED_PREAMBLE_MARKER,
+} from './governance.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
@@ -517,6 +523,23 @@ export default Plugin.define({
           };
         },
       });
+    });
+
+    // --- Governed agent preamble --------------------------------------------
+    // Bake a short, static Behavior-OS reminder into every agent's system prompt
+    // so governance is present in the agent definition itself, not only in the
+    // per-request `session.context` injection. State-free on purpose: the live
+    // DNA/step/mission stay in the context hook to avoid stale duplication.
+    await ctx.agent.transform((editor) => {
+      for (const agent of editor.list()) {
+        editor.update(String(agent.id), (draft) => {
+          const existing = draft.system ?? '';
+          if (existing.includes(GOVERNED_PREAMBLE_MARKER)) return;
+          draft.system = existing
+            ? `${existing}\n\n${buildGovernedPreamble()}`
+            : buildGovernedPreamble();
+        });
+      }
     });
 
     // --- Governance enforcement ---------------------------------------------

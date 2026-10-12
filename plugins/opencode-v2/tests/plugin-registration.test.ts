@@ -11,8 +11,17 @@ interface CapturedTool {
   execute?: (input: unknown, context?: unknown) => Promise<unknown>;
 }
 
+interface FakeAgentInfo {
+  id: string;
+  name: string;
+  system?: string;
+}
+
 interface FakeContext {
   location: { directory: string };
+  agent: {
+    transform: (cb: (editor: unknown) => void) => Promise<void>;
+  };
   tool: {
     transform: (cb: (editor: unknown) => void) => Promise<void>;
     hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
@@ -46,9 +55,28 @@ function createFakeContext(locationDirectory: string) {
   const sessionHooks: Record<string, unknown> = {};
   const permissionHooks: Record<string, unknown> = {};
   const storageData = new Map<string, unknown>();
+  const agents: FakeAgentInfo[] = [
+    { id: 'build', name: 'Build', system: 'You are the build agent.' },
+    { id: 'review', name: 'Review' },
+  ];
 
   const ctx: FakeContext = {
     location: { directory: locationDirectory },
+    agent: {
+      transform: async (cb) => {
+        const editor = {
+          list: () => agents,
+          get: (id: string) => agents.find((agent) => agent.id === id),
+          default: () => {},
+          update: (id: string, update: (agent: FakeAgentInfo) => void) => {
+            const agent = agents.find((candidate) => candidate.id === id);
+            if (agent) update(agent);
+          },
+          remove: () => {},
+        };
+        await cb(editor);
+      },
+    },
     tool: {
       transform: async (cb) => {
         const editor = {
@@ -90,7 +118,7 @@ function createFakeContext(locationDirectory: string) {
     },
   };
 
-  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks, storageData };
+  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks, storageData, agents };
 }
 
 async function runTool(
@@ -207,6 +235,26 @@ describe('behavior-os plugin registration', () => {
     expect(event.system).toHaveLength(1);
     expect(event.system[0].text).toContain('No DNA pattern selected');
     expect(event.system[0].text).toContain('bos_select_dna');
+  });
+
+  it('appends a governed preamble to every agent system prompt, idempotently', async () => {
+    const { ctx, agents } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const build = agents.find((agent) => agent.id === 'build');
+    const review = agents.find((agent) => agent.id === 'review');
+
+    // Existing system prompt is preserved and the preamble appended.
+    expect(build?.system).toContain('You are the build agent.');
+    expect(build?.system).toContain('<!-- behavior-os:governed -->');
+    expect(build?.system).toContain('bos_select_dna');
+    // Agents without a system prompt still receive it.
+    expect(review?.system).toContain('<!-- behavior-os:governed -->');
+
+    // Re-running the transform must not duplicate the preamble.
+    await plugin.setup(ctx as never);
+    const markerCount = (build?.system?.match(/<!-- behavior-os:governed -->/g) ?? []).length;
+    expect(markerCount).toBe(1);
   });
 
   it('governance and permission hooks are a no-op when no DNA is selected', async () => {

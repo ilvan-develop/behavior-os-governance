@@ -169,6 +169,18 @@ function makeCtx(directory) {
   };
   const ctx = {
     location: { directory },
+    agent: {
+      transform: async (cb) => {
+        await cb({
+          list: () => [],
+          get: () => undefined,
+          default: () => {},
+          update: () => {},
+          remove: () => {},
+        });
+        return { dispose: async () => {} };
+      },
+    },
     tool: {
       transform: async (cb) => {
         await cb({

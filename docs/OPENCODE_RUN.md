@@ -72,6 +72,9 @@ O plugin registou os hooks (para além das 12 tools):
   há DNA ativo e nenhuma missão ativa — assim `activeMission` deixa de ficar sempre `null`.
   **Não** avança o protocolo e **não** cria mais de uma missão por sessão (evita spam).
 - **`session.context`** — injeta **sempre** orientação governada (mesmo sem DNA).
+- **`ctx.agent.transform`** — anexa um **preâmbulo governado curto** ao `system` de cada
+  agente (idempotente, via marcador), para que a governação exista na própria definição do
+  agente; o estado dinâmico (DNA/passo/missão) fica no `session.context`.
 - **`tool.execute.before`** — apenas *advisory* (log de escalonamento); não bloqueia.
 - **`tool.execute.after`** — regista falhas no learning engine (sem avançar o protocolo).
 

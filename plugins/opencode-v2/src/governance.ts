@@ -370,3 +370,27 @@ export function classifyMissionIntent(text: string): MissionIntent | null {
 
   return { title: buildMissionTitle(trimmed), type, priority };
 }
+
+/**
+ * Marker embedded at the top of a governed agent preamble. Used to keep the
+ * agent transform idempotent: an agent whose system prompt already contains it is
+ * left untouched.
+ */
+export const GOVERNED_PREAMBLE_MARKER = '<!-- behavior-os:governed -->';
+
+/**
+ * Static, agent-level Behavior-OS preamble appended to every agent's system
+ * prompt.
+ *
+ * Deliberately short and state-free: the live DNA, protocol step and mission are
+ * injected per request by the plugin's `session.context` hook. This only makes the
+ * location's governance explicit inside the agent definition itself and points
+ * the model at the 7-step protocol and the `behavior-os` skill.
+ */
+export function buildGovernedPreamble(): string {
+  return [
+    GOVERNED_PREAMBLE_MARKER,
+    '[Behavior-OS] This project is governed. Before mutating files or running risky commands, select a DNA pattern with bos_select_dna and follow the 7-step protocol: bos_list_dna -> bos_get_state -> bos_create_mission -> bos_start_mission -> bos_run_audit -> bos_record_learning.',
+    'The active DNA, current step and mission are provided in the session context. Load the behavior-os skill for the intent-to-DNA map and the meaning of a governance block or escalation.',
+  ].join('\n');
+}

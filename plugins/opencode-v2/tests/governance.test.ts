@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildGovernanceContext,
+  buildGovernedPreamble,
   classifyDNA,
   classifyMissionIntent,
   DNA_KEYWORDS,
+  GOVERNED_PREAMBLE_MARKER,
 } from '../src/governance';
 
 describe('classifyDNA', () => {
@@ -141,5 +143,22 @@ describe('classifyMissionIntent', () => {
     expect(intent).not.toBeNull();
     expect(intent?.title.length).toBeLessThanOrEqual(80);
     expect(intent?.title.endsWith('...')).toBe(true);
+  });
+});
+
+describe('buildGovernedPreamble', () => {
+  it('starts with the idempotency marker', () => {
+    expect(buildGovernedPreamble().startsWith(GOVERNED_PREAMBLE_MARKER)).toBe(true);
+  });
+
+  it('names the protocol tools so the agent knows the next action', () => {
+    const preamble = buildGovernedPreamble();
+    for (const tool of ['bos_select_dna', 'bos_create_mission', 'bos_record_learning']) {
+      expect(preamble).toContain(tool);
+    }
+  });
+
+  it('is deterministic (safe to re-apply idempotently)', () => {
+    expect(buildGovernedPreamble()).toBe(buildGovernedPreamble());
   });
 });

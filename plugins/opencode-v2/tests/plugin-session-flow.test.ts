@@ -14,6 +14,9 @@ type SessionHook = (event: unknown) => Promise<void>;
 
 interface FakeContext {
   location: { directory: string };
+  agent: {
+    transform: (cb: (editor: unknown) => void) => Promise<void>;
+  };
   tool: {
     transform: (cb: (editor: unknown) => void) => Promise<void>;
     hook: () => Promise<unknown>;
@@ -38,6 +41,17 @@ function createContext(storageData: Map<string, unknown>) {
 
   const ctx: FakeContext = {
     location: { directory: repoRoot },
+    agent: {
+      transform: async (cb) => {
+        await cb({
+          list: () => [],
+          get: () => undefined,
+          default: () => {},
+          update: () => {},
+          remove: () => {},
+        });
+      },
+    },
     tool: {
       transform: async (cb) => {
         await cb({
