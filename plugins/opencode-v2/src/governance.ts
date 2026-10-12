@@ -53,7 +53,7 @@ function collectStrings(value: unknown, into: string[]): void {
   }
 }
 
-function isMutating(value: string | undefined): boolean {
+export function isMutating(value: string | undefined): boolean {
   return typeof value === 'string' && MUTATING_TOOL.test(value);
 }
 

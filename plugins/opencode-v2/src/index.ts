@@ -12,6 +12,7 @@ import {
   classifyDNA,
   classifyMissionIntent,
   GOVERNED_PREAMBLE_MARKER,
+  isMutating,
 } from './governance.js';
 import {
   appendGovernanceLog,
@@ -811,27 +812,38 @@ export default Plugin.define({
           context,
         });
 
+        // Denies only ever apply to state-changing actions, and never to the
+        // governance control plane (bos_*): reading PII is not an *operation* on
+        // it, and a restrictive DNA must stay escapable (a bootstrap deadlock
+        // would otherwise be inescapable). Either way the verdict is recorded,
+        // never silently lost.
+        const isControlPlane = /^bos_/i.test(event.action);
+        const readOnly = !isMutating(event.action);
+        const overridden = decision.verdict === 'deny' && (isControlPlane || readOnly);
+        const effectiveVerdict = overridden ? 'allow' : decision.verdict;
+
         // Record the decision in the governance log: always for deny/escalate;
         // for allow only when at least one rule was actually evaluated, keeping
         // the log focused on governance activity rather than benign tool calls.
-        const isActive = decision.verdict !== 'allow' || decision.rulesEvaluated.length > 0;
+        const isActive =
+          effectiveVerdict !== 'allow' || overridden || decision.rulesEvaluated.length > 0;
         if (isActive) {
           recordLog(
             'permission',
             decision.verdict as GovernanceLogOutcome,
             event.action,
-            decision.reason,
+            overridden ? `control-plane override: ${decision.reason}` : decision.reason,
           );
         }
 
-        if (decision.verdict === 'deny') {
+        if (effectiveVerdict === 'deny') {
           event.effect = 'deny';
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
           await notify(
             event.sessionID,
             `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}\n${BLOCK_HINT}`,
           );
-        } else if (decision.verdict === 'escalate' && event.effect !== 'deny') {
+        } else if (effectiveVerdict === 'escalate' && event.effect !== 'deny') {
           event.effect = 'ask';
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
           await notify(
@@ -840,6 +852,8 @@ export default Plugin.define({
           );
         }
       } catch (error) {
+        // A governance failure must never be invisible: record it as well.
+        recordLog('permission', 'error', event.action, describeError(error));
         console.warn(`[Behavior-OS] Permission evaluation error: ${describeError(error)}`);
       }
     });

@@ -647,6 +647,71 @@ const claims = [
       };
     },
   },
+  {
+    id: 'C20',
+    category: 'ENFORCEMENT',
+    promise: 'A read-only action is never denied by data-encryption',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: 'financial-compliance' });
+      const event = {
+        action: 'grep',
+        resources: ['copy the personal data column'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect !== 'deny', `a read-only action was denied: ${event.message}`);
+      return { status: 'PASS', evidence: `grep stayed ${event.effect}` };
+    },
+  },
+  {
+    id: 'C21',
+    category: 'ENFORCEMENT',
+    promise: 'The governance control plane is never denied (no DNA bootstrap deadlock)',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: 'financial-compliance' });
+      const event = {
+        action: 'bos_create_mission',
+        resources: ['copy the personal data column'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect !== 'deny', `the control plane was denied: ${event.message}`);
+      const log = await env.runTool('bos_get_log', { limit: 100 });
+      const override = log.entries.find(
+        (e) =>
+          e.kind === 'permission' &&
+          e.action === 'bos_create_mission' &&
+          typeof e.detail === 'string' &&
+          e.detail.includes('override'),
+      );
+      expect(Boolean(override), 'the control-plane override was not recorded');
+      return { status: 'PASS', evidence: 'control plane allowed and override logged' };
+    },
+  },
+  {
+    id: 'C22',
+    category: 'OBSERVABILITY',
+    promise: 'Every non-allow verdict is recorded before the effect is applied',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: 'surgical-team' });
+      const event = {
+        action: 'bash',
+        resources: ['deploy to production'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect === 'deny', `expected deny, got ${event.effect}`);
+      const log = await env.runTool('bos_get_log', { limit: 100 });
+      const deny = log.entries.find(
+        (e) => e.kind === 'permission' && e.outcome === 'deny' && e.action === 'bash',
+      );
+      expect(Boolean(deny), 'the deny was not recorded with a matching action');
+      return { status: 'PASS', evidence: `deny recorded for action ${deny.action}` };
+    },
+  },
 ];
 
 function pad(value, width) {

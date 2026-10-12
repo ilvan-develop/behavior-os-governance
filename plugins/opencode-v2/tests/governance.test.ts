@@ -6,6 +6,7 @@ import {
   classifyMissionIntent,
   DNA_KEYWORDS,
   GOVERNED_PREAMBLE_MARKER,
+  isMutating,
 } from '../src/governance';
 
 describe('classifyDNA', () => {
@@ -71,6 +72,15 @@ describe('buildGovernanceContext', () => {
 
     const payment = buildGovernanceContext({ text: 'approve the wire transfer' });
     expect(payment['financial-transaction']).toBe(true);
+  });
+
+  it('classifies read-only and mutating actions (C20)', () => {
+    expect(isMutating('grep')).toBe(false);
+    expect(isMutating('read')).toBe(false);
+    expect(isMutating('list')).toBe(false);
+    expect(isMutating('edit')).toBe(true);
+    expect(isMutating('bash')).toBe(true);
+    expect(isMutating('bos_create_mission')).toBe(true);
   });
 
   it('carries the action and tool through unchanged', () => {

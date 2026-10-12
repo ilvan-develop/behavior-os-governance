@@ -334,6 +334,40 @@ describe('behavior-os plugin registration', () => {
     expect(event.message).toMatch(/surgical/i);
   });
 
+  it('does not deny a read-only action under data-encryption (C20)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'financial-compliance' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'grep',
+      resources: ['look for the ssn column in the records'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    expect(event.effect).toBe('allow');
+  });
+
+  it('never blocks the governance control plane even when the DNA would deny it (C21)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'financial-compliance' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bos_create_mission',
+      resources: ['review the ssn column'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    expect(event.effect).not.toBe('deny');
+  });
+
   it('escalates (ask) a deployment through the permission hook under devops-pipeline', async () => {
     const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);

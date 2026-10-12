@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-12T17:51:59.670Z",
+  "generatedAt": "2026-10-12T18:10:42.609Z",
   "plugin": "behavior-os",
-  "total": 19,
-  "proven": 19,
+  "total": 22,
+  "proven": 22,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1791827519459-xd9m6z2texd status=pending"
+      "evidence": "activeMission=mission-1791828642407-qw81lo5cdb status=pending"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1791827519508-6tclhd09gn == activeMission"
+      "evidence": "autoMission=mission-1791828642444-1b2w3mog5mu == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p1356-kdi1l across 14 entries"
+      "evidence": "instance=p14632-og0ng across 14 entries"
     },
     {
       "id": "C15",
@@ -137,6 +137,27 @@
       "promise": "An equal-revision collision from another writer is detected (recoverable without CAS)",
       "status": "PASS",
       "evidence": "equal-rev foreign writer detected; nextRevision=6"
+    },
+    {
+      "id": "C20",
+      "category": "ENFORCEMENT",
+      "promise": "A read-only action is never denied by data-encryption",
+      "status": "PASS",
+      "evidence": "grep stayed allow"
+    },
+    {
+      "id": "C21",
+      "category": "ENFORCEMENT",
+      "promise": "The governance control plane is never denied (no DNA bootstrap deadlock)",
+      "status": "PASS",
+      "evidence": "control plane allowed and override logged"
+    },
+    {
+      "id": "C22",
+      "category": "OBSERVABILITY",
+      "promise": "Every non-allow verdict is recorded before the effect is applied",
+      "status": "PASS",
+      "evidence": "deny recorded for action bash"
     }
   ]
 }
