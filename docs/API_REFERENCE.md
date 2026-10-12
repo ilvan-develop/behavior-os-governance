@@ -143,6 +143,7 @@ interface SDKOptions {
 | bos_select_dna | Select a DNA pattern |
 | bos_get_dna_pattern | Retrieve a DNA pattern |
 | bos_list_dna_patterns | List all available patterns |
+| bos_get_log | Read the recent governance log (how DNA rules were applied) |
 
 ### Mission Tools
 

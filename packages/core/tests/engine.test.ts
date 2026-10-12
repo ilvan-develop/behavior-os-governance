@@ -55,7 +55,7 @@ describe('QualityEngine', () => {
     governance: [],
     quality: [
       { id: 'coverage', type: 'test_coverage', threshold: 80 },
-      { id: 'lint', type: 'lint_errors', threshold: 0, operator: 'lte' },
+      { id: 'lint', type: 'lint', threshold: 0, operator: 'lte' },
     ],
   };
 
@@ -64,7 +64,7 @@ describe('QualityEngine', () => {
   it('should pass when metrics meet thresholds', () => {
     const result = engine.evaluate({
       test_coverage: 90,
-      lint_errors: 0,
+      lint: 0,
     });
     expect(result.passed).toBe(true);
   });
@@ -72,7 +72,7 @@ describe('QualityEngine', () => {
   it('should fail when metrics are below threshold', () => {
     const result = engine.evaluate({
       test_coverage: 50,
-      lint_errors: 5,
+      lint: 5,
     });
     expect(result.passed).toBe(false);
     expect(result.failedGates).toHaveLength(2);
@@ -140,7 +140,8 @@ describe('MissionEngine', () => {
     expect(mission.status).toBe('pending');
 
     const started = engine.start(mission.id);
-    expect(started.status).toBe('active');
+    expect(started).not.toBeNull();
+    expect(started?.status).toBe('active');
   });
 });
 

@@ -36,13 +36,14 @@ behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 > O MCP server **não** é registado no `opencode.json` (`.mcp.json` é ignorado pelo v2);
 > mantém-se como pacote standalone para clientes MCP externos.
 
-## Ferramentas Disponíveis (12 × `bos_*`)
+## Ferramentas Disponíveis (13 × `bos_*`)
 - `bos_evaluate_governance` - Avaliar ações contra regras de governança
 - `bos_create_mission` - Criar novas missões
 - `bos_start_mission` - Iniciar missão
 - `bos_list_missions` - Listar missões (com filtros)
 - `bos_check_quality` - Verificar gates de qualidade
 - `bos_get_insights` - Obter insights do learning engine
+- `bos_get_log` - Ler o log de governação (como o DNA foi aplicado)
 - `bos_get_state` - Estado atual do protocolo
 - `bos_get_status` - Status atual do Behavior-OS
 - `bos_list_dna` - Listar padrões DNA disponíveis
@@ -60,7 +61,7 @@ behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 
 ## Governação ativa (hooks do v2)
 
-O plugin registou os hooks (para além das 12 tools):
+O plugin registou os hooks (para além das 13 tools):
 
 - **`permission.evaluate`** — **bloqueia de facto**. Constrói uma bolsa de condições a
   partir da ação/recursos e define `effect: "deny"`/`"ask"` conforme as regras do DNA.
@@ -104,6 +105,79 @@ opencode run --session ses-x --auto "Execute: echo deploy to production"
 > ferramenta — incluindo `write`/`edit` do próprio agente — enquanto estiver ativo.
 > Para voltar a um modo não-bloqueante, seleciona um padrão só-`warn` (ex.:
 > `bos_select_dna lean-factory`).
+
+## Observabilidade: ler a governação no ecrã
+
+Para que a governação deixe de ser uma "caixa negra", cada decisão é registada num
+**ring buffer** em memória (`plugins/opencode-v2/src/governance-log.ts`, máx. 200 eventos)
+e fica visível em **três superfícies**:
+
+1. **Na própria sessão (TUI)** — eventos significativos são publicados como mensagens
+   sintéticas (`ctx.session.synthetic`): DNA auto-selecionado, missão auto-criada,
+   `⛔` bloqueio e `⚠️` escalonamento. O utilizador vê a governação *enquanto* trabalha.
+2. **Via tool `bos_get_log`** — devolve os N eventos mais recentes (JSON), cada um com
+   `seq`, `at` (ISO), `kind`, `outcome`, `dna`, `step`, `mission`, `action` e `detail`:
+   ```powershell
+   opencode run --session ses-x "Usa bos_get_log com limit=20 e resume o que aconteceu"
+   ```
+3. **No console do servidor** — os desfechos `deny`/`escalate`/`error` são também
+   impressos numa linha única e *greppable*:
+   ```
+   [Behavior-OS:LOG:permission:deny] dna=Surgical Team step=3 mission=mission-… action="bash" Blocked by rule: sterile-field
+   ```
+
+Eventos registados: `dna_selected`, `mission`, `protocol`, `permission`, `advisory`,
+`learning`, `restore`, `tool`. Para manter o log focado, decisões `allow` sem nenhuma
+regra avaliada **não** são registadas. O log é apenas diagnóstico — nunca persiste e
+nunca influencia decisões.
+
+## Provar a governação: conformance de promessas
+
+Observar um log mostra *o que aconteceu*; para provar que o Behavior-OS **cumpre o que
+promete**, cada promessa é convertida numa verificação executável. O harness
+`scripts/governance-conformance.mjs` arranca o plugin real + o core real (sem servidor,
+sem rede, estado limpo) e avalia um conjunto de *claims*:
+
+```powershell
+pnpm verify:governance
+```
+
+O relatório imprime uma tabela `claims → evidência` e grava
+`docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
+(pronto para CI). Cobertura atual: **12/12 claims**.
+
+| Claim | Promessa | Prova |
+| --- | --- | --- |
+| C01 | Surgical Team bloqueia mudanças de produção | hook `permission` → `deny` |
+| C02 | Auto-verificação do agente == enforcement | `bos_evaluate_governance` → `deny` |
+| C03 | Enterprise Governance escala mudanças | hook `permission` → `ask` |
+| C04 | Auto-verificação == escalonamento | `bos_evaluate_governance` → `escalate` |
+| C05 | Todo `deny`/`escalate` é registado (DNA+passo) | `bos_get_log` |
+| C06 | Log limitado e monotónico | ring buffer `seq++` |
+| C07 | Seleção de DNA = passo 1 do protocolo | `stepHistory` |
+| C08 | `exportState`/`importState` round-trip | core |
+| C09 | Iniciar missão define `activeMission` | sem divergência |
+| C10 | Quality gates aplicam thresholds do DNA | `bos_check_quality` |
+| C11 | Learnings surgem em insights | `bos_record_learning` → `bos_get_insights` |
+| C12 | `deny`/`escalate` emite mensagem no ecrã | `session.synthetic` |
+
+### Limites honestos (o que *não* é 100%)
+
+"Governação 100%" não é um estado que se afirma — é **cobertura sobre um conjunto
+enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. Hoje:
+
+- **Enforced (automático, dificilmente contornável):** o hook `permission.evaluate`
+  decide `deny`/`ask`. É a única superfície tipada de bloqueio do v2.
+- **Advisory (automático mas mole):** as regras `escalate` produzem `ask`; num host
+  não-interativo (ou auto-aprovado) o comando **corre de qualquer forma**. Registado como
+  `warn`/`escalate`, mas não impede execução.
+- **Reativo (exige ator):** a progressão do protocolo, ciclo de missões e auditorias só
+  avançam quando alguém invoca as tools `bos_*`. Não é autónomo por si.
+- **Não provado ainda:** que *toda* ação mutadora passe pelo hook (depende do host), e a
+  consistência entre instâncias/sessões concorrentes que partilham o mesmo estado.
+
+Corolário: para aumentar a cobertura, adiciona-se um claim por cada nova promessa, com a
+sua verificação — não se aumenta a prosa.
 
 ## Skill governada
 

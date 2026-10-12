@@ -13,6 +13,12 @@ import {
   classifyMissionIntent,
   GOVERNED_PREAMBLE_MARKER,
 } from './governance.js';
+import {
+  appendGovernanceLog,
+  type GovernanceLogKind,
+  type GovernanceLogOutcome,
+  getGovernanceLog,
+} from './governance-log.js';
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
@@ -196,7 +202,56 @@ export default Plugin.define({
 
     // Restore any state persisted by a previous process so protocol progress,
     // the selected DNA, missions and learnings survive a restart.
-    await restorePersistedState(ctx);
+    const restored = await restorePersistedState(ctx);
+
+    // --- Governance observability -------------------------------------------
+    // `recordLog` stamps every governance event with the live DNA/step/mission
+    // so the `bos_get_log` tool (and the `[Behavior-OS:LOG:*]` console lines)
+    // tell the full story of how rules were applied. Best-effort by design.
+    const recordLog = (
+      kind: GovernanceLogKind,
+      outcome: GovernanceLogOutcome,
+      action: string,
+      detail: string,
+    ): void => {
+      const snapshot = bos.getState();
+      appendGovernanceLog({
+        kind,
+        outcome,
+        dna: snapshot.selectedDna,
+        step: snapshot.currentStep,
+        mission: snapshot.activeMission,
+        action,
+        detail,
+      });
+    };
+
+    if (restored) {
+      const snapshot = bos.getState();
+      appendGovernanceLog({
+        kind: 'restore',
+        outcome: 'info',
+        dna: snapshot.selectedDna,
+        step: snapshot.currentStep,
+        mission: snapshot.activeMission,
+        action: 'setup',
+        detail: 'Restored persisted state from ctx.storage',
+      });
+    }
+
+    // Post a short user-visible message into the session TUI for significant
+    // governance events (DNA selection, mission creation, deny/escalate).
+    // Never throws: notifications are observability, not enforcement.
+    const notify = async (sessionID: string | undefined, text: string): Promise<void> => {
+      if (!sessionID) return;
+      const send = ctx.session?.synthetic;
+      if (typeof send !== 'function') return;
+      try {
+        await send({ sessionID, text, delivery: 'queue' });
+      } catch {
+        // ignore: best-effort on-screen notification
+      }
+    };
 
     await ctx.tool.transform((editor) => {
       // Register every bos_* tool as a direct (non-Code-Mode) tool. In v2,
@@ -216,6 +271,9 @@ export default Plugin.define({
           properties: {
             action: { type: 'string' },
             agent: { type: 'string' },
+            tool: { type: 'string' },
+            resources: { type: 'array', items: { type: 'string' } },
+            text: { type: 'string' },
             context: { type: 'object' },
           },
           required: ['action', 'agent'],
@@ -224,11 +282,25 @@ export default Plugin.define({
           const params = input as {
             action: string;
             agent: string;
+            tool?: string;
+            resources?: string[];
+            text?: string;
             context?: Record<string, unknown>;
           };
+          // Build the condition bag the same way the permission hook does, so an
+          // agent that self-checks with this tool gets the *same* verdict the
+          // enforcer would apply. Explicit keys can still be supplied via
+          // `context`, but they no longer bypass the heuristic signals.
+          const context = buildGovernanceContext({
+            tool: params.tool ?? params.action,
+            action: params.action,
+            resources: params.resources,
+            text: params.text,
+            metadata: params.context,
+          });
           const result = bos.evaluateGovernance(params.action, {
             agent: params.agent,
-            context: params.context ?? {},
+            context,
           });
           return {
             content: JSON.stringify(result, null, 2),
@@ -260,6 +332,12 @@ export default Plugin.define({
           }
           await bos.loadDNA(dna);
           await persistState(ctx);
+          recordLog(
+            'dna_selected',
+            'info',
+            'bos_select_dna',
+            `Selected DNA pattern "${params.pattern}"`,
+          );
           return {
             content: `DNA pattern "${params.pattern}" selected. Governance rules activated.`,
           };
@@ -283,6 +361,12 @@ export default Plugin.define({
           }));
           bos.advanceProtocolStep('bos_list_dna');
           await persistState(ctx);
+          recordLog(
+            'protocol',
+            'info',
+            'bos_list_dna',
+            `Listed ${patterns.length} patterns (protocol step ${bos.getState().currentStep + 1})`,
+          );
           return {
             content: JSON.stringify({ patterns, total: patterns.length }, null, 2),
           };
@@ -328,6 +412,7 @@ export default Plugin.define({
             priority: params.priority as 'critical' | 'high' | 'medium' | 'low',
           });
           await persistState(ctx);
+          recordLog('mission', 'info', 'bos_create_mission', `Created mission ${mission.id}`);
           return {
             content: `Mission created: ${mission.id}`,
           };
@@ -354,6 +439,12 @@ export default Plugin.define({
             };
           }
           await persistState(ctx);
+          recordLog(
+            'mission',
+            'info',
+            'bos_start_mission',
+            `Started mission "${params.missionId}"`,
+          );
           return {
             content: `Mission "${params.missionId}" started. Status: ${mission.status}`,
           };
@@ -408,6 +499,7 @@ export default Plugin.define({
             stages: params.stages,
           });
           await persistState(ctx);
+          recordLog('tool', 'info', 'bos_run_audit', `Audit complete: ${report.overall}`);
           return {
             content: `Audit complete: ${report.overall}`,
           };
@@ -517,9 +609,35 @@ export default Plugin.define({
         execute: async (): Promise<{ content: string }> => {
           bos.advanceProtocolStep('bos_get_state');
           await persistState(ctx);
+          recordLog(
+            'protocol',
+            'info',
+            'bos_get_state',
+            `Protocol step ${bos.getState().currentStep + 1}: ${bos.getState().selectedDna ?? 'no DNA'}`,
+          );
           const state = bos.getState();
           return {
             content: JSON.stringify(state, null, 2),
+          };
+        },
+      });
+
+      // Tool 13: bos_get_log — read the governance log on screen
+      tools.add({
+        name: 'bos_get_log',
+        description:
+          'Read the recent Behavior-OS governance log (how DNA rules were applied to actions in this session)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const entries = getGovernanceLog(params.limit ?? 50);
+          return {
+            content: JSON.stringify({ total: entries.length, entries }, null, 2),
           };
         },
       });
@@ -561,12 +679,33 @@ export default Plugin.define({
           context,
         });
 
+        // Record the decision in the governance log: always for deny/escalate;
+        // for allow only when at least one rule was actually evaluated, keeping
+        // the log focused on governance activity rather than benign tool calls.
+        const isActive = decision.verdict !== 'allow' || decision.rulesEvaluated.length > 0;
+        if (isActive) {
+          recordLog(
+            'permission',
+            decision.verdict as GovernanceLogOutcome,
+            event.action,
+            decision.reason,
+          );
+        }
+
         if (decision.verdict === 'deny') {
           event.effect = 'deny';
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
+          await notify(
+            event.sessionID,
+            `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}`,
+          );
         } else if (decision.verdict === 'escalate' && event.effect !== 'deny') {
           event.effect = 'ask';
           event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
+          await notify(
+            event.sessionID,
+            `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}`,
+          );
         }
       } catch (error) {
         console.warn(`[Behavior-OS] Permission evaluation error: ${describeError(error)}`);
@@ -593,6 +732,7 @@ export default Plugin.define({
           context,
         });
         if (decision.verdict === 'escalate') {
+          recordLog('advisory', 'warn', toolName, decision.reason);
           console.warn(`[Behavior-OS] Escalation advised: ${decision.reason}`);
         }
       } catch (error) {
@@ -615,6 +755,12 @@ export default Plugin.define({
           advanceProtocol: false,
         });
         await persistState(ctx);
+        recordLog(
+          'learning',
+          'error',
+          `tool:${event.tool}`,
+          `Tool failure recorded as learning: ${event.error.message}`,
+        );
       } catch (error) {
         console.warn(`[Behavior-OS] Learning capture error: ${describeError(error)}`);
       }
@@ -636,7 +782,16 @@ export default Plugin.define({
         if (match && dna) {
           await bos.loadDNA(dna);
           behavioros.autoSelectedDna = match;
-          console.log(`[Behavior-OS] Auto-selected DNA "${match}" from prompt intent`);
+          recordLog(
+            'dna_selected',
+            'info',
+            'session.prompt',
+            `Auto-selected DNA "${match}" from prompt intent`,
+          );
+          await notify(
+            event.sessionID,
+            `[Behavior-OS] 🧬 Auto-selected DNA "${match}" — governance rules are now active.`,
+          );
         }
       }
 
@@ -657,8 +812,15 @@ export default Plugin.define({
           });
           bos.startMission(mission.id, { advanceProtocol: false });
           behavioros.autoMission = mission.id;
-          console.log(
-            `[Behavior-OS] Auto-created mission "${mission.id}" (${intent.type}/${intent.priority})`,
+          recordLog(
+            'mission',
+            'info',
+            'session.prompt',
+            `Auto-created mission "${mission.id}" (${intent.type}/${intent.priority})`,
+          );
+          await notify(
+            event.sessionID,
+            `[Behavior-OS] 🎯 Opened mission "${mission.id}" for this request.`,
           );
         }
       }

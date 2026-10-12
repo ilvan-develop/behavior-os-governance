@@ -1,4 +1,4 @@
-import type { DNA } from '@behavior-os/schemas';
+import type { Agent, DNA } from '@behavior-os/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BehaviorOS } from '../src/engine/behavior-os';
 
@@ -143,7 +143,7 @@ describe('BehaviorOS - Coverage Tests', () => {
   });
 
   it('should register and list agents', () => {
-    const agent1 = {
+    const agent1: Agent = {
       id: 'agent-1',
       name: 'Agent One',
       type: 'developer',
@@ -154,7 +154,7 @@ describe('BehaviorOS - Coverage Tests', () => {
       metrics: { tasksCompleted: 0, tasksFailed: 0, avgResponseTime: 0, governanceViolations: 0 },
     };
 
-    const agent2 = {
+    const agent2: Agent = {
       id: 'agent-2',
       name: 'Agent Two',
       type: 'architect',

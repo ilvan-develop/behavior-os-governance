@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MissionEngine } from '../src/engine/mission-engine.js';
+import { type CreateMissionOptions, MissionEngine } from '../src/engine/mission-engine.js';
 
 describe('MissionEngine Edge Cases', () => {
   it('should handle very long mission titles', () => {
@@ -97,10 +97,12 @@ describe('MissionEngine Edge Cases', () => {
       priority: 'medium',
       dnaPattern: 'test',
       createdBy: 'agent-1',
+      // Extra input at the runtime boundary: `metadata` is not part of
+      // CreateMissionOptions and must be ignored without throwing.
       metadata: undefined,
-    });
+    } as unknown as CreateMissionOptions);
 
-    expect(mission.metadata).toBeUndefined();
+    expect((mission as unknown as { metadata?: unknown }).metadata).toBeUndefined();
   });
 
   it('should handle emoji in titles', () => {

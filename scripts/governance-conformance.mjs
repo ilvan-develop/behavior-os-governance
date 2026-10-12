@@ -1,0 +1,443 @@
+#!/usr/bin/env node
+/**
+ * Behavior-OS — Governance Conformance Harness
+ *
+ * Answers one question: *"how do we prove the governance promises hold?"*
+ *
+ * You cannot prove "100% governance" as a vibe. You can only prove it as
+ * **coverage over an explicitly enumerated, executable set of claims**. This
+ * script enumerates every promise Behavior-OS makes to an agent host, turns each
+ * one into a falsifiable check, runs them against the *current build* in-process,
+ * and prints a claims -> evidence table plus a machine-readable report.
+ *
+ * Hermetic on purpose: it spins up the real plugin (`plugins/opencode-v2/dist`)
+ * with a stubbed host, and the real core engine (`packages/core/dist`), so it
+ * does not depend on a live OpenCode server, on network, or on transient state.
+ *
+ * Exit code is non-zero if any claim FAILs, so it can gate CI.
+ *
+ * Usage: node scripts/governance-conformance.mjs
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BehaviorOS } from '../packages/core/dist/index.js';
+import plugin from '../plugins/opencode-v2/dist/index.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPORT_PATH = path.join(repoRoot, 'docs', 'analysis', 'governance-conformance.json');
+
+class ClaimFailure extends Error {}
+
+function expect(condition, message) {
+  if (!condition) throw new ClaimFailure(message);
+}
+
+/**
+ * Boot the real plugin against a stubbed OpenCode host and return the handles a
+ * claim needs: the registered tools, the hooks, and the on-screen notifications.
+ */
+async function bootPlugin() {
+  const addedTools = [];
+  const toolHooks = new Map();
+  const sessionHooks = new Map();
+  const permissionHooks = new Map();
+  const syntheticCalls = [];
+  const storage = new Map();
+  const agents = [
+    { id: 'build', name: 'Build', system: 'You are the build agent.' },
+    { id: 'review', name: 'Review' },
+  ];
+
+  const ctx = {
+    location: { directory: repoRoot },
+    agent: {
+      transform(callback) {
+        callback({
+          list: () => agents,
+          get: (id) => agents.find((agent) => agent.id === id),
+          default() {},
+          update(id, update) {
+            const agent = agents.find((candidate) => candidate.id === id);
+            if (agent) update(agent);
+          },
+          remove() {},
+        });
+        return { dispose: async () => {} };
+      },
+    },
+    tool: {
+      transform(callback) {
+        return callback({
+          add: (tool) => addedTools.push(tool),
+          namespace() {},
+          update() {},
+          remove() {},
+          list() {
+            return [];
+          },
+          get() {
+            return undefined;
+          },
+        });
+      },
+      hook(name, cb) {
+        toolHooks.set(name, cb);
+      },
+    },
+    session: {
+      hook(name, cb) {
+        sessionHooks.set(name, cb);
+      },
+      async synthetic(input) {
+        syntheticCalls.push(input);
+        return { id: `synthetic-${syntheticCalls.length}` };
+      },
+    },
+    permission: {
+      hook(name, cb) {
+        permissionHooks.set(name, cb);
+      },
+    },
+    storage: {
+      async get(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      async set(key, value) {
+        storage.set(key, value);
+      },
+    },
+  };
+
+  await plugin.setup(ctx);
+
+  const byName = Object.fromEntries(addedTools.map((tool) => [tool.name, tool]));
+  const runTool = async (name, input = {}) => {
+    const tool = byName[name];
+    if (!tool) throw new ClaimFailure(`tool "${name}" is not registered`);
+    const result = await tool.execute(input);
+    // Most tools return JSON, but some (select_dna, create_mission, ...) return a
+    // human-readable sentence. Normalise both so claims can read fields directly.
+    try {
+      return JSON.parse(result.content);
+    } catch {
+      return result.content;
+    }
+  };
+
+  return {
+    ctx,
+    agents,
+    addedTools,
+    toolHooks,
+    sessionHooks,
+    permissionHooks,
+    syntheticCalls,
+    runTool,
+  };
+}
+
+const SURGICAL = 'surgical-team';
+const ENTERPRISE = 'enterprise-governance';
+const MINIMAL_DNA = {
+  name: 'Conformance DNA',
+  version: '1.0.0',
+  description: 'Minimal DNA used to verify engine-level promises',
+  personas: [],
+  governance: [
+    {
+      id: 'conformance-block',
+      level: 'critical',
+      action: 'block',
+      conditions: [{ type: 'production', value: true }],
+      description: 'Block production changes',
+    },
+  ],
+  quality: [{ id: 'coverage', type: 'test_coverage', threshold: 100 }],
+};
+
+const claims = [
+  {
+    id: 'C01',
+    category: 'ENFORCEMENT',
+    promise: 'Surgical Team blocks production changes (permission hook → deny)',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: SURGICAL });
+      const event = {
+        action: 'bash',
+        resources: ['deploy to production'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect === 'deny', `expected effect "deny", got "${event.effect}"`);
+      expect(/surgical/i.test(event.message ?? ''), 'denial must name the active DNA');
+      return { status: 'PASS', evidence: `effect=deny message="${event.message}"` };
+    },
+  },
+  {
+    id: 'C02',
+    category: 'CONSISTENCY',
+    promise: 'Agent self-check agrees with enforcement (same action → deny)',
+    async check(env) {
+      const result = await env.runTool('bos_evaluate_governance', {
+        action: 'bash',
+        agent: 'conformance',
+        tool: 'bash',
+        resources: ['deploy to production'],
+      });
+      expect(
+        result.verdict === 'deny',
+        `bos_evaluate_governance returned "${result.verdict}" but the enforcer denies`,
+      );
+      return { status: 'PASS', evidence: `verdict=deny rules=${result.rulesEvaluated?.join(',')}` };
+    },
+  },
+  {
+    id: 'C03',
+    category: 'ENFORCEMENT',
+    promise: 'Enterprise Governance escalates changes (permission hook → ask)',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: ENTERPRISE });
+      const event = { action: 'bash', agent: 'conformance', effect: 'allow' };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect === 'ask', `expected effect "ask" (escalate), got "${event.effect}"`);
+      return { status: 'PASS', evidence: `effect=ask message="${event.message}"` };
+    },
+  },
+  {
+    id: 'C04',
+    category: 'CONSISTENCY',
+    promise: 'Agent self-check agrees with escalation (same action → escalate)',
+    async check(env) {
+      const result = await env.runTool('bos_evaluate_governance', {
+        action: 'bash',
+        agent: 'conformance',
+        tool: 'bash',
+      });
+      expect(
+        result.verdict === 'escalate',
+        `bos_evaluate_governance returned "${result.verdict}" but the enforcer escalates`,
+      );
+      return {
+        status: 'PASS',
+        evidence: `verdict=escalate rules=${result.rulesEvaluated?.join(',')}`,
+      };
+    },
+  },
+  {
+    id: 'C05',
+    category: 'OBSERVABILITY',
+    promise: 'Every deny/escalate is recorded in the governance log with DNA + step',
+    async check(env) {
+      const log = await env.runTool('bos_get_log', { limit: 100 });
+      const deny = log.entries.filter((e) => e.kind === 'permission' && e.outcome === 'deny');
+      expect(deny.length > 0, 'no permission "deny" entry was recorded');
+      const entry = deny[deny.length - 1];
+      expect(entry.dna === 'Surgical Team', `deny entry dna="${entry.dna}"`);
+      expect(typeof entry.step === 'number', 'deny entry is missing its protocol step');
+      return {
+        status: 'PASS',
+        evidence: `deny entries=${deny.length} dna=${entry.dna} step=${entry.step}`,
+      };
+    },
+  },
+  {
+    id: 'C06',
+    category: 'OBSERVABILITY',
+    promise: 'Governance log is bounded and monotonic (ring buffer, seq++ )',
+    async check(env) {
+      const log = await env.runTool('bos_get_log', { limit: 500 });
+      expect(log.entries.length <= 200, `log holds ${log.entries.length} entries (> 200)`);
+      let previous = 0;
+      for (const entry of log.entries) {
+        expect(entry.seq > previous, `seq not monotonic at ${entry.seq}`);
+        previous = entry.seq;
+      }
+      return { status: 'PASS', evidence: `${log.entries.length} entries, seq monotonic` };
+    },
+  },
+  {
+    id: 'C07',
+    category: 'PROTOCOL',
+    promise: 'Selecting a DNA pattern records protocol step 1 (monotonic history)',
+    async check(env) {
+      const state = await env.runTool('bos_get_state');
+      const entry = (state.stepHistory ?? []).find((e) => e.tool === 'bos_select_dna');
+      expect(entry?.step === 1, `bos_select_dna not recorded as step 1 (got ${entry?.step})`);
+      expect(state.currentStep >= 1, `currentStep=${state.currentStep}`);
+      return { status: 'PASS', evidence: `step1 recorded, currentStep=${state.currentStep}` };
+    },
+  },
+  {
+    id: 'C08',
+    category: 'PERSISTENCE',
+    promise: 'exportState → importState round-trips DNA, step and missions',
+    async check() {
+      const source = new BehaviorOS();
+      await source.loadDNA(MINIMAL_DNA);
+      source.createMission({ title: 'Conformance', type: 'feature', priority: 'medium' });
+      const snapshot = JSON.parse(JSON.stringify(source.exportState()));
+
+      const restored = new BehaviorOS();
+      const ok = restored.importState(snapshot);
+      expect(ok === true, 'importState returned false for a snapshot from the same version');
+      const state = restored.getState();
+      expect(state.selectedDna === 'Conformance DNA', `restored dna="${state.selectedDna}"`);
+      expect(restored.listMissions().length === 1, 'mission list did not survive the round-trip');
+      return { status: 'PASS', evidence: `dna=${state.selectedDna} missionCount=1` };
+    },
+  },
+  {
+    id: 'C09',
+    category: 'CONSISTENCY',
+    promise: 'Starting a mission sets activeMission to that mission id (no divergence)',
+    async check(env) {
+      await env.runTool('bos_create_mission', {
+        title: 'Conformance mission',
+        type: 'feature',
+        priority: 'medium',
+      });
+      // The create tool returns a human string; recover the id from the mission list.
+      const missions = await env.runTool('bos_list_missions', { limit: 50 });
+      const target = missions[missions.length - 1];
+      expect(target?.id, 'no mission was created');
+      await env.runTool('bos_start_mission', { missionId: target.id });
+      const state = await env.runTool('bos_get_state');
+      expect(
+        state.activeMission === target.id,
+        `activeMission="${state.activeMission}" but started mission "${target.id}"`,
+      );
+      const active = missions.find((m) => m.id === target.id);
+      return {
+        status: 'PASS',
+        evidence: `activeMission=${target.id} status=${active?.status ?? 'unknown'}`,
+      };
+    },
+  },
+  {
+    id: 'C10',
+    category: 'QUALITY',
+    promise: 'Quality gates enforce the active DNA thresholds',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: SURGICAL });
+      const failing = await env.runTool('bos_check_quality', { metrics: { test_coverage: 50 } });
+      expect(failing.passed === false, 'quality gate did NOT fail at 50% coverage (threshold=100)');
+      const passing = await env.runTool('bos_check_quality', { metrics: { test_coverage: 100 } });
+      expect(passing.passed === true, 'quality gate did not pass at 100% coverage');
+      return { status: 'PASS', evidence: 'threshold 100: 50%→fail, 100%→pass' };
+    },
+  },
+  {
+    id: 'C11',
+    category: 'LEARNING',
+    promise: 'Recorded learnings surface through the insights API',
+    async check(env) {
+      await env.runTool('bos_record_learning', {
+        type: 'failure',
+        source: 'conformance',
+        content: 'Conformance harness learning probe',
+        impact: 'high',
+      });
+      const insights = await env.runTool('bos_get_insights', { limit: 10 });
+      const list = Array.isArray(insights) ? insights : (insights.insights ?? []);
+      expect(list.length > 0, 'recorded learning did not appear in insights');
+      return { status: 'PASS', evidence: `${list.length} insight(s) returned` };
+    },
+  },
+  {
+    id: 'C12',
+    category: 'OBSERVABILITY',
+    promise: 'Deny/escalate surfaces an on-screen notification (synthetic message)',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: SURGICAL });
+      const before = env.syntheticCalls.length;
+      const event = {
+        action: 'write',
+        resources: ['deploy to production'],
+        agent: 'conformance',
+        effect: 'allow',
+        sessionID: 'ses-conformance',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect === 'deny', `expected deny, got ${event.effect}`);
+      const emitted = env.syntheticCalls.slice(before);
+      expect(emitted.length > 0, 'no synthetic notification was emitted for the denial');
+      expect(/blocked/i.test(emitted[0].text ?? ''), 'notification does not describe the block');
+      return { status: 'PASS', evidence: `synthetic: "${emitted[0].text}"` };
+    },
+  },
+];
+
+function pad(value, width) {
+  return String(value).padEnd(width, ' ');
+}
+
+async function main() {
+  const env = await bootPlugin();
+  const results = [];
+
+  for (const claim of claims) {
+    try {
+      const outcome = await claim.check(env);
+      results.push({ ...claim, ...outcome });
+    } catch (error) {
+      results.push({
+        id: claim.id,
+        category: claim.category,
+        promise: claim.promise,
+        status: 'FAIL',
+        evidence: error instanceof ClaimFailure ? error.message : `threw: ${error.message}`,
+      });
+    }
+  }
+
+  const idWidth = 4;
+  const catWidth = Math.max(...results.map((r) => r.category.length));
+  const statusWidth = 6;
+
+  console.log('\nBehavior-OS — Governance Conformance Report');
+  console.log('='.repeat(78));
+  for (const result of results) {
+    console.log(
+      `${pad(result.id, idWidth)} ${pad(result.category, catWidth)} ${pad(result.status, statusWidth)} ${result.promise}`,
+    );
+    if (result.status === 'FAIL') {
+      console.log(`${' '.repeat(idWidth + catWidth + statusWidth + 3)}↳ ${result.evidence}`);
+    }
+  }
+  console.log('-'.repeat(78));
+
+  const proven = results.filter((r) => r.status === 'PASS').length;
+  const failures = results.filter((r) => r.status === 'FAIL');
+  const total = results.length;
+  const coverage = Math.round((proven / total) * 100);
+  console.log(`Proven: ${proven}/${total} claims (${coverage}%)  |  Failures: ${failures.length}`);
+  console.log('='.repeat(78));
+
+  const report = {
+    generatedAt: new Date().toISOString(),
+    plugin: plugin.id,
+    total,
+    proven,
+    coverage,
+    claims: results.map((r) => ({
+      id: r.id,
+      category: r.category,
+      promise: r.promise,
+      status: r.status,
+      evidence: r.evidence,
+    })),
+  };
+
+  fs.mkdirSync(path.dirname(REPORT_PATH), { recursive: true });
+  fs.writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`Report written to ${path.relative(repoRoot, REPORT_PATH)}`);
+
+  process.exit(failures.length > 0 ? 1 : 0);
+}
+
+main().catch((error) => {
+  console.error('Conformance harness crashed:', error);
+  process.exit(1);
+});

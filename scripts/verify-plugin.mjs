@@ -97,6 +97,7 @@ try {
     'bos_create_mission',
     'bos_evaluate_governance',
     'bos_get_insights',
+    'bos_get_log',
     'bos_get_state',
     'bos_get_status',
     'bos_list_dna',
@@ -199,6 +200,31 @@ try {
     if (!skill.includes('description:')) {
       fail('behavior-os skill is missing a description (it would not be advertised)');
     }
+  }
+
+  // Governance log: bos_get_log must surface the DNA selection and the denial
+  // recorded above, stamped with the active DNA.
+  {
+    const logResult = JSON.parse((await runTool('bos_get_log', { limit: 20 })).content);
+    if (!Array.isArray(logResult.entries) || logResult.entries.length === 0) {
+      fail('bos_get_log returned no governance entries');
+    }
+    const dnaEntries = logResult.entries.filter((entry) => entry.kind === 'dna_selected');
+    const dnaEntry = dnaEntries[dnaEntries.length - 1];
+    if (dnaEntry?.dna !== 'Surgical Team') {
+      fail('bos_get_log is missing the surgical-team DNA selection entry');
+    }
+    const denyEntry = logResult.entries.find(
+      (entry) => entry.kind === 'permission' && entry.outcome === 'deny',
+    );
+    if (denyEntry?.dna !== 'Surgical Team') {
+      fail('bos_get_log is missing the permission deny entry');
+    }
+    console.log(
+      'Log: bos_get_log returned',
+      logResult.entries.length,
+      'entries incl. dna_selected + permission deny',
+    );
   }
 
   console.log('Protocol flow: step 1 complete, currentStep =', afterState.currentStep);

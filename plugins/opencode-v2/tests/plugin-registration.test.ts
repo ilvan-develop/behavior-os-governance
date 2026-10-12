@@ -28,6 +28,11 @@ interface FakeContext {
   };
   session: {
     hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
+    synthetic?: (input: {
+      sessionID: string;
+      text: string;
+      delivery?: 'steer' | 'queue' | null;
+    }) => Promise<unknown>;
   };
   permission: {
     hook: (name: string, cb: unknown) => Promise<{ dispose: () => Promise<void> }>;
@@ -44,6 +49,7 @@ interface FakePermissionEvent {
   action: string;
   resources?: string[];
   agent?: string;
+  sessionID?: string;
   metadata?: Record<string, unknown>;
   effect?: 'allow' | 'ask' | 'deny';
   message?: string;
@@ -55,6 +61,7 @@ function createFakeContext(locationDirectory: string) {
   const sessionHooks: Record<string, unknown> = {};
   const permissionHooks: Record<string, unknown> = {};
   const storageData = new Map<string, unknown>();
+  const syntheticCalls: Array<{ sessionID: string; text: string }> = [];
   const agents: FakeAgentInfo[] = [
     { id: 'build', name: 'Build', system: 'You are the build agent.' },
     { id: 'review', name: 'Review' },
@@ -99,6 +106,9 @@ function createFakeContext(locationDirectory: string) {
         sessionHooks[name] = cb;
         return { dispose: async () => {} };
       },
+      synthetic: async (input) => {
+        syntheticCalls.push({ sessionID: input.sessionID, text: input.text });
+      },
     },
     permission: {
       hook: async (name, cb) => {
@@ -118,7 +128,16 @@ function createFakeContext(locationDirectory: string) {
     },
   };
 
-  return { ctx, addedTools, toolHooks, sessionHooks, permissionHooks, storageData, agents };
+  return {
+    ctx,
+    addedTools,
+    toolHooks,
+    sessionHooks,
+    permissionHooks,
+    storageData,
+    agents,
+    syntheticCalls,
+  };
 }
 
 async function runTool(
@@ -139,6 +158,7 @@ const EXPECTED_TOOLS = [
   'bos_create_mission',
   'bos_evaluate_governance',
   'bos_get_insights',
+  'bos_get_log',
   'bos_get_state',
   'bos_get_status',
   'bos_list_dna',
@@ -159,7 +179,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 12 bos_* tools', async () => {
+  it('registers exactly the 13 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -171,7 +191,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(12);
+    expect(addedTools).toHaveLength(13);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -198,7 +218,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(12);
+    expect(addedTools).toHaveLength(13);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -331,6 +351,35 @@ describe('behavior-os plugin registration', () => {
     expect(event.effect).toBe('ask');
     expect(event.message).toMatch(/behavior-os/i);
   });
+
+  it('the agent self-check agrees with the enforcer (same inputs → same verdict)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    // Enforcement path: the permission hook decides for the real action.
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    // Self-check path: the agent asks the engine *before* acting. It must not
+    // reach a different conclusion from the code that actually enforces.
+    const check = await runTool(addedTools, 'bos_evaluate_governance', {
+      action: 'bash',
+      agent: 'test',
+      tool: 'bash',
+      resources: ['deploy to production'],
+    });
+    const verdict = JSON.parse(check.content) as { verdict: string };
+
+    expect(event.effect).toBe('deny');
+    expect(verdict.verdict).toBe('deny');
+  });
 });
 
 describe('behavior-os plugin tool execution', () => {
@@ -349,7 +398,9 @@ describe('behavior-os plugin tool execution', () => {
     const byName = (name: string) => {
       const tool = addedTools.find((t) => t.name === name);
       expect(tool?.execute, `${name} has no execute`).toBeTypeOf('function');
-      return tool as CapturedTool & { execute: (input: unknown) => Promise<{ content: string }> };
+      return tool as Omit<CapturedTool, 'execute'> & {
+        execute: (input: unknown) => Promise<{ content: string }>;
+      };
     };
     return byName;
   }
@@ -397,5 +448,102 @@ describe('behavior-os plugin tool execution', () => {
 
     const verdict = JSON.parse(result.content) as { verdict: string };
     expect(['allow', 'deny', 'escalate']).toContain(verdict.verdict);
+  });
+
+  it('bos_evaluate_governance normalizes resources into condition signals', async () => {
+    const byName = await setupTools();
+    await byName('bos_select_dna').execute({ pattern: 'surgical-team' });
+
+    // Raw context alone would carry no `production` key; the tool must run the
+    // same heuristic the hook uses so "deploy to production" is recognized.
+    const result = await byName('bos_evaluate_governance').execute({
+      action: 'bash',
+      agent: 'e2e-agent',
+      tool: 'bash',
+      resources: ['deploy to production'],
+    });
+    const verdict = JSON.parse(result.content) as { verdict: string };
+
+    expect(verdict.verdict).toBe('deny');
+  });
+});
+
+describe('behavior-os governance log', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('bos_get_log surfaces the deny decision with DNA/step/mission stamped', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+    expect(event.effect).toBe('deny');
+
+    const result = await runTool(addedTools, 'bos_get_log', { limit: 20 });
+    const parsed = JSON.parse(result.content) as {
+      total: number;
+      entries: Array<{
+        kind: string;
+        outcome: string;
+        dna: string | null;
+        step: number;
+        mission: string | null;
+        action: string;
+        detail: string;
+      }>;
+    };
+
+    expect(parsed.total).toBeGreaterThan(0);
+    // The engine and the log are module-level singletons shared across tests,
+    // so earlier tests may have logged other DNA selections; find the
+    // surgical-team entry specifically.
+    const dnaEntry = parsed.entries.find(
+      (entry) => entry.kind === 'dna_selected' && entry.dna === 'Surgical Team',
+    );
+    expect(dnaEntry, 'DNA selection should be logged').toBeDefined();
+
+    const denyEntry = parsed.entries.find(
+      (entry) => entry.kind === 'permission' && entry.outcome === 'deny',
+    );
+    expect(denyEntry, 'deny decision should be logged').toBeDefined();
+    expect(denyEntry?.dna).toBe('Surgical Team');
+    expect(denyEntry?.action).toBe('bash');
+    expect(denyEntry?.detail.length).toBeGreaterThan(0);
+  });
+
+  it('posts a synthetic session message when a governed action is denied', async () => {
+    const { ctx, addedTools, permissionHooks, syntheticCalls } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    await permission({
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-test-123',
+      agent: 'test',
+      effect: 'allow',
+    });
+
+    expect(syntheticCalls.length).toBeGreaterThan(0);
+    const denyNote = syntheticCalls.find((call) => call.text.includes('⛔'));
+    expect(denyNote, 'deny should produce a synthetic on-screen message').toBeDefined();
+    expect(denyNote?.sessionID).toBe('ses-test-123');
   });
 });

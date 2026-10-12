@@ -110,11 +110,17 @@ async function main() {
   console.log('  Current step:', state.currentStep);
   console.log('  Selected DNA:', state.selectedDna);
 
-  // Get metrics
-  const metrics = bos.getAgentState();
+  // Agent metrics (aggregated across registered agents)
+  const agents = bos.listAgents();
+  const tasksCompleted = agents.reduce((sum, agent) => sum + agent.metrics.tasksCompleted, 0);
+  const governanceViolations = agents.reduce(
+    (sum, agent) => sum + agent.metrics.governanceViolations,
+    0,
+  );
   console.log('\n📈 Agent metrics:');
-  console.log('  Tasks completed:', metrics.tasksCompleted);
-  console.log('  Governance violations:', metrics.governanceViolations);
+  console.log('  Agents registered:', agents.length);
+  console.log('  Tasks completed:', tasksCompleted);
+  console.log('  Governance violations:', governanceViolations);
 
   console.log('\n✅ Example completed successfully!');
 }

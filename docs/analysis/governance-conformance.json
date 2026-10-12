@@ -1,0 +1,93 @@
+{
+  "generatedAt": "2026-10-12T12:29:01.672Z",
+  "plugin": "behavior-os",
+  "total": 12,
+  "proven": 12,
+  "coverage": 100,
+  "claims": [
+    {
+      "id": "C01",
+      "category": "ENFORCEMENT",
+      "promise": "Surgical Team blocks production changes (permission hook → deny)",
+      "status": "PASS",
+      "evidence": "effect=deny message=\"[Behavior-OS:Surgical Team] Blocked by rule: sterile-field (Block any non-approved production changes)\""
+    },
+    {
+      "id": "C02",
+      "category": "CONSISTENCY",
+      "promise": "Agent self-check agrees with enforcement (same action → deny)",
+      "status": "PASS",
+      "evidence": "verdict=deny rules=sterile-field,timeout-verification"
+    },
+    {
+      "id": "C03",
+      "category": "ENFORCEMENT",
+      "promise": "Enterprise Governance escalates changes (permission hook → ask)",
+      "status": "PASS",
+      "evidence": "effect=ask message=\"[Behavior-OS:Enterprise Governance] Escalated by rule: change-management\""
+    },
+    {
+      "id": "C04",
+      "category": "CONSISTENCY",
+      "promise": "Agent self-check agrees with escalation (same action → escalate)",
+      "status": "PASS",
+      "evidence": "verdict=escalate rules=change-management,data-protection"
+    },
+    {
+      "id": "C05",
+      "category": "OBSERVABILITY",
+      "promise": "Every deny/escalate is recorded in the governance log with DNA + step",
+      "status": "PASS",
+      "evidence": "deny entries=1 dna=Surgical Team step=1"
+    },
+    {
+      "id": "C06",
+      "category": "OBSERVABILITY",
+      "promise": "Governance log is bounded and monotonic (ring buffer, seq++ )",
+      "status": "PASS",
+      "evidence": "4 entries, seq monotonic"
+    },
+    {
+      "id": "C07",
+      "category": "PROTOCOL",
+      "promise": "Selecting a DNA pattern records protocol step 1 (monotonic history)",
+      "status": "PASS",
+      "evidence": "step1 recorded, currentStep=3"
+    },
+    {
+      "id": "C08",
+      "category": "PERSISTENCE",
+      "promise": "exportState → importState round-trips DNA, step and missions",
+      "status": "PASS",
+      "evidence": "dna=Conformance DNA missionCount=1"
+    },
+    {
+      "id": "C09",
+      "category": "CONSISTENCY",
+      "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
+      "status": "PASS",
+      "evidence": "activeMission=mission-1791808141665-s7nfc32kza status=pending"
+    },
+    {
+      "id": "C10",
+      "category": "QUALITY",
+      "promise": "Quality gates enforce the active DNA thresholds",
+      "status": "PASS",
+      "evidence": "threshold 100: 50%→fail, 100%→pass"
+    },
+    {
+      "id": "C11",
+      "category": "LEARNING",
+      "promise": "Recorded learnings surface through the insights API",
+      "status": "PASS",
+      "evidence": "1 insight(s) returned"
+    },
+    {
+      "id": "C12",
+      "category": "OBSERVABILITY",
+      "promise": "Deny/escalate surfaces an on-screen notification (synthetic message)",
+      "status": "PASS",
+      "evidence": "synthetic: \"[Behavior-OS] ⛔ Blocked \"write\" — Blocked by rule: sterile-field (Block any non-approved production changes)\""
+    }
+  ]
+}

@@ -8,8 +8,10 @@ Artefactos: `docs/analysis/governance-flow-scenarios.csv` (1000 linhas),
 `docs/analysis/governance-flow-summary.json`, gerados por
 `scripts/analyze-governance-flow.mjs`.
 
-> **Atualização (mesma data) — P0 implementado e verificado.**
-> A governação agora **bloqueia de facto**. Ver §8 para o estado de cada finding, o
+> **Atualização (mesma data) — P0, P1, P2 e P3 implementados e verificados.**
+> A governação agora **bloqueia de facto** (§8: P0) e é **observável no ecrã**
+> (§8: P3 — tool `bos_get_log`, mensagens sintéticas e linha
+> `[Behavior-OS:LOG:…]` no console). Ver §8 para o estado de cada finding, o
 > mapeamento para os ficheiros alterados e as provas E2E (`opencode run`). Os números
 > da Parte A/B em §4 foram regenerados após a correção.
 
@@ -393,25 +395,67 @@ Implementado e verificado. Cada correção tem testes que a provam.
 | **F10** subconjunto de tools no before | `GOVERNED_TOOL = /bash\|write\|edit\|patch\|apply\|shell\|mcp__/i` (advisory) | ✅ |
 | **F11** cache de governação | Efetivamente resolvido: o registry reutiliza o engine enquanto a referência do DNA não muda → `decisionCache` de 5 min ativo | ✅ |
 
-### Ficheiros novos/alterados (P0/P1/P2)
+### P3 — observabilidade (ler a governação no ecrã) ✅
+
+> Pedido explícito: poder **ler**, na sessão do OpenCode, como o DNA/governança está a ser
+> aplicado. Antes só existia `console.log` disperso, sem histórico consultável.
+
+| Comportamento | Correção | Estado |
+|---|---|---|
+| Sem histórico de decisões | **Ring buffer** de eventos (máx. 200) em `governance-log.ts` | ✅ |
+| Sem leitura na sessão | Tool **`bos_get_log`** (13ª tool) devolve os N eventos em JSON | ✅ |
+| Sem feedback imediato | Mensagens sintéticas (`ctx.session.synthetic`) em DNA auto, missão auto, `⛔` deny e `⚠️` escalate | ✅ |
+| Sem análise nos logs do servidor | Linha única greppable `[Behavior-OS:LOG:kind:outcome] dna=… step=… mission=… action="…"` para `deny`/`escalate`/`error` | ✅ |
+
+Cada evento carrega `seq`, `at`, `kind`, `outcome`, `dna`, `step`, `mission`, `action` e
+`detail`; os `kind` possíveis são `dna_selected`, `mission`, `protocol`, `permission`,
+`advisory`, `learning`, `restore` e `tool`. Decisões `allow` sem regra avaliada não são
+registadas (mantém o log focado). É puramente diagnóstico: não persiste nem influencia
+decisões.
+
+### P4 — provar a governação (conformance de promessas) ✅
+
+> Pergunta: *"como provamos que temos governação total e que o Behavior-OS cumpre tudo o
+> que promete a 100%?"* Resposta rigorosa: "100%" não é um estado que se afirma — é
+> **cobertura sobre um conjunto enumerado de promessas**, cada uma com uma verificação
+> executável.
+
+| Comportamento | Correção | Estado |
+|---|---|---|
+| Duas vias de decisão divergiam: o hook `permission` **escalava** `deploy to production` enquanto a auto-verificação `bos_evaluate_governance` respondia `allow` | A tool passa a construir o *condition bag* via `buildGovernanceContext` (igual ao hook): `tool`/`resources`/`text` + `metadata` explícitos | ✅ |
+| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 12 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
+| Limites não declarados | Secção "Limites honestos" no `OPENCODE_RUN.md` separa **Enforced** (`permission` deny) / **Advisory** (`escalate`→`ask`, não impede execução) / **Reativo** (protocolo por tools) / **Não provado** | ✅ |
+
+As 12 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
+C03 escalonamento, C05 log com DNA+passo, C06 limite+monotonicidade, C07 protocolo,
+C08 persistência, C09 invariante `activeMission`, C10 quality gates, C11 learnings/C12
+mensagem no ecrã.
+
+### Ficheiros novos/alterados (P0/P1/P2/P3)
 
 - `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA`, `buildGovernanceContext`,
   `classifyMissionIntent` e `buildGovernedPreamble`/`GOVERNED_PREAMBLE_MARKER` (helpers puros,
   sem imports do OpenCode).
+- `plugins/opencode-v2/src/governance-log.ts` **(novo, P3)** — ring buffer de eventos de
+  governação + `serializeGovernanceLog` (linha greppable para o console).
 - `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`
   (auto-DNA + **auto-missão**), `session.context` (sempre ativo), `tool.execute.before`
   (advisory), `tool.execute.after` (learning); **persistência** via `ctx.storage`;
-  **preâmbulo governado nos agentes** via `ctx.agent.transform`.
+  **preâmbulo governado nos agentes** via `ctx.agent.transform`; **observabilidade** (registo
+  de eventos + mensagens sintéticas + tool `bos_get_log`).
 - `packages/core/src/engine/behavior-os.ts` — `recordLearning({ advanceProtocol? })`,
   `createMission`/`startMission({ advanceProtocol? })`, **`activeMission`** (set no start,
   clear no complete/fail), `exportState()`/`importState()` + `BehaviorOSSnapshot`.
 - `packages/core/src/engine/mission-engine.ts` / `learning-engine.ts` — `snapshot()`/`restore()`.
 - `packages/mcp-server/src/server.ts` — contexto aninhado + `bos_list_dna` + catálogo dinâmico.
 - `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
+- `scripts/governance-conformance.mjs` **(novo, P4)** — harness de conformance: 12 *claims*
+  sobre plugin+core reais, relatório `claims → evidência` + JSON.
 - `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
 - `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
 - `plugins/opencode-v2/tests/governance.test.ts` (**24 testes**),
-  `plugin-registration.test.ts` (16), `plugin-session-flow.test.ts` **(novo, 3)**.
+  `plugin-registration.test.ts` (18), `plugin-session-flow.test.ts` (3),
+  `governance-log.test.ts` **(novo, P3 — 5 testes do ring buffer e do eco no console)**.
 - `packages/core/tests/persistence.test.ts` **(novo, 8)** — round-trip de estado,
   `activeMission`, `advanceProtocol:false` e reutilização do cache.
 - `.opencode/skills/behavior-os/SKILL.md` **(novo)** — skill governada (protocolo de 7
@@ -432,12 +476,16 @@ Implementado e verificado. Cada correção tem testes que a provam.
    **segundo processo** restaurou o mesmo `activeMission` a partir de `ctx.storage`.
 5. `pnpm verify:plugin` confirma o **preâmbulo governado nos agentes**
    (`Agents: governed preamble applied to build, review`).
+6. `pnpm verify:plugin` confirma também a **observabilidade** — imprime a linha
+   `[Behavior-OS:LOG:permission:deny] dna=Surgical Team step=3 mission=mission-… action="bash" …`
+   e valida que `bos_get_log` devolve os eventos `dna_selected` + `permission deny`.
 
 ### Como reproduzir
 
 ```powershell
 pnpm build; pnpm test; pnpm lint:check; pnpm typecheck
 pnpm verify:plugin      # hooks + deny real
+pnpm verify:governance  # 12 claims: promessa → evidência
 pnpm smoke:mcp          # 12 tools + match de contexto
 pnpm analyze:flow       # regenera os 1000 cenários
 ```

@@ -35,7 +35,13 @@ export const PersonaBoundarySchema = z.object({
 export const PersonaSchema = z.object({
   role: z.string(),
   name: z.string(),
-  authority: z.enum(['admin', 'architect', 'developer', 'reviewer', 'operator']),
+  /**
+   * Free-form authority label used by a persona (e.g. "architect", "tech-lead",
+   * "compliance", "pi"). This is intentionally a string: shipped DNA patterns in
+   * `dnas/*.yaml` use domain-specific authorities, so a closed enum would reject
+   * the project's own patterns.
+   */
+  authority: z.string(),
   boundaries: z.array(PersonaBoundarySchema).optional(),
   skills: z.array(z.string()),
   description: z.string().optional(),
