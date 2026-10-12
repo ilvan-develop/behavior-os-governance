@@ -939,6 +939,85 @@ server.registerTool(
 );
 
 // ============================================================
+// ANALYTICS TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_recommendations',
+  {
+    description: 'Scored recommendations derived from recent learning events',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Max recommendations (default 5)'),
+      ageLimitHours: z.number().optional().describe('Ignore older events (default 168h)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Recommendations' },
+  },
+  async ({ limit, ageLimitHours }: { limit?: number; ageLimitHours?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const recs = bos.recommend(limit, ageLimitHours);
+      return { content: [{ type: 'text', text: JSON.stringify(recs, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_drift',
+  {
+    description: 'Compare two DNA snapshots and report behavioral drift',
+    inputSchema: z.object({
+      dnaA: z.string().describe('Older DNA name'),
+      dnaB: z.string().describe('Newer DNA name'),
+    }),
+    annotations: { readOnlyHint: true, title: 'DNA Drift' },
+  },
+  async ({ dnaA, dnaB }: { dnaA: string; dnaB: string }) => {
+    try {
+      const bos = getBehaviorOS();
+      const drift = bos.compareDNADrift(
+        {
+          name: dnaA,
+          version: '0',
+          description: '',
+          personas: [],
+          governance: [],
+          quality: [],
+        } as never,
+        {
+          name: dnaB,
+          version: '0',
+          description: '',
+          personas: [],
+          governance: [],
+          quality: [],
+        } as never,
+      );
+      return { content: [{ type: 'text', text: JSON.stringify(drift, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // RESOURCES
 // ============================================================
 

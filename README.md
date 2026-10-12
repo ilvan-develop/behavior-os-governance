@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 8 core engines, 21 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 10 core engines, 23 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -86,11 +86,11 @@ pnpm build
 └──────────────────────────────────────────────────────┘
 
 > The 9-layer diagram above is documentation of the conceptual stack. Only the
-> **8 engines** listed below are implemented in code; there is no separate
+> **10 engines** listed below are implemented in code; there is no separate
 > "Behavioral" or "Compiler" engine.
 ```
 
-### 8 Core Engines Powering the Stack
+### 10 Core Engines Powering the Stack
 
 | Engine | Purpose |
 |---|---|
@@ -101,6 +101,8 @@ pnpm build
 | MissionEngine | In-memory mission lifecycle management |
 | PipelineEngine | Ordered gates with synchronous pre-execution blocking |
 | DecisionEngine | Weighted voting/quorum (majority/supermajority/unanimous) |
+| RecommendationEngine | Scored recommendations from learning events |
+| DriftEngine | Behavioral drift between DNA snapshots |
 | DNALoader | YAML pattern loading with Zod validation |
 
 ## Features Deep Dive
@@ -165,7 +167,7 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 21 Tools + 2 Resources
+### MCP Server — 23 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
@@ -177,7 +179,8 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 | **Decision** | `bos_decide` |
 | **Evolution** | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
-| **Status** | `bos_get_status`, `bos_get_state`, `bos_verify_audit_trail` |
+| **Drift** | `bos_drift` |
+| **Analytics** | `bos_recommendations` |
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
@@ -324,11 +327,11 @@ mcpServers:
 | Package | Description | Version |
 |---|---|---|
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
-| `@behavior-os/core` | 8 engines + EngineRegistry | 2.0.0 |
+| `@behavior-os/core` | 10 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 21 tools + 2 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 23 tools + hooks | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 23 tools + 2 resources | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 25 tools + hooks | 2.0.0 |
 
 ## License
 

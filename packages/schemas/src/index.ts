@@ -411,6 +411,28 @@ export const CodeFixResultSchema = z.object({
   missionId: z.string().optional(),
 });
 export type CodeFixResult = z.infer<typeof CodeFixResultSchema>;
+export const RankedRecommendationSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  score: z.number().min(0).max(1),
+  evidence: z.array(z.string()),
+  timestamp: z.string(),
+});
+export type RankedRecommendation = z.infer<typeof RankedRecommendationSchema>;
+export const DriftInfoSchema = z.object({
+  id: z.string(),
+  newerName: z.string(),
+  olderName: z.string(),
+  rulesAdded: z.number(),
+  rulesRemoved: z.number(),
+  gatesAdded: z.number(),
+  gatesRemoved: z.number(),
+  totalChanges: z.number(),
+  significant: z.boolean(),
+  summary: z.string(),
+  timestamp: z.string(),
+});
+export type DriftInfo = z.infer<typeof DriftInfoSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;

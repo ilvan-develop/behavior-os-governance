@@ -109,11 +109,11 @@ source files; there is no code auto-fix.
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
 
-## Core Engines (8 Total)
+## Core Engines (10 Total)
 
 These are the only engines that exist in `packages/core/src/engine/`. Earlier
 revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
-only the eight below are real, and no throughput numbers are claimed.
+only the ten below are real, and no throughput numbers are claimed.
 
 | Engine | File | Purpose |
 |--------|------|---------|
@@ -124,6 +124,9 @@ only the eight below are real, and no throughput numbers are claimed.
 | MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
 | PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
 | DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
+| RecommendationEngine | `recommendation-engine.ts` | Scored recommendations from learning events |
+| DriftEngine | `drift-engine.ts` | Behavioral drift between DNA snapshots |
+| DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 | DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 
 ## Persistence (pluggable)
@@ -170,7 +173,7 @@ reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 ## Integration Points
 
 ### MCP Server (standalone)
-- 21 tools + 2 resources exposed via Model Context Protocol
+- 23 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
@@ -224,6 +227,19 @@ Response to Agent
 > (`bos_verify_audit_trail`). Mission/learning/agent/audit-report state is
 > persisted to SQLite when a `persistence.path` is configured. See
 > `docs/CLAIMS.md` for the verified status.
+
+## 7 Real Algorithms
+
+The system ships with **seven** real, measurable algorithms (not synthetic
+`Ops/sec` figures). Each is documented in its engine source file:
+
+1. **Confidence scoring** — `LearningEngine.confidenceFor()`: `min(1, n/5)*0.6 + avgImpact*0.4`
+2. **Recency decay** — `RecommendationEngine.recencyWeight()`: `max(0, 1 - h/72)`
+3. **Recommendation score** — `0.4*recency + 0.3*frequency + 0.3*impact`
+4. **Quorum resolution** — `DecisionEngine.resolve()`: majority / supermajority (≥ 2/3) / unanimous
+5. **SHA-256 hash chain** — `verifyGovernanceLog()` recomputes the tamper-evident trail
+6. **Drift detection** — `DriftEngine.compare()`: symmetric difference of rules + gates
+7. **Resource normalization** — `buildGovernanceContext()`: maps resources into condition signals
 
 ## Extensibility
 

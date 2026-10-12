@@ -8,6 +8,7 @@ import type {
   DecisionOutcome,
   DecisionPolicy,
   DNA,
+  DriftInfo,
   EvolutionProposal,
   GovernanceDecision,
   LearningEvent,
@@ -17,6 +18,7 @@ import type {
   MissionPriority,
   MissionType,
   PipelineRun,
+  RankedRecommendation,
   Vote,
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
@@ -24,9 +26,11 @@ import type { Store } from '../persistence/store.js';
 import type { DecideOptions } from './decision-engine.js';
 import {
   type DecisionEngine,
+  type DriftEngine,
   EngineRegistry,
   type LearningEngine,
   type MissionEngine,
+  type RecommendationEngine,
 } from './index.js';
 import {
   type GateContext,
@@ -698,6 +702,42 @@ export class BehaviorOS {
   /** Read persisted decisions, newest first. Empty without a store. */
   listDecisions(limit = 50): Decision[] {
     return this.store?.listDecisions(limit) ?? [];
+  }
+
+  // Recommendations ----------------------------------------------------------
+  /**
+   * Scored recommendations derived from recent learning events. Uses
+   * {@link RecommendationEngine}.
+   */
+  recommend(limit = 5, ageLimitHours = 168): RankedRecommendation[] {
+    return (
+      this.registry
+        .get<RecommendationEngine>('recommendation')
+        ?.recommend(this.getLearningEngine().getEvents(), limit, ageLimitHours) ?? []
+    );
+  }
+
+  // Drift detection --------------------------------------------------------
+  /**
+   * Compare two DNA snapshots and return the behavioral drift between them.
+   * A drift is significant when `totalChanges >= 2`.
+   */
+  compareDNADrift(dnaA: DNA, dnaB: DNA): DriftInfo {
+    return (
+      this.registry.get<DriftEngine>('drift')?.compare(dnaA, dnaB) ?? {
+        id: `drift-${Date.now()}`,
+        newerName: dnaB.name,
+        olderName: dnaA.name,
+        rulesAdded: 0,
+        rulesRemoved: 0,
+        gatesAdded: 0,
+        gatesRemoved: 0,
+        totalChanges: 0,
+        significant: false,
+        summary: 'No drift engine available.',
+        timestamp: new Date().toISOString(),
+      }
+    );
   }
 
   // Agent Management

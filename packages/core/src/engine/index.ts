@@ -2,20 +2,24 @@ import type { DNA } from '@behavior-os/schemas';
 import { AuditEngine } from './audit-engine.js';
 import { DecisionEngine } from './decision-engine.js';
 import { DNALoader } from './dna-loader.js';
+import { DriftEngine } from './drift-engine.js';
 import { GovernanceEngine } from './governance-engine.js';
 import { LearningEngine } from './learning-engine.js';
 import { MissionEngine } from './mission-engine.js';
 import { QualityEngine } from './quality-engine.js';
+import { RecommendationEngine } from './recommendation-engine.js';
 
 export * from './pipeline-engine.js';
 export {
   AuditEngine,
   DecisionEngine,
   DNALoader,
+  DriftEngine,
   GovernanceEngine,
   LearningEngine,
   MissionEngine,
   QualityEngine,
+  RecommendationEngine,
 };
 
 export class EngineRegistry {
@@ -77,6 +81,18 @@ export class EngineRegistry {
   createDecisionEngine(): DecisionEngine {
     const engine = new DecisionEngine();
     this.register('decision', engine);
+    return engine;
+  }
+
+  createRecommendationEngine(): RecommendationEngine {
+    const engine = new RecommendationEngine();
+    this.register('recommendation', engine);
+    return engine;
+  }
+
+  createDriftEngine(): DriftEngine {
+    const engine = new DriftEngine();
+    this.register('drift', engine);
     return engine;
   }
 

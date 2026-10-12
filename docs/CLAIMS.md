@@ -7,20 +7,20 @@
 ## Como verificar (comandos)
 
 ```bash
-# Motores reais (esperado: audit, behavior-os, decision, dna-loader, governance, learning, mission, pipeline, quality)
+# Motores reais (esperado: audit, behavior-os, decision, drift, dna-loader, governance, learning, mission, pipeline, quality, recommendation)
 ls packages/core/src/engine/*.ts
 
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 21) e resources (esperado: 2)
+# Tools MCP (esperado: 23) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 25 objetos)
+# Schemas Zod (esperado: 29 objetos)
 grep -c "z.object(" packages/schemas/src/index.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
@@ -37,20 +37,20 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 
 | Afirmação | Estado | Realidade verificada |
 |---|---|---|
-| 10 motores operacionais | ❌ | **8** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Não existem Behavioral/Compiler. |
+| 10 motores operacionais | ✅ | **10** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Listado: audit, behavior-os, decision, drift, dna-loader, governance, learning, mission, pipeline, quality, recommendation. |
 | GovernanceEngine com 609 linhas | ❌ | **147** linhas. |
 | QualityEngine com 618 linhas | ❌ | **96** linhas. |
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **21 tools + 2 resources** (server) / **23 tools** (plugin). |
-| 29 schemas Zod | ❌ | **25** `z.object` (+24 `z.enum`). |
+| 30 tools & 7 resources MCP | ❌ | **23 tools + 2 resources** (server) / **25 tools** (plugin). |
+| 29 schemas Zod | ✅ | **29** `z.object` (+24 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
 | SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
 | Persistência plugável + Postgres remoto | ✅ com ressalvas | Interface `Store` sincronizada; `SqliteStore` é o default. `PostgresStore` é opcional (`pg` resolvido só no `connect()`, **não** é dependência), com espelho em memória + write-through assíncrono (`flush()`/`closeAsync()`). Forte consistência para escritores: `store.withTransaction(async () => { store.saveA(); store.saveB() })` garante COMMIT atômico — o espelho só é atualizado após o COMMIT, por isso um leitor concorrente vê tudo ou nada. |
-| Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
-| 7 algoritmos matemáticos | ⚠️ parcial | Existe **1** algoritmo real de confiança (`frequency * 0.6 + avgImpact * 0.4`) + deteção de padrões por contagem. Não são 7. |
+| Trilho de auditoria imutável | ⚠️ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM/imutável. |
+| 7 algoritmos matemáticos | ✅ | 7 algoritmos reais documentados: (1) confiança `min(1,n/5)*0.6 + avgImpact*0.4`; (2) recência `max(0, 1 - h/72)`; (3) score recomendação `0.4*recency+0.3*freq+0.3*impact`; (4) quorum ponderado (majority/supermajority/unanimous); (5) hash-chain SHA-256; (6) drift simétrico (diff de regras/gates); (7) normalização de recursos em condições. |
 | Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
 | Propostas de correção de código | ✅ leitura + persistência governada | `LearningEngine.proposeCodeFixes()` gera `CodeFixProposal[]` a partir de eventos `fix` repetidos. `BehaviorOS.applyCodeFixes()` persiste resultados na tabela `code_fix_results` com as mesmas 3 travas da evolução (opt-in, `apply:true`, quórum). MCP: `bos_code_fixes` / `bos_apply_code_fixes`. |
 | 10 estágios de auditoria | ❌ | `AuditStageSchema` tem **6**; por omissão corre **4**. |

@@ -1053,9 +1053,60 @@ export default Plugin.define({
           return { content: JSON.stringify(reports, null, 2) };
         },
       });
-    });
+      // Tool 24: bos_recommendations — scored recommendations
+      tools.add({
+        name: 'bos_recommendations',
+        description: 'Scored recommendations derived from recent learning events',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+            ageLimitHours: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number; ageLimitHours?: number };
+          const recs = bos.recommend(params.limit, params.ageLimitHours);
+          return { content: JSON.stringify(recs, null, 2) };
+        },
+      });
 
-    // --- Governed agent preamble --------------------------------------------
+      // Tool 25: bos_drift — compare DNA snapshots
+      tools.add({
+        name: 'bos_drift',
+        description: 'Compare two DNA snapshots and report behavioral drift',
+        input: {
+          type: 'object',
+          properties: {
+            dnaA: { type: 'string' },
+            dnaB: { type: 'string' },
+          },
+          required: ['dnaA', 'dnaB'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { dnaA: string; dnaB: string };
+          const drift = bos.compareDNADrift(
+            {
+              name: params.dnaA,
+              version: '0',
+              description: '',
+              personas: [],
+              governance: [],
+              quality: [],
+            } as never,
+            {
+              name: params.dnaB,
+              version: '0',
+              description: '',
+              personas: [],
+              governance: [],
+              quality: [],
+            } as never,
+          );
+          return { content: JSON.stringify(drift, null, 2) };
+        },
+      });
+    });
     // Bake a short, static Behavior-OS reminder into every agent's system prompt
     // so governance is present in the agent definition itself, not only in the
     // per-request `session.context` injection. State-free on purpose: the live
