@@ -83,7 +83,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | OpenCode v2 | ✅ Plugin nativo |
 | Windsurf | ✅ Pronto |
 
-**13 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, execução de auditorias, registro de aprendizados e mais) + **14 tools nativas `bos_*`** no OpenCode v2 via plugin.
+**14 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, execução de auditorias, registro de aprendizados e mais) + **14 tools nativas `bos_*`** no OpenCode v2 via plugin.
 
 ---
 
@@ -96,7 +96,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | Revisão manual constante | Governança automatizada |
 | Erros se repetem | Engine de aprendizado deteta padrões recorrentes |
 | Coordenação difícil | Protocolo de 7 passos + missões rastreáveis |
-| Infraestrutura ad-hoc | 7 engines + CLI + SDK prontos |
+| Infraestrutura ad-hoc | 8 engines + CLI + SDK prontos |
 
 ---
 
@@ -128,7 +128,7 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 42 ficheiros de teste / 377 casos (`pnpm test`)
+- ✅ 43 ficheiros de teste / 390 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
 - ✅ Build ESM + DTS
 - ✅ v2.0.0

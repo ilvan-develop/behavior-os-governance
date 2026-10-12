@@ -1,5 +1,6 @@
 import type { DNA } from '@behavior-os/schemas';
 import { AuditEngine } from './audit-engine.js';
+import { DecisionEngine } from './decision-engine.js';
 import { DNALoader } from './dna-loader.js';
 import { GovernanceEngine } from './governance-engine.js';
 import { LearningEngine } from './learning-engine.js';
@@ -7,7 +8,15 @@ import { MissionEngine } from './mission-engine.js';
 import { QualityEngine } from './quality-engine.js';
 
 export * from './pipeline-engine.js';
-export { AuditEngine, DNALoader, GovernanceEngine, LearningEngine, MissionEngine, QualityEngine };
+export {
+  AuditEngine,
+  DecisionEngine,
+  DNALoader,
+  GovernanceEngine,
+  LearningEngine,
+  MissionEngine,
+  QualityEngine,
+};
 
 export class EngineRegistry {
   private engines = new Map<string, unknown>();
@@ -62,6 +71,12 @@ export class EngineRegistry {
   createMissionEngine(dna?: DNA): MissionEngine {
     const engine = new MissionEngine(dna);
     this.register('mission', engine);
+    return engine;
+  }
+
+  createDecisionEngine(): DecisionEngine {
+    const engine = new DecisionEngine();
+    this.register('decision', engine);
     return engine;
   }
 

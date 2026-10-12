@@ -8,20 +8,20 @@
 
 ```bash
 ```bash
-# Motores reais (esperado: audit, behavior-os, dna-loader, governance, learning, mission, pipeline, quality)
+# Motores reais (esperado: audit, behavior-os, decision, dna-loader, governance, learning, mission, pipeline, quality)
 ls packages/core/src/engine/*.ts
 
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 13) e resources (esperado: 2)
+# Tools MCP (esperado: 14) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 21 objetos)
+# Schemas Zod (esperado: 23 objetos)
 grep -c "z.object(" packages/schemas/src/index.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
@@ -33,14 +33,15 @@ grep -ri "sqlite" packages plugins --include=*.ts
 
 | Afirmação | Estado | Realidade verificada |
 |---|---|---|
-| 10 motores operacionais | ❌ | **7** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Não existem Decision/Behavioral/Compiler. |
+| 10 motores operacionais | ❌ | **8** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Não existem Behavioral/Compiler. |
 | GovernanceEngine com 609 linhas | ❌ | **147** linhas. |
 | QualityEngine com 618 linhas | ❌ | **96** linhas. |
 | AuditEngine com 1347 linhas | ❌ | **180** linhas. |
 | PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
 | 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **13 tools + 2 resources** (server) / **14 tools** (plugin). |
-| 29 schemas Zod | ❌ | **21** `z.object` (+19 `z.enum`). |
+| 30 tools & 7 resources MCP | ❌ | **14 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 29 schemas Zod | ❌ | **23** `z.object` (+22 `z.enum`). |
+| Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
 | SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
 | Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
@@ -52,7 +53,7 @@ grep -ri "sqlite" packages plugins --include=*.ts
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
 | Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 12 tools + 2 resources funcionais. |
+| MCP real (não vaporware) | ✅ | 14 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
 | DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
 
@@ -88,8 +89,22 @@ Limitations honestas:
 - O default são 2 tipos de gate (1 `pre` + N `post`), não "9 camadas".
 - Gates são síncronos e in-process; não há execução distribuída.
 
+## Motor de decisão (votação/quorum)
+
+`packages/core/src/engine/decision-engine.ts` resolve um assunto por votação
+ponderada:
+
+- políticas: `majority` (default), `supermajority` (≥ 2/3), `unanimous`;
+- `quorum` = peso participante mínimo (aprov + rejei + abstenções), default 1;
+- pesos por votante (negativos → 0); abstenções contam para o quórum mas nunca
+  aprovam sozinhas; empate e "tudo abstenção" → `rejected` (fail-safe);
+- `BehaviorOS.decide()` aplica defaults de config e persiste na tabela `decisions`
+  (MCP: `bos_decide`).
+
+Limitação honesta: é contagem/voto determinístico in-process; **não** há consenso
+distribuído (Raft/Paxos) nem delegação entre agentes.
+
 ## O que ainda NÃO existe (roadmap)
 
 - Persistência em Postgres remoto (o SQLite local já existe).
-- Motor de decisão por votação/quorum.
 - Aplicação automática de correções pelo LearningEngine.

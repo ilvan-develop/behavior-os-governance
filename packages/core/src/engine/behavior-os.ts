@@ -2,6 +2,8 @@ import type {
   Agent,
   AgentState,
   AuditReport,
+  Decision,
+  DecisionPolicy,
   DNA,
   GovernanceDecision,
   LearningEvent,
@@ -13,7 +15,13 @@ import type {
   PipelineRun,
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
-import { EngineRegistry, type LearningEngine, type MissionEngine } from './index.js';
+import type { DecideOptions } from './decision-engine.js';
+import {
+  type DecisionEngine,
+  EngineRegistry,
+  type LearningEngine,
+  type MissionEngine,
+} from './index.js';
 import {
   type GateContext,
   PipelineEngine,
@@ -40,6 +48,8 @@ export interface BehaviorOSConfig {
    * executes. Pass `gates` to replace the default gates entirely.
    */
   pipeline?: { enabled?: boolean; gates?: PipelineGate[] };
+  /** Defaults for {@link BehaviorOS.decide} when a call omits `policy`/`quorum`. */
+  decision?: { policy?: DecisionPolicy; quorum?: number };
 }
 
 /**
@@ -447,6 +457,34 @@ export class BehaviorOS {
 
   getInsights(limit = 10): LearningEvent[] {
     return this.getLearningEngine().getInsights(limit);
+  }
+
+  // Decisions (voting/quorum) ----------------------------------------------
+  private getDecisionEngine(): DecisionEngine {
+    let engine = this.registry.get<DecisionEngine>('decision');
+    if (!engine) engine = this.registry.createDecisionEngine();
+    return engine;
+  }
+
+  /**
+   * Resolve a subject by weighted vote. `policy`/`quorum` fall back to the
+   * `decision` config. The outcome is persisted when a store is attached.
+   */
+  decide(options: DecideOptions): Decision {
+    const { policy, quorum, ...rest } = options;
+    const decision = this.getDecisionEngine().decide({
+      ...rest,
+      policy: policy ?? this.config.decision?.policy,
+      quorum: quorum ?? this.config.decision?.quorum,
+      missionId: rest.missionId ?? this.agentState.activeMission ?? undefined,
+    });
+    this.store?.saveDecision(decision);
+    return decision;
+  }
+
+  /** Read persisted decisions, newest first. Empty without a store. */
+  listDecisions(limit = 50): Decision[] {
+    return this.store?.listDecisions(limit) ?? [];
   }
 
   // Agent Management

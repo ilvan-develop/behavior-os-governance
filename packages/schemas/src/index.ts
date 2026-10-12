@@ -229,6 +229,45 @@ export const PipelineRunSchema = z.object({
 });
 
 // ============================================================
+// Decision (voting) Schemas
+// ============================================================
+
+export const VoteChoiceSchema = z.enum(['approve', 'reject', 'abstain']);
+
+export const VoteSchema = z.object({
+  voterId: z.string(),
+  choice: VoteChoiceSchema,
+  /** Voting weight. Defaults to 1; negative weights are clamped to 0. */
+  weight: z.number().optional(),
+  reason: z.string().optional(),
+});
+
+export const DecisionPolicySchema = z.enum(['majority', 'supermajority', 'unanimous']);
+
+export const DecisionOutcomeSchema = z.enum(['approved', 'rejected', 'no_quorum']);
+
+export const DecisionSchema = z.object({
+  id: z.string(),
+  subject: z.string(),
+  policy: DecisionPolicySchema,
+  outcome: DecisionOutcomeSchema,
+  quorum: z.number(),
+  quorumMet: z.boolean(),
+  /** Sum of weights per choice. */
+  approve: z.number(),
+  reject: z.number(),
+  abstain: z.number(),
+  /** Total participating weight (approve + reject + abstain). */
+  participatingWeight: z.number(),
+  votes: z.array(VoteSchema),
+  /** Voters that cast a non-abstain vote. */
+  decidedBy: z.array(z.string()),
+  reasons: z.array(z.string()),
+  timestamp: z.string(),
+  missionId: z.string().optional(),
+});
+
+// ============================================================
 // Learning Schemas
 // ============================================================
 
@@ -317,6 +356,11 @@ export type PipelinePhase = z.infer<typeof PipelinePhaseSchema>;
 export type GateStatus = z.infer<typeof GateStatusSchema>;
 export type GateResult = z.infer<typeof GateResultSchema>;
 export type PipelineRun = z.infer<typeof PipelineRunSchema>;
+export type VoteChoice = z.infer<typeof VoteChoiceSchema>;
+export type Vote = z.infer<typeof VoteSchema>;
+export type DecisionPolicy = z.infer<typeof DecisionPolicySchema>;
+export type DecisionOutcome = z.infer<typeof DecisionOutcomeSchema>;
+export type Decision = z.infer<typeof DecisionSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;

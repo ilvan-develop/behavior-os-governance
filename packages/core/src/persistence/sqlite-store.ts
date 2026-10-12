@@ -13,7 +13,14 @@
  */
 
 import { createRequire } from 'node:module';
-import type { Agent, AuditReport, LearningEvent, Mission, PipelineRun } from '@behavior-os/schemas';
+import type {
+  Agent,
+  AuditReport,
+  Decision,
+  LearningEvent,
+  Mission,
+  PipelineRun,
+} from '@behavior-os/schemas';
 
 /** Minimal structural types for the subset of `node:sqlite` we use. */
 interface SqlStatement {
@@ -108,6 +115,15 @@ export class SqliteStore {
         agent_id TEXT,
         overall TEXT,
         blocked INTEGER,
+        created_at TEXT,
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS decisions (
+        id TEXT PRIMARY KEY,
+        subject TEXT,
+        policy TEXT,
+        outcome TEXT,
+        mission_id TEXT,
         created_at TEXT,
         json TEXT NOT NULL
       );
@@ -257,6 +273,38 @@ export class SqliteStore {
       .prepare('SELECT json FROM pipeline_runs ORDER BY created_at DESC LIMIT ?')
       .all(limit);
     return this.parseRows<PipelineRun>(rows);
+  }
+
+  // Decisions (voting/quorum) ----------------------------------------------
+  saveDecision(decision: Decision): void {
+    this.db
+      .prepare(
+        `INSERT INTO decisions (id, subject, policy, outcome, mission_id, created_at, json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           subject = excluded.subject,
+           policy = excluded.policy,
+           outcome = excluded.outcome,
+           mission_id = excluded.mission_id,
+           created_at = excluded.created_at,
+           json = excluded.json`,
+      )
+      .run(
+        decision.id,
+        decision.subject,
+        decision.policy,
+        decision.outcome,
+        decision.missionId ?? null,
+        decision.timestamp,
+        JSON.stringify(decision),
+      );
+  }
+
+  listDecisions(limit = 50): Decision[] {
+    const rows = this.db
+      .prepare('SELECT json FROM decisions ORDER BY created_at DESC LIMIT ?')
+      .all(limit);
+    return this.parseRows<Decision>(rows);
   }
 
   // Key/value metadata -----------------------------------------------------

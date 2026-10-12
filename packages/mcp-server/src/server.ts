@@ -1,10 +1,12 @@
 import { BehaviorOS } from '@behavior-os/core';
 import type {
+  DecisionPolicy,
   DNA,
   LearningImpact,
   LearningType,
   MissionPriority,
   MissionType,
+  Vote,
 } from '@behavior-os/schemas';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -411,6 +413,70 @@ server.registerTool(
       const result = bos.preflightAction(action, { agent: agentId, context });
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// DECISION TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_decide',
+  {
+    description: 'Resolve a subject by weighted vote (majority/supermajority/unanimous + quorum)',
+    inputSchema: z.object({
+      subject: z.string().describe('What is being decided'),
+      votes: z
+        .array(
+          z.object({
+            voterId: z.string(),
+            choice: z.enum(['approve', 'reject', 'abstain']),
+            weight: z.number().optional().describe('Voting weight (default 1)'),
+            reason: z.string().optional(),
+          }),
+        )
+        .describe('The votes to tally'),
+      policy: z
+        .enum(['majority', 'supermajority', 'unanimous'])
+        .optional()
+        .describe('Decision policy (default majority)'),
+      quorum: z.number().optional().describe('Minimum participating weight (default 1)'),
+      missionId: z.string().optional().describe('Related mission ID'),
+    }),
+    annotations: {
+      title: 'Decide',
+    },
+  },
+  async ({
+    subject,
+    votes,
+    policy,
+    quorum,
+    missionId,
+  }: {
+    subject: string;
+    votes: Vote[];
+    policy?: DecisionPolicy;
+    quorum?: number;
+    missionId?: string;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const decision = bos.decide({ subject, votes, policy, quorum, missionId });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(decision, null, 2) }],
       };
     } catch (error) {
       return {

@@ -63,10 +63,13 @@ quality gate (post, blocking). Callers replace them with `pipeline.gates`, and
 `pipeline.enabled: false` disables the pipeline. There are **not** nine validation
 layers — the default pipeline is 1 pre + N post gates (N = DNA quality gates).
 
-### 6. Decision Layer — not implemented
-There is **no** voting/quorum engine in this codebase. All decisions are made by
-`GovernanceEngine` rule evaluation (section 4). This slot is documented only to
-make its absence explicit; it is not shipped behavior.
+### 6. Decision Layer
+Voting/quorum engine (`DecisionEngine`, `decision-engine.ts`). A subject is
+resolved by weighted votes under a policy (`majority`, `supermajority`,
+`unanimous`) with a quorum threshold; ties and all-abstain resolve to `rejected`
+(fail-safe). `BehaviorOS.decide()` applies configured defaults and persists the
+outcome. This is deterministic in-process voting — **not** a distributed
+consensus protocol (no Raft/Paxos).
 
 ### 7. Audit Layer
 Multi-stage audit pipeline. `AuditStageSchema` defines **6** stages
@@ -96,11 +99,11 @@ Pattern detection over recorded events:
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
 
-## Core Engines (7 Total)
+## Core Engines (8 Total)
 
 These are the only engines that exist in `packages/core/src/engine/`. Earlier
 revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
-only the seven below are real, and no throughput numbers are claimed.
+only the eight below are real, and no throughput numbers are claimed.
 
 | Engine | File | Purpose |
 |--------|------|---------|
@@ -110,12 +113,13 @@ only the seven below are real, and no throughput numbers are claimed.
 | LearningEngine | `learning-engine.ts` | Pattern detection from learning events |
 | MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
 | PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
+| DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
 | DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 
 ## Persistence (SQLite)
 
 Opt-in SQLite persistence in the core package, using the built-in `node:sqlite`
-module (Node ≥ 22.5) so **no external dependency** is needed. Six tables keep
+module (Node ≥ 22.5) so **no external dependency** is needed. Seven tables keep
 state across restarts:
 
 | Table | Contents |
@@ -125,6 +129,7 @@ state across restarts:
 | `agents` | one row per registered agent |
 | `audit_log` | one row per audit report (append-only by convention) |
 | `pipeline_runs` | one row per gate-pipeline run / blocked pre-flight |
+| `decisions` | one row per voting/quorum outcome |
 | `meta` | key/value metadata |
 
 Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
@@ -135,7 +140,7 @@ See `packages/core/src/persistence/sqlite-store.ts`.
 ## Integration Points
 
 ### MCP Server (standalone)
-- 13 tools + 2 resources exposed via Model Context Protocol
+- 14 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
