@@ -423,7 +423,7 @@ decisões.
 | Comportamento | Correção | Estado |
 |---|---|---|
 | Duas vias de decisão divergiam: o hook `permission` **escalava** `deploy to production` enquanto a auto-verificação `bos_evaluate_governance` respondia `allow` | A tool passa a construir o *condition bag* via `buildGovernanceContext` (igual ao hook): `tool`/`resources`/`text` + `metadata` explícitos | ✅ |
-| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 22 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
+| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 23 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
 | Divergência entre instâncias/sessões invisível | Cada evento do log ganha `instance` (`p<pid>-<rand>`) e o harness inclui C13 (auto-missão coerente numa instância isolada) e C14 (identidade estável) | ✅ |
 | Clobber entre instâncias concorrentes (last-writer-wins) | Módulo puro `storage-sync.ts`: cada snapshot leva `revision`+`writer`; `planPersist` decide **adopt-then-write** (adota snapshot mais recente de outra instância antes de escrever) e mantém revisões monotónicas; C15 prova o contrato | ✅ |
 | Updates locais perdidos no adopt | `mergeSnapshots`: missões/learnings unidas por `id` (o mais recente ganha no mesmo `id`), DNA/`activeMission` do mais recente com fallback ao local, `currentStep` máximo, `stepHistory` unida; C16 + teste de integração com dois writers | ✅ |
@@ -433,9 +433,10 @@ decisões.
 | Leitura bloqueada por data-encryption (falso-positivo) | Negar apenas ações mutantes: ler PII não é operar sobre ela (C20) | ✅ |
 | Deadlock de bootstrap ao trocar de DNA | O control plane (`bos_*`) nunca é negado e o override é registado (C21) | ✅ |
 | Deny sem entrada no log | Todo o veredito não-`allow` é gravado antes de aplicar o efeito (C22) | ✅ |
+| Negação sem origem (camada externa ao plugin) | Garantia in-repo: toda a negação do plugin tem entrada no log e é reproduzível (C23). Limite honesto: negações emitidas fora do plugin não são atribuíveis pelo repositório | ⚠️ |
 | Limites não declarados | Secção "Limites honestos" no `OPENCODE_RUN.md` separa **Enforced** (`permission` deny) / **Advisory** (`escalate`→`ask`, não impede execução) / **Reativo** (protocolo por tools) / **Não provado** | ✅ |
 
-As 22 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
+As 23 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
 C03 escalonamento, C05 log com DNA+passo, C06 limite+monotonicidade, C07 protocolo,
 C08 persistência, C09 invariante `activeMission`, C10 quality gates, C11 learnings,
 C12 mensagem no ecrã, C13 auto-missão coerente, C14 identidade de instância, C15
@@ -459,7 +460,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
 - `packages/core/src/engine/mission-engine.ts` / `learning-engine.ts` — `snapshot()`/`restore()`.
 - `packages/mcp-server/src/server.ts` — contexto aninhado + `bos_list_dna` + catálogo dinâmico.
 - `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
-- `scripts/governance-conformance.mjs` **(novo, P4)** — harness de conformance: 22 *claims*
+- `scripts/governance-conformance.mjs` **(novo, P4)** — harness de conformance: 23 *claims*
   sobre plugin+core reais, relatório `claims → evidência` + JSON.
 - `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
 - `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
@@ -495,7 +496,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
 ```powershell
 pnpm build; pnpm test; pnpm lint:check; pnpm typecheck
 pnpm verify:plugin      # hooks + deny real
-pnpm verify:governance  # 22 claims: promessa → evidência
+pnpm verify:governance  # 23 claims: promessa → evidência
 pnpm smoke:mcp          # 12 tools + match de contexto
 pnpm analyze:flow       # regenera os 1000 cenários
 ```

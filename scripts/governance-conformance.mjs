@@ -712,6 +712,35 @@ const claims = [
       return { status: 'PASS', evidence: `deny recorded for action ${deny.action}` };
     },
   },
+  {
+    id: 'C23',
+    category: 'OBSERVABILITY',
+    promise: 'Every denial is attributable: a matching log entry and a reproducible verdict',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: 'surgical-team' });
+      const event = {
+        action: 'bash',
+        resources: ['deploy to production'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(event);
+      expect(event.effect === 'deny', 'expected the action to be denied');
+      const log = await env.runTool('bos_get_log', { limit: 100 });
+      const entry = log.entries.find(
+        (e) => e.kind === 'permission' && e.outcome === 'deny' && e.action === 'bash',
+      );
+      expect(Boolean(entry), 'the denial has no matching log entry (unattributable)');
+      const again = await env.runTool('bos_evaluate_governance', {
+        action: 'bash',
+        agent: 'conformance',
+        tool: 'bash',
+        resources: ['deploy to production'],
+      });
+      expect(again.verdict === 'deny', `the denial is not reproducible: ${again.verdict}`);
+      return { status: 'PASS', evidence: 'deny logged for bash and reproduced' };
+    },
+  },
 ];
 
 function pad(value, width) {
