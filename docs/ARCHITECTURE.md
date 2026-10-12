@@ -170,7 +170,7 @@ reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 ## Integration Points
 
 ### MCP Server (standalone)
-- 18 tools + 2 resources exposed via Model Context Protocol
+- 21 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 

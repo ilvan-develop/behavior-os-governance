@@ -851,6 +851,94 @@ server.registerTool(
 );
 
 // ============================================================
+// LIST TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_list_decisions',
+  {
+    description: 'List persisted voting/quorum decisions (requires persistence)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum results (default 50)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'List Decisions' },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const decisions = bos.listDecisions(limit);
+      return { content: [{ type: 'text', text: JSON.stringify(decisions, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_pipeline_runs',
+  {
+    description: 'List persisted gate-pipeline runs / blocked pre-flights (requires persistence)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum results (default 50)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'List Pipeline Runs' },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const runs = bos.listPipelineRuns(limit);
+      return { content: [{ type: 'text', text: JSON.stringify(runs, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_audit_reports',
+  {
+    description: 'List persisted audit reports (requires persistence)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum results (default 50)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'List Audit Reports' },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const reports = bos.listAuditReports(limit);
+      return { content: [{ type: 'text', text: JSON.stringify(reports, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // RESOURCES
 // ============================================================
 

@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 8 core engines, 18 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 8 core engines, 21 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -165,7 +165,7 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 18 Tools + 2 Resources
+### MCP Server — 21 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
@@ -327,7 +327,7 @@ mcpServers:
 | `@behavior-os/core` | 8 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 18 tools + 2 resources | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 21 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
 
 ## License
