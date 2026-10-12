@@ -15,6 +15,14 @@ export interface QualityResult {
   metrics: QualityMetrics;
 }
 
+/** Outcome of evaluating a single gate — `skipped` when the metric is absent. */
+export interface GateEvaluation {
+  status: 'passed' | 'failed' | 'skipped';
+  actual?: number;
+  expected: number;
+  type: string;
+}
+
 export class QualityEngine {
   private gates: QualityGate[];
 
@@ -29,24 +37,7 @@ export class QualityEngine {
     for (const gate of this.gates) {
       const actual = normalizedMetrics[gate.type];
       if (actual === undefined) continue;
-
-      let passed = false;
-      switch (gate.operator ?? 'gte') {
-        case 'gte':
-          passed = actual >= gate.threshold;
-          break;
-        case 'lte':
-          passed = actual <= gate.threshold;
-          break;
-        case 'eq':
-          passed = actual === gate.threshold;
-          break;
-        case 'neq':
-          passed = actual !== gate.threshold;
-          break;
-      }
-
-      if (!passed) {
+      if (!this.compare(gate.operator ?? 'gte', actual, gate.threshold)) {
         failedGates.push({
           id: gate.id,
           expected: gate.threshold,
@@ -61,6 +52,42 @@ export class QualityEngine {
       failedGates,
       metrics,
     };
+  }
+
+  /**
+   * Evaluate a single gate. Unlike {@link evaluate} (which aggregates and skips
+   * absent metrics), this reports per-gate status — used by the gate pipeline to
+   * expose one pipeline gate per DNA quality gate.
+   */
+  evaluateGate(gate: QualityGate, metrics: QualityMetrics | undefined): GateEvaluation {
+    const actual = metrics?.[gate.type];
+    if (actual === undefined) {
+      return { status: 'skipped', expected: gate.threshold, type: gate.type };
+    }
+    const passed = this.compare(gate.operator ?? 'gte', actual, gate.threshold);
+    return {
+      status: passed ? 'passed' : 'failed',
+      actual,
+      expected: gate.threshold,
+      type: gate.type,
+    };
+  }
+
+  private compare(
+    operator: 'gte' | 'lte' | 'eq' | 'neq',
+    actual: number,
+    threshold: number,
+  ): boolean {
+    switch (operator) {
+      case 'lte':
+        return actual <= threshold;
+      case 'eq':
+        return actual === threshold;
+      case 'neq':
+        return actual !== threshold;
+      default:
+        return actual >= threshold;
+    }
   }
 
   getGates(): QualityGate[] {

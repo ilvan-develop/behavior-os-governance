@@ -6,6 +6,7 @@ import { LearningEngine } from './learning-engine.js';
 import { MissionEngine } from './mission-engine.js';
 import { QualityEngine } from './quality-engine.js';
 
+export * from './pipeline-engine.js';
 export { AuditEngine, DNALoader, GovernanceEngine, LearningEngine, MissionEngine, QualityEngine };
 
 export class EngineRegistry {

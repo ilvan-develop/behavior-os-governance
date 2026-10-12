@@ -195,6 +195,40 @@ export const AuditReportSchema = z.object({
 });
 
 // ============================================================
+// Pipeline Schemas
+// ============================================================
+
+/** Whether a gate runs before (pre) or after (post) an action executes. */
+export const PipelinePhaseSchema = z.enum(['pre', 'post']);
+
+export const GateStatusSchema = z.enum(['passed', 'failed', 'warning', 'skipped']);
+
+export const GateResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  phase: PipelinePhaseSchema,
+  /** When true, a `failed` status halts the run and blocks the action. */
+  blocking: z.boolean(),
+  status: GateStatusSchema,
+  details: z.record(z.string(), z.unknown()),
+  durationMs: z.number(),
+  timestamp: z.string(),
+});
+
+export const PipelineRunSchema = z.object({
+  id: z.string(),
+  overall: z.enum(['pass', 'fail', 'warning']),
+  blocked: z.boolean(),
+  blockedBy: z.string().optional(),
+  phases: z.array(PipelinePhaseSchema),
+  gates: z.array(GateResultSchema),
+  durationMs: z.number(),
+  timestamp: z.string(),
+  missionId: z.string().optional(),
+  agentId: z.string().optional(),
+});
+
+// ============================================================
 // Learning Schemas
 // ============================================================
 
@@ -279,6 +313,10 @@ export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema> & {
 export type AuditStage = z.infer<typeof AuditStageSchema>;
 export type AuditResult = z.infer<typeof AuditResultSchema>;
 export type AuditReport = z.infer<typeof AuditReportSchema>;
+export type PipelinePhase = z.infer<typeof PipelinePhaseSchema>;
+export type GateStatus = z.infer<typeof GateStatusSchema>;
+export type GateResult = z.infer<typeof GateResultSchema>;
+export type PipelineRun = z.infer<typeof PipelineRunSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;

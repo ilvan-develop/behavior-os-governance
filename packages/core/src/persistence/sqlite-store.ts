@@ -13,7 +13,7 @@
  */
 
 import { createRequire } from 'node:module';
-import type { Agent, AuditReport, LearningEvent, Mission } from '@behavior-os/schemas';
+import type { Agent, AuditReport, LearningEvent, Mission, PipelineRun } from '@behavior-os/schemas';
 
 /** Minimal structural types for the subset of `node:sqlite` we use. */
 interface SqlStatement {
@@ -99,6 +99,15 @@ export class SqliteStore {
         mission_id TEXT,
         agent_id TEXT,
         overall TEXT,
+        created_at TEXT,
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS pipeline_runs (
+        id TEXT PRIMARY KEY,
+        mission_id TEXT,
+        agent_id TEXT,
+        overall TEXT,
+        blocked INTEGER,
         created_at TEXT,
         json TEXT NOT NULL
       );
@@ -216,6 +225,38 @@ export class SqliteStore {
       .prepare('SELECT json FROM audit_log ORDER BY created_at DESC LIMIT ?')
       .all(limit);
     return this.parseRows<AuditReport>(rows);
+  }
+
+  // Pipeline runs (gate pre-flight / full runs) -----------------------------
+  savePipelineRun(run: PipelineRun): void {
+    this.db
+      .prepare(
+        `INSERT INTO pipeline_runs (id, mission_id, agent_id, overall, blocked, created_at, json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           mission_id = excluded.mission_id,
+           agent_id = excluded.agent_id,
+           overall = excluded.overall,
+           blocked = excluded.blocked,
+           created_at = excluded.created_at,
+           json = excluded.json`,
+      )
+      .run(
+        run.id,
+        run.missionId ?? null,
+        run.agentId ?? null,
+        run.overall,
+        run.blocked ? 1 : 0,
+        run.timestamp,
+        JSON.stringify(run),
+      );
+  }
+
+  listPipelineRuns(limit = 50): PipelineRun[] {
+    const rows = this.db
+      .prepare('SELECT json FROM pipeline_runs ORDER BY created_at DESC LIMIT ?')
+      .all(limit);
+    return this.parseRows<PipelineRun>(rows);
   }
 
   // Key/value metadata -----------------------------------------------------

@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 6 core engines, 12 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 7 core engines, 13 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -66,6 +66,9 @@ pnpm build
 │   Stages: lint → typecheck → security → coverage      │
 │   (simulated by default; real checks opt-in)          │
 ├──────────────────────────────────────────────────────┤
+│                   GATE PIPELINE                       │
+│   preflight: governance gate (blocking) → quality     │
+├──────────────────────────────────────────────────────┤
 │                   GOVERNANCE LAYER                    │
 │   Rules: block | escalate | warn | log | transform    │
 ├──────────────────────────────────────────────────────┤
@@ -80,11 +83,11 @@ pnpm build
 └──────────────────────────────────────────────────────┘
 
 > The 9-layer diagram above is documentation of the conceptual stack. Only the
-> **6 engines** listed below are implemented in code; there is no separate
-> "Decision" or "Behavioral" engine.
+> **7 engines** listed below are implemented in code; there is no separate
+> "Decision" engine (no voting/quorum).
 ```
 
-### 6 Core Engines Powering the Stack
+### 7 Core Engines Powering the Stack
 
 | Engine | Purpose |
 |---|---|
@@ -93,6 +96,7 @@ pnpm build
 | AuditEngine | Multi-stage audit pipeline (real or simulated) |
 | LearningEngine | Pattern detection from learning events |
 | MissionEngine | In-memory mission lifecycle management |
+| PipelineEngine | Ordered gates with synchronous pre-execution blocking |
 | DNALoader | YAML pattern loading with Zod validation |
 
 ## Features Deep Dive
@@ -174,8 +178,8 @@ Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 ### SQLite Persistence (opt-in)
 
 State survives restarts using the built-in `node:sqlite` module (Node ≥ 22.5, **no
-external dependency**). `missions`, `learnings`, `agents`, `audit_log` and a
-key/value `meta` table are stored in a local database:
+external dependency**). `missions`, `learnings`, `agents`, `audit_log`,
+`pipeline_runs` and a key/value `meta` table are stored in a local database:
 
 ```ts
 const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
@@ -207,8 +211,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 41 |
-| Test cases (`it`/`test` blocks) | 365 |
+| Test files (`*.test.ts`) | 42 |
+| Test cases (`it`/`test` blocks) | 377 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |
@@ -304,10 +308,10 @@ mcpServers:
 | Package | Description | Version |
 |---|---|---|
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
-| `@behavior-os/core` | 6 engines + EngineRegistry | 2.0.0 |
+| `@behavior-os/core` | 7 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 12 tools + 2 resources | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 13 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
 
 ## License

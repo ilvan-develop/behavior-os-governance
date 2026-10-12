@@ -7,38 +7,40 @@
 ## Como verificar (comandos)
 
 ```bash
-# Motores reais (esperado: audit, behavior-os, dna-loader, governance, learning, mission, quality)
+```bash
+# Motores reais (esperado: audit, behavior-os, dna-loader, governance, learning, mission, pipeline, quality)
 ls packages/core/src/engine/*.ts
 
 # Linhas por motor
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 12) e resources (esperado: 2)
+# Tools MCP (esperado: 13) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 20 objetos)
+# Schemas Zod (esperado: 21 objetos)
 grep -c "z.object(" packages/schemas/src/index.ts
 
-# SQLite (esperado: 0 no código)
+# SQLite (esperado: >= 1 ficheiro no código)
 grep -ri "sqlite" packages plugins --include=*.ts
+```
 ```
 
 ## Tabela de afirmações
 
 | Afirmação | Estado | Realidade verificada |
 |---|---|---|
-| 10 motores operacionais | ❌ | **6** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Não existem Decision/Behavioral/Pipeline/Compiler. |
-| GovernanceEngine com 609 linhas | ❌ | **126** linhas. |
-| QualityEngine com 618 linhas | ❌ | **59** linhas. |
-| AuditEngine com 1347 linhas | ❌ | **160** linhas. |
-| PipelineEngine com 657 linhas | ❌ | Ficheiro **não existe**. |
-| 9 camadas de validação (runtime) | ❌ | Diagrama conceptual; sem pipeline de 9 gates. |
-| 30 tools & 7 resources MCP | ❌ | **12 tools + 2 resources** (server) / **14 tools** (plugin). |
-| 29 schemas Zod | ❌ | **20** `z.object` (+10 enums). |
+| 10 motores operacionais | ❌ | **7** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Não existem Decision/Behavioral/Compiler. |
+| GovernanceEngine com 609 linhas | ❌ | **147** linhas. |
+| QualityEngine com 618 linhas | ❌ | **96** linhas. |
+| AuditEngine com 1347 linhas | ❌ | **180** linhas. |
+| PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
+| 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
+| 30 tools & 7 resources MCP | ❌ | **13 tools + 2 resources** (server) / **14 tools** (plugin). |
+| 29 schemas Zod | ❌ | **21** `z.object` (+19 `z.enum`). |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
 | SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
 | Trilho de auditoria imutável | ✅ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM. |
@@ -48,7 +50,7 @@ grep -ri "sqlite" packages plugins --include=*.ts
 | `authority_level: 3` | ❌ | Campo real: `authority: string` (ex.: `operator`). |
 | Gate 2 real (Biome, tsc, pnpm audit) | ⚠️ | Verdade **apenas** com `simulate: false`; por omissão é simulado e passa sempre. |
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
-| Bloqueio antes da execução | ✅ (plugin) | `ctx.permission.hook('evaluate')` → `deny`/`ask`, só com DNA ativo e só em ações que mudam estado. |
+| Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
 | MCP real (não vaporware) | ✅ | 12 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
@@ -67,9 +69,27 @@ Limitações honestas:
 - O buffer é limitado (ring buffer); a verificação cobre a janela retida e
   ancora no `prevHash` do primeiro evento retido.
 
+## Gate pipeline
+
+`PipelineEngine` (`packages/core/src/engine/pipeline-engine.ts`) runs an ordered
+list of gates synchronously. A gate is `{ id, phase, blocking, evaluate }`; a
+**blocking** gate that returns `failed` halts the run and blocks the action.
+
+- `preflightAction(action, ctx)` runs only the `pre` gates → `{ allowed, blockedBy, run }`.
+  This is a real pre-execution veto that any host can call (the MCP server exposes
+  it as `bos_preflight`), not only the OpenCode plugin.
+- `runPipeline(context)` runs `pre` + `post` gates and persists the run.
+- Default gates: `governance` (pre, blocking) + one `quality:<id>` gate per DNA
+  quality gate (post, blocking). Supplying `pipeline.gates` replaces them;
+  `pipeline.enabled: false` yields a pass-through pipeline.
+- Blocked pre-flights and full runs are persisted in the `pipeline_runs` table.
+
+Limitations honestas:
+- O default são 2 tipos de gate (1 `pre` + N `post`), não "9 camadas".
+- Gates são síncronos e in-process; não há execução distribuída.
+
 ## O que ainda NÃO existe (roadmap)
 
 - Persistência em Postgres remoto (o SQLite local já existe).
-- Pipeline de N gates com bloqueio síncrono pré-execução fora do plugin OpenCode.
 - Motor de decisão por votação/quorum.
 - Aplicação automática de correções pelo LearningEngine.

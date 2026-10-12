@@ -10,9 +10,16 @@ import type {
   Mission,
   MissionPriority,
   MissionType,
+  PipelineRun,
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import { EngineRegistry, type LearningEngine, type MissionEngine } from './index.js';
+import {
+  type GateContext,
+  PipelineEngine,
+  type PipelineGate,
+  type PreflightResult,
+} from './pipeline-engine.js';
 
 export interface BehaviorOSConfig {
   dnaPath?: string;
@@ -27,6 +34,12 @@ export interface BehaviorOSConfig {
    * from the store on construction.
    */
   persistence?: { path: string; autoHydrate?: boolean };
+  /**
+   * Gate pipeline. When enabled (default), {@link BehaviorOS.preflightAction}
+   * runs the `pre` gates synchronously and can block an action *before* it
+   * executes. Pass `gates` to replace the default gates entirely.
+   */
+  pipeline?: { enabled?: boolean; gates?: PipelineGate[] };
 }
 
 /**
@@ -77,6 +90,7 @@ export class BehaviorOS {
   private agents: Map<string, Agent> = new Map();
   private readonly config: BehaviorOSConfig;
   private store: SqliteStore | null = null;
+  private pipeline: PipelineEngine | null = null;
 
   constructor(config: BehaviorOSConfig = {}) {
     this.config = config;
@@ -128,6 +142,8 @@ export class BehaviorOS {
   // DNA Management
   async loadDNA(dna: DNA): Promise<void> {
     this.currentDNA = dna;
+    // Rebuild the gate pipeline so per-DNA quality gates reflect the new pattern.
+    this.pipeline = null;
     this.agentState.selectedDna = dna.name;
     this.agentState.updatedAt = new Date().toISOString();
     this.advanceProtocolStep('bos_select_dna');
@@ -198,6 +214,109 @@ export class BehaviorOS {
     const qualityEngine = this.registry.createQualityEngine(this.currentDNA);
     const result = qualityEngine.evaluate(metrics);
     return { passed: result.passed, details: result };
+  }
+
+  // Gate Pipeline -----------------------------------------------------------
+  /**
+   * Build (once) the gate pipeline. Default gates:
+   *  - `governance` (pre, blocking) — a `deny` verdict blocks the action;
+   *  - one `quality:<id>` gate per DNA quality gate (post, blocking).
+   *
+   * Supplying `config.pipeline.gates` replaces the defaults entirely, and
+   * `config.pipeline.enabled: false` yields an empty (pass-through) pipeline.
+   * The pipeline is rebuilt whenever the DNA changes so per-DNA gates are current.
+   */
+  getPipelineEngine(): PipelineEngine {
+    if (this.pipeline) return this.pipeline;
+
+    const configured = this.config.pipeline?.gates;
+    const pipeline = new PipelineEngine(configured);
+
+    if (!configured && this.config.pipeline?.enabled !== false) {
+      pipeline.addGate({
+        id: 'governance',
+        name: 'Governance rules',
+        phase: 'pre',
+        blocking: true,
+        evaluate: (ctx: GateContext) => {
+          if (!this.currentDNA) {
+            return { status: 'skipped', details: { reason: 'No DNA pattern selected' } };
+          }
+          const decision = this.evaluateGovernance(ctx.action ?? '', {
+            agent: ctx.agentId ?? 'system',
+            // Surface the action as a condition flag so DNA rules can match on it,
+            // alongside any caller-supplied flags (which take precedence).
+            context: { action: ctx.action, ...(ctx.context ?? {}) },
+          });
+          if (decision.verdict === 'deny') {
+            return {
+              status: 'failed',
+              details: { verdict: decision.verdict, reason: decision.reason },
+            };
+          }
+          if (decision.verdict === 'escalate' || decision.verdict === 'transform') {
+            return {
+              status: 'warning',
+              details: { verdict: decision.verdict, reason: decision.reason },
+            };
+          }
+          return { status: 'passed', details: { verdict: decision.verdict } };
+        },
+      });
+
+      for (const gate of this.currentDNA?.quality ?? []) {
+        pipeline.addGate({
+          id: `quality:${gate.id}`,
+          name: `Quality gate: ${gate.id}`,
+          phase: 'post',
+          blocking: true,
+          evaluate: (ctx: GateContext) => {
+            if (!this.currentDNA) {
+              return { status: 'skipped', details: { reason: 'No DNA pattern selected' } };
+            }
+            const evaluation = this.registry
+              .createQualityEngine(this.currentDNA)
+              .evaluateGate(gate, ctx.metrics ?? {});
+            return { status: evaluation.status, details: { ...evaluation } };
+          },
+        });
+      }
+    }
+
+    this.pipeline = pipeline;
+    return pipeline;
+  }
+
+  /**
+   * Synchronously check whether an action may proceed. Runs only the `pre`
+   * gates, so this is a real pre-execution veto usable by any host — not just
+   * the OpenCode plugin. A blocked pre-flight is persisted to the audit log when
+   * a store is attached.
+   */
+  preflightAction(
+    action: string,
+    context: { agent: string; context?: Record<string, unknown> } = { agent: 'system' },
+  ): PreflightResult {
+    const result = this.getPipelineEngine().preflight({
+      action,
+      agentId: context.agent,
+      context: context.context ?? {},
+      missionId: this.agentState.activeMission ?? undefined,
+    });
+    if (!result.allowed) this.store?.savePipelineRun(result.run);
+    return result;
+  }
+
+  /** Run the full pipeline (pre + post gates) and persist the run. */
+  runPipeline(context: GateContext = {}): PipelineRun {
+    const run = this.getPipelineEngine().run(context);
+    this.store?.savePipelineRun(run);
+    return run;
+  }
+
+  /** Read persisted pipeline runs, newest first. Empty without a store. */
+  listPipelineRuns(limit = 50): PipelineRun[] {
+    return this.store?.listPipelineRuns(limit) ?? [];
   }
 
   // Audit
@@ -395,6 +514,8 @@ export class BehaviorOS {
         this.agentState = cloneJson(snapshot.agentState);
       }
       this.currentDNA = snapshot.dna ?? null;
+      // The rebuilt pipeline must reflect the restored DNA's quality gates.
+      this.pipeline = null;
 
       // Rebind the DNA-scoped engines to the restored DNA so a decision cached
       // under a previous pattern can never leak into the restored session.

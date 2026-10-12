@@ -51,12 +51,24 @@ Evaluates actions against governance rules.
 - Actions: `block`, `escalate`, `warn`, `log`
 - Levels: `critical`, `high`, `medium`, `low`
 
-### 5. Decision Layer — not implemented
+### 5. Gate Pipeline Layer
+A real, ordered gate pipeline (`PipelineEngine`, `pipeline-engine.ts`). Gates run
+**synchronously** and may be *blocking*: a blocking `failed` halts the run and
+vetoes the action before it executes. `BehaviorOS.preflightAction()` runs the
+`pre` gates synchronously (a core-level, host-agnostic equivalent of the OpenCode
+plugin's permission hook); `runPipeline()` runs `pre` + `post`.
+
+Default gates: `governance` (pre, blocking) plus one `quality:<id>` gate per DNA
+quality gate (post, blocking). Callers replace them with `pipeline.gates`, and
+`pipeline.enabled: false` disables the pipeline. There are **not** nine validation
+layers — the default pipeline is 1 pre + N post gates (N = DNA quality gates).
+
+### 6. Decision Layer — not implemented
 There is **no** voting/quorum engine in this codebase. All decisions are made by
 `GovernanceEngine` rule evaluation (section 4). This slot is documented only to
 make its absence explicit; it is not shipped behavior.
 
-### 6. Audit Layer
+### 7. Audit Layer
 Multi-stage audit pipeline. `AuditStageSchema` defines **6** stages
 (`lint`, `typecheck`, `security`, `coverage`, `performance`, `governance`); the
 default run uses the first four.
@@ -65,13 +77,13 @@ default run uses the first four.
 > explicitly requested (`simulate: false`) and shell out to `pnpm lint:check`,
 > `pnpm typecheck`, `pnpm audit --audit-level=high`, and the coverage report.
 
-### 7. Quality Layer
+### 8. Quality Layer
 Quality gates enforcement:
 - Test coverage ≥ 80%
 - Zero lint errors
 - Zero security vulnerabilities
 
-### 8. Learning Layer
+### 9. Learning Layer
 Pattern detection over recorded events:
 - Record events
 - Detect recurring patterns (an event type seen ≥ 2 times)
@@ -80,15 +92,15 @@ Pattern detection over recorded events:
 > Fixes are **not** applied automatically; a human/agent must act on a
 > recommendation. There is no confidence-threshold auto-apply.
 
-### 9. Mission Layer
+### 10. Mission Layer
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
 
-## Core Engines (6 Total)
+## Core Engines (7 Total)
 
 These are the only engines that exist in `packages/core/src/engine/`. Earlier
 revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
-only the six below are real, and no throughput numbers are claimed.
+only the seven below are real, and no throughput numbers are claimed.
 
 | Engine | File | Purpose |
 |--------|------|---------|
@@ -97,12 +109,13 @@ only the six below are real, and no throughput numbers are claimed.
 | AuditEngine | `audit-engine.ts` | Multi-stage audit (simulated or real) |
 | LearningEngine | `learning-engine.ts` | Pattern detection from learning events |
 | MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
+| PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
 | DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 
 ## Persistence (SQLite)
 
 Opt-in SQLite persistence in the core package, using the built-in `node:sqlite`
-module (Node ≥ 22.5) so **no external dependency** is needed. Five tables keep
+module (Node ≥ 22.5) so **no external dependency** is needed. Six tables keep
 state across restarts:
 
 | Table | Contents |
@@ -111,6 +124,7 @@ state across restarts:
 | `learnings` | one row per learning event |
 | `agents` | one row per registered agent |
 | `audit_log` | one row per audit report (append-only by convention) |
+| `pipeline_runs` | one row per gate-pipeline run / blocked pre-flight |
 | `meta` | key/value metadata |
 
 Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
@@ -121,7 +135,7 @@ See `packages/core/src/persistence/sqlite-store.ts`.
 ## Integration Points
 
 ### MCP Server (standalone)
-- 12 tools + 2 resources exposed via Model Context Protocol
+- 13 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
@@ -146,6 +160,8 @@ User Request
     ↓
 OpenCode Plugin / MCP Server / CLI / SDK
     ↓
+PipelineEngine.preflight() — pre gates may veto before execution
+    ↓
 GovernanceEngine (evaluate rules)
     ↓
 QualityEngine (check gates)
@@ -163,9 +179,10 @@ Response to Agent
 
 1. **DNA-defined boundaries** - Agents can only operate within defined personas
 2. **Rule-based governance** - Actions evaluated against explicit rules
-3. **Audit trail** - Every governance event logged with timestamp and context
-4. **Quality gates** - Evaluate reported metrics against thresholds
-5. **Learning from failures** - Tool failures recorded; recurring patterns detected and surfaced
+3. **Synchronous gate pipeline** - `preflightAction()` runs blocking `pre` gates that veto an action before it executes
+4. **Audit trail** - Every governance event logged with timestamp and context
+5. **Quality gates** - Evaluate reported metrics against thresholds
+6. **Learning from failures** - Tool failures recorded; recurring patterns detected and surfaced
 
 > Note: the governance log is in-memory plus a bounded JSON tail in host
 > storage, and is now **tamper-evident** via a SHA-256 hash chain

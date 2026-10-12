@@ -376,6 +376,57 @@ server.registerTool(
 );
 
 // ============================================================
+// PIPELINE TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_preflight',
+  {
+    description:
+      'Synchronously pre-flight an action against the gate pipeline; blocks before execution',
+    inputSchema: z.object({
+      action: z.string().describe('Action to pre-flight, e.g. "deploy"'),
+      agentId: z.string().describe('Agent ID'),
+      context: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Extra condition flags (e.g. { production: true })'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      title: 'Pre-flight Action',
+    },
+  },
+  async ({
+    action,
+    agentId,
+    context,
+  }: {
+    action: string;
+    agentId: string;
+    context?: Record<string, unknown>;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.preflightAction(action, { agent: agentId, context });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // LEARNING TOOLS
 // ============================================================
 
