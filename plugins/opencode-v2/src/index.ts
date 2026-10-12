@@ -21,6 +21,7 @@ import {
   getGovernanceLog,
 } from './governance-log.js';
 import {
+  detectOvertake,
   mergeSnapshots,
   planPersist,
   readStoredManifest,
@@ -55,55 +56,96 @@ function toStorageJson(value: unknown): StorageJson {
  * Persist the current engine snapshot so state survives a restart. Best-effort:
  * a missing or failing storage domain must never break a tool call.
  *
- * Cross-instance guard: several OpenCode servers can share one storage backend
- * while keeping separate in-memory engines. Every snapshot is stored with a
- * monotonic `revision` and the `writer` instance id; before writing, an instance
- * adopts any snapshot committed by a *different* instance at a higher revision,
- * so a concurrent writer can never be silently clobbered (last-writer-wins
- * becomes "adopt-then-write"). The decision itself is the pure `planPersist`.
+ * Writes are serialized per instance (single-flight): the storage API is a
+ * plain get/set, so two tool calls persisting at once must not interleave a
+ * read with a write. After each write the store is re-read; if another
+ * instance landed a higher revision inside our window, we detect the overtake
+ * and retry once with adopt+merge instead of failing silently. A backend with
+ * compare-and-swap would remove the residual equal-revision race, which is
+ * irreducible over a get/set storage API.
  */
+let persistQueue: Promise<void> = Promise.resolve();
+
 async function persistState(ctx: Context): Promise<void> {
+  const run = persistQueue.then(() => persistStateOnce(ctx));
+  persistQueue = run.catch(() => {});
+  return run;
+}
+
+/** One serialized persist round: plan -> adopt/merge -> write -> verify. */
+async function persistStateOnce(ctx: Context): Promise<void> {
   const storage: Context['storage'] | undefined = ctx.storage;
   if (!storage || typeof storage.set !== 'function' || !behaviorOS) return;
   try {
-    const existing = await storage.get(STORAGE_KEY);
-    const manifest = readStoredManifest(existing);
-    const plan = planPersist({
-      localRevision: storageRevision,
-      instanceId: GOVERNANCE_INSTANCE_ID,
-      storedRevision: manifest.revision,
-      storedWriter: manifest.writer,
-    });
-    if (plan.adopt) {
-      // Adopt the newer foreign snapshot *by merge*: item collections are
-      // unioned by id so local-only work is preserved, and the newer snapshot
-      // wins identical items. Never discard the local session blindly.
-      const merged = mergeSnapshots(
-        behaviorOS.exportState() as unknown as SnapshotLike,
-        existing as unknown as SnapshotLike,
+    await writeSnapshot(storage);
+    // Post-write verification: a plain get/set backend has no CAS, so a
+    // concurrent instance can still overtake us between our read and write.
+    const after = await storage.get(STORAGE_KEY);
+    const verify = detectOvertake(storageRevision, readStoredManifest(after).revision);
+    if (verify.overtaken) {
+      logRestoreWarn(
+        `Overtaken after write: wrote rev=${storageRevision}, store has rev=${verify.storedRevision}; retrying adopt+merge`,
       );
-      behaviorOS.importState(merged as unknown as BehaviorOSSnapshot);
-      const state = behaviorOS.getState();
-      appendGovernanceLog({
-        kind: 'restore',
-        outcome: 'warn',
-        dna: state.selectedDna,
-        step: state.currentStep,
-        mission: state.activeMission,
-        action: 'storage',
-        detail: `Adopted rev=${manifest.revision} written by instance ${manifest.writer} before persisting (merged ${behaviorOS.listMissions().length} missions)`,
-      });
+      await writeSnapshot(storage);
+      const afterRetry = await storage.get(STORAGE_KEY);
+      const retry = detectOvertake(storageRevision, readStoredManifest(afterRetry).revision);
+      if (retry.overtaken) {
+        logRestoreWarn(
+          `Still overtaken after retry (store rev=${retry.storedRevision}); giving up this round — backend CAS required for atomicity`,
+        );
+      }
     }
-    storageRevision = plan.nextRevision;
-    const envelope = {
-      ...behaviorOS.exportState(),
-      revision: storageRevision,
-      writer: GOVERNANCE_INSTANCE_ID,
-    };
-    await storage.set(STORAGE_KEY, toStorageJson(envelope));
   } catch (error) {
     console.warn(`[Behavior-OS] State persist failed: ${describeError(error)}`);
   }
+}
+
+/** Read -> adopt/merge if a newer foreign snapshot exists -> write the stamp. */
+async function writeSnapshot(storage: NonNullable<Context['storage']>): Promise<void> {
+  if (!behaviorOS) return;
+  const existing = await storage.get(STORAGE_KEY);
+  const manifest = readStoredManifest(existing);
+  const plan = planPersist({
+    localRevision: storageRevision,
+    instanceId: GOVERNANCE_INSTANCE_ID,
+    storedRevision: manifest.revision,
+    storedWriter: manifest.writer,
+  });
+  if (plan.adopt) {
+    // Adopt the newer foreign snapshot *by merge*: item collections are
+    // unioned by id so local-only work is preserved, and the newer snapshot
+    // wins identical items. Never discard the local session blindly.
+    const merged = mergeSnapshots(
+      behaviorOS.exportState() as unknown as SnapshotLike,
+      existing as unknown as SnapshotLike,
+    );
+    behaviorOS.importState(merged as unknown as BehaviorOSSnapshot);
+    logRestoreWarn(
+      `Adopted rev=${manifest.revision} written by instance ${manifest.writer} before persisting (merged ${behaviorOS.listMissions().length} missions)`,
+    );
+  }
+  storageRevision = plan.nextRevision;
+  const envelope = {
+    ...behaviorOS.exportState(),
+    revision: storageRevision,
+    writer: GOVERNANCE_INSTANCE_ID,
+  };
+  await storage.set(STORAGE_KEY, toStorageJson(envelope));
+}
+
+/** Emit a storage-related governance log line with the current engine state. */
+function logRestoreWarn(detail: string): void {
+  if (!behaviorOS) return;
+  const state = behaviorOS.getState();
+  appendGovernanceLog({
+    kind: 'restore',
+    outcome: 'warn',
+    dna: state.selectedDna,
+    step: state.currentStep,
+    mission: state.activeMission,
+    action: 'storage',
+    detail,
+  });
 }
 
 /** Restore a persisted snapshot, if any. Returns whether state was restored. */

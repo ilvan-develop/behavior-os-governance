@@ -68,7 +68,15 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
   if (signals.resources) {
     for (const resource of signals.resources) collectStrings(resource, strings);
   }
-  const haystack = strings.join(' ').toLowerCase();
+  // Split camelCase/PascalCase boundaries before matching so code identifiers
+  // do not leak lowercase substrings that merely *look* like a short sensitive
+  // token; word- and phrase-matching then fires on real content only. Standalone
+  // tokens in prose (uppercase acronyms, hyphenated values) are unaffected.
+  const haystack = strings
+    .join(' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase();
 
   const hasWord = (...words: string[]): boolean =>
     words.some((word) => new RegExp(`\\b${word}\\b`).test(haystack));

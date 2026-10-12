@@ -61,6 +61,24 @@ export function planPersist(params: {
   };
 }
 
+export interface OvertakeReport {
+  overtaken: boolean;
+  storedRevision: number;
+}
+
+/**
+ * Post-write verification over a plain get/set backend. If the store already
+ * holds a *higher* revision than the one we just wrote, another instance wrote
+ * inside our read→write window and the caller should retry with adopt+merge.
+ * An equal revision means the store still shows our own write — an exactly
+ * simultaneous equal-revision collision is indistinguishable from our own
+ * write without a storage-side compare-and-swap, and that residual race is
+ * documented as the irreducible limit of a get/set storage API.
+ */
+export function detectOvertake(wroteRevision: number, storedRevision: number): OvertakeReport {
+  return { overtaken: storedRevision > wroteRevision, storedRevision };
+}
+
 // ============================================================
 // Conflict merge (adopt-then-write with no lost updates)
 // ============================================================

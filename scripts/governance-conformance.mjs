@@ -105,7 +105,10 @@ async function bootPlugin(pluginModule = plugin, sharedStorage) {
         return storage.has(key) ? storage.get(key) : null;
       },
       async set(key, value) {
-        storage.set(key, value);
+        // Await the underlying write: a storage stub may be asynchronous, and
+        // the plugin re-reads the store right after writing to verify the write
+        // landed. Fire-and-forget would break that verification.
+        await storage.set(key, value);
       },
     },
   };
@@ -502,6 +505,71 @@ const claims = [
       return {
         status: 'PASS',
         evidence: `missions=[${titles.join(',')}] learnings=2 (same id → foreign/newer wins)`,
+      };
+    },
+  },
+  {
+    id: 'C17',
+    category: 'CONSISTENCY',
+    promise:
+      'Concurrent persists in one instance are serialized (single-flight): monotonic revisions, no lost write',
+    async check() {
+      const records = [];
+      class SlowRecordMap extends Map {
+        constructor(delayMs = 15) {
+          super();
+          this._delayMs = delayMs;
+        }
+        async set(key, value) {
+          // Slow storage widens the get/set interleaving window: without the
+          // single-flight lock two concurrent persists would both read the same
+          // base revision and plan the same next one.
+          await new Promise((resolve) => setTimeout(resolve, this._delayMs));
+          records.push({
+            rev: value?.revision ?? null,
+            writer: value?.writer ?? null,
+            missions: (value?.missions ?? []).map((m) => m.title),
+          });
+          return super.set(key, value);
+        }
+      }
+
+      const env = await bootPlugin(plugin, new SlowRecordMap());
+      await env.runTool('bos_select_dna', { pattern: 'surgical-team' });
+      const before = records.length;
+      await Promise.all([
+        env.runTool('bos_create_mission', {
+          title: 'race-a',
+          type: 'feature',
+          priority: 'high',
+        }),
+        env.runTool('bos_create_mission', {
+          title: 'race-b',
+          type: 'feature',
+          priority: 'high',
+        }),
+      ]);
+      const after = records.length;
+      expect(after > before, 'the concurrent persists never reached storage');
+
+      const revs = records.map((r) => r.rev).filter((r) => r !== null);
+      for (let i = 1; i < revs.length; i += 1) {
+        expect(
+          revs[i] > revs[i - 1],
+          `revisions are not strictly monotonic under contention: [${revs.join(',')}]`,
+        );
+      }
+
+      const stored = env.storage.get('behavioros:state');
+      const titles = (stored?.missions ?? []).map((m) => m.title).sort();
+      expect(
+        titles.includes('race-a') && titles.includes('race-b'),
+        `a racing mission was lost: [${titles.join(',')}]`,
+      );
+
+      return {
+        status: 'PASS',
+        evidence: `revs=[${revs.join(',')}] missions=[${titles.join(',')}]`,
       };
     },
   },

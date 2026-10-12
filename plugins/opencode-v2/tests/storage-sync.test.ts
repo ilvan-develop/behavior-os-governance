@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mergeSnapshots, planPersist, readStoredManifest } from '../src/storage-sync.js';
+import {
+  detectOvertake,
+  mergeSnapshots,
+  planPersist,
+  readStoredManifest,
+} from '../src/storage-sync.js';
 
 describe('storage-sync', () => {
   describe('readStoredManifest', () => {
@@ -163,6 +168,17 @@ describe('storage-sync', () => {
       expect(merged.missions).toEqual([]);
       expect(merged.agentState.selectedDna).toBeNull();
       expect(merged.dna).toBeNull();
+    });
+  });
+
+  describe('detectOvertake', () => {
+    it('reports an overtake when the store holds a higher revision', () => {
+      expect(detectOvertake(4, 7)).toEqual({ overtaken: true, storedRevision: 7 });
+    });
+
+    it('accepts our own write and an older store', () => {
+      expect(detectOvertake(4, 4).overtaken).toBe(false);
+      expect(detectOvertake(5, 4).overtaken).toBe(false);
     });
   });
 });

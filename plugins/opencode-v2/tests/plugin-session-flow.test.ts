@@ -260,4 +260,96 @@ describe('behavior-os session flow', () => {
     if (!adopted) throw new Error('expected an "Adopted rev=..." governance log entry');
     expect(adopted.detail).toContain('merged 4 missions');
   });
+
+  it('serializes concurrent persists so revisions stay strictly monotonic', async () => {
+    const storageData = new Map<string, unknown>();
+    const pluginA = await loadFreshPlugin();
+    const a = createContext(storageData);
+    const recordedRevisions: number[] = [];
+    const baseSet = a.ctx.storage.set;
+    a.ctx.storage.set = async (key, value) => {
+      // Slow storage widens the get/set interleaving window: without the
+      // single-flight lock both concurrent persists would read the same base
+      // and plan the same next revision.
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      const revision = (value as { revision?: number } | undefined)?.revision ?? null;
+      if (revision !== null) recordedRevisions.push(revision);
+      await baseSet(key, value);
+    };
+    await pluginA.setup(a.ctx as never);
+
+    await runTool(a.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    await Promise.all([
+      runTool(a.addedTools, 'bos_create_mission', {
+        title: 'race-a',
+        type: 'feature',
+        priority: 'high',
+      }),
+      runTool(a.addedTools, 'bos_create_mission', {
+        title: 'race-b',
+        type: 'feature',
+        priority: 'high',
+      }),
+    ]);
+
+    expect(recordedRevisions.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < recordedRevisions.length; i += 1) {
+      expect(recordedRevisions[i]).toBeGreaterThan(recordedRevisions[i - 1]);
+    }
+    const stored = storageData.get(STORAGE_KEY) as {
+      missions: Array<{ title: string }>;
+    };
+    const titles = stored.missions.map((m) => m.title).sort();
+    expect(titles).toEqual(['race-a', 'race-b']);
+  });
+
+  it('detects a cross-instance overtake and retries with adopt+merge', async () => {
+    const storageData = new Map<string, unknown>();
+    const pluginA = await loadFreshPlugin();
+    const a = createContext(storageData);
+    const baseSet = a.ctx.storage.set;
+    let bumped = false;
+    a.ctx.storage.set = async (key, value) => {
+      await baseSet(key, value);
+      if (bumped) return;
+      const envelope = value as { revision?: number } | undefined;
+      if (typeof envelope?.revision !== 'number') return;
+      bumped = true;
+      // A rival instance landed a higher revision inside our get→set window.
+      await baseSet(key, {
+        ...envelope,
+        revision: envelope.revision + 1,
+        writer: 'rival-instance',
+        missions: [
+          ...((envelope as { missions?: unknown[] }).missions ?? []),
+          { id: 'outsider-1', title: 'from-other-process' },
+        ],
+      });
+    };
+    await pluginA.setup(a.ctx as never);
+
+    await runTool(a.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    await runTool(a.addedTools, 'bos_create_mission', {
+      title: 'mine-1',
+      type: 'feature',
+      priority: 'high',
+    });
+
+    // The retry must adopt the foreign content (outsider mission), not clobber it.
+    const stored = storageData.get(STORAGE_KEY) as {
+      missions: Array<{ title: string }>;
+      revision: number;
+    };
+    const titles = stored.missions.map((m) => m.title).sort();
+    expect(titles).toEqual(['from-other-process', 'mine-1']);
+    expect(stored.revision).toBeGreaterThan(1);
+
+    const log = JSON.parse((await runTool(a.addedTools, 'bos_get_log')).content) as {
+      entries: Array<{ kind: string; detail: string }>;
+    };
+    const overtakes = log.entries.filter(
+      (entry) => entry.kind === 'restore' && /Overtaken after write/.test(entry.detail),
+    );
+    expect(overtakes.length).toBeGreaterThanOrEqual(1);
+  });
 });

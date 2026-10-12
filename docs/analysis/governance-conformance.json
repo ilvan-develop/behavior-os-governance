@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-12T13:29:12.516Z",
+  "generatedAt": "2026-10-12T17:05:17.204Z",
   "plugin": "behavior-os",
-  "total": 16,
-  "proven": 16,
+  "total": 17,
+  "proven": 17,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1791811752457-4k21dfdfsd9 status=pending"
+      "evidence": "activeMission=mission-1791824717047-9wkoasr6wx status=pending"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1791811752508-jlafkyst8ch == activeMission"
+      "evidence": "autoMission=mission-1791824717084-2yckb120jgr == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p11488-yqcdo across 14 entries"
+      "evidence": "instance=p6468-rcqye across 14 entries"
     },
     {
       "id": "C15",
@@ -116,6 +116,13 @@
       "promise": "Conflict merge preserves local items (no lost update on adopt)",
       "status": "PASS",
       "evidence": "missions=[foreign-edit,foreign-only,local-only] learnings=2 (same id → foreign/newer wins)"
+    },
+    {
+      "id": "C17",
+      "category": "CONSISTENCY",
+      "promise": "Concurrent persists in one instance are serialized (single-flight): monotonic revisions, no lost write",
+      "status": "PASS",
+      "evidence": "revs=[10,11,12] missions=[Conformance mission,race-a,race-b]"
     }
   ]
 }
