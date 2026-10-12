@@ -4,6 +4,7 @@ import { BehaviorOS } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
+import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
 import { load as yamlLoad } from 'js-yaml';
 
 // Global state for this plugin instance
@@ -132,7 +133,15 @@ export default Plugin.define({
       }
     }
 
-    await ctx.tool.transform((tools) => {
+    await ctx.tool.transform((editor) => {
+      // Register every bos_* tool as a direct (non-Code-Mode) tool. In v2,
+      // tools default to Code Mode exposure (options.codemode defaults to true)
+      // which makes them invokable only through the execute tool. codemode:false
+      // exposes them as first-class tools the agent can call by name.
+      const tools = {
+        add: (tool: PluginToolInfo) => editor.add({ ...tool, options: { codemode: false } }),
+      };
+
       // Tool 1: bos_evaluate_governance
       tools.add({
         name: 'bos_evaluate_governance',
