@@ -128,7 +128,7 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 44 ficheiros de teste / 402 casos (`pnpm test`)
+- ✅ 45 ficheiros de teste / 416 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
 - ✅ Build ESM + DTS
 - ✅ v2.0.0

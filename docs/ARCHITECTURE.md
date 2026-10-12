@@ -123,11 +123,16 @@ only the eight below are real, and no throughput numbers are claimed.
 | DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
 | DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 
-## Persistence (SQLite)
+## Persistence (pluggable)
 
-Opt-in SQLite persistence in the core package, using the built-in `node:sqlite`
-module (Node ≥ 22.5) so **no external dependency** is needed. Seven tables keep
-state across restarts:
+Every store implements the synchronous `Store` interface
+(`packages/core/src/persistence/store.ts`), so `BehaviorOS` never depends on a
+concrete database. Inject one with
+`new BehaviorOS({ persistence: { store } })`; `persistence.path` opens the
+built-in SQLite store instead.
+
+**SQLite (default, zero dependency).** Uses the built-in `node:sqlite` module
+(Node ≥ 22.5). Seven tables keep state across restarts:
 
 | Table | Contents |
 |---|---|
@@ -143,6 +148,16 @@ Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, o
 set `BEHAVIOROS_DB_PATH` when running the MCP server. Without a path the engine
 runs fully in memory; an unusable path degrades to memory instead of throwing.
 See `packages/core/src/persistence/sqlite-store.ts`.
+
+**Postgres (optional).** `PostgresStore` stores every document in one table with
+a `kind` discriminator. `pg` is **not** a dependency of this package — it is
+resolved at `connect()` time, so an SQLite-only project never installs a driver.
+Because `Store` is synchronous and Postgres is not, the adapter keeps an
+in-memory mirror: reads come from the mirror loaded at `connect()` and writes are
+written through asynchronously. `await flush()` drains the queue (and rethrows
+the first write error); `await closeAsync()` flushes and ends the pool. It is
+**not** a strongly-consistent multi-writer store — a concurrent reader can see
+stale data until you flush.
 
 ## Integration Points
 

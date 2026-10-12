@@ -17,6 +17,7 @@ import type {
   Vote,
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
+import type { Store } from '../persistence/store.js';
 import type { DecideOptions } from './decision-engine.js';
 import {
   type DecisionEngine,
@@ -38,12 +39,12 @@ export interface BehaviorOSConfig {
   audit?: { enabled?: boolean };
   learning?: { enabled?: boolean };
   /**
-   * Opt-in SQLite persistence. When set, missions/learnings/agents/audit reports
-   * are written to a local database (built-in `node:sqlite`, no dependency) so
-   * state survives a restart. `autoHydrate` (default true) restores the engine
-   * from the store on construction.
+   * Opt-in persistence. `path` opens the built-in SQLite store (no dependency);
+   * `store` injects any {@link Store} — for example a `PostgresStore` — and takes
+   * precedence. `autoHydrate` (default true) restores the engine on construction.
+   * A store that cannot be opened degrades to memory instead of failing.
    */
-  persistence?: { path: string; autoHydrate?: boolean };
+  persistence?: { path?: string; store?: Store; autoHydrate?: boolean };
   /**
    * Gate pipeline. When enabled (default), {@link BehaviorOS.preflightAction}
    * runs the `pre` gates synchronously and can block an action *before* it
@@ -119,7 +120,7 @@ export class BehaviorOS {
   private agentState: AgentState;
   private agents: Map<string, Agent> = new Map();
   private readonly config: BehaviorOSConfig;
-  private store: SqliteStore | null = null;
+  private store: Store | null = null;
   private pipeline: PipelineEngine | null = null;
 
   constructor(config: BehaviorOSConfig = {}) {
@@ -140,12 +141,19 @@ export class BehaviorOS {
       void this.loadDNAFromPath(config.dnaPath);
     }
 
-    // Opt-in SQLite persistence. Best-effort: a missing/unavailable SQLite
-    // must never prevent the engine from starting.
-    if (config.persistence?.path) {
+    // Opt-in persistence. Best-effort: a store that is unavailable must never
+    // prevent the engine from starting. An injected store takes precedence over
+    // the built-in SQLite path.
+    const persistence = config.persistence;
+    if (persistence?.store) {
+      this.store = persistence.store;
+      if (persistence.autoHydrate !== false) {
+        this.hydrateFromStore();
+      }
+    } else if (persistence?.path) {
       try {
-        this.store = new SqliteStore({ path: config.persistence.path });
-        if (config.persistence.autoHydrate !== false) {
+        this.store = new SqliteStore({ path: persistence.path });
+        if (persistence.autoHydrate !== false) {
           this.hydrateFromStore();
         }
       } catch {
@@ -673,8 +681,8 @@ export class BehaviorOS {
     }
   }
 
-  // Persistence (SQLite) ----------------------------------------------------
-  /** Restore missions/learnings/agents from the attached SQLite store. */
+  // Persistence (attached Store) ---------------------------------------------
+  /** Restore missions/learnings/agents from the attached store. */
   private hydrateFromStore(): void {
     if (!this.store) return;
     this.getMissionEngine().restore(this.store.listMissions());
@@ -684,7 +692,7 @@ export class BehaviorOS {
     }
   }
 
-  /** Persist all current in-memory state to SQLite (no-op without a store). */
+  /** Persist all current in-memory state to the store (no-op without one). */
   persistAll(): void {
     if (!this.store) return;
     for (const mission of this.getMissionEngine().snapshot()) this.store.saveMission(mission);
@@ -697,12 +705,12 @@ export class BehaviorOS {
     return this.store?.listAuditReports(limit) ?? [];
   }
 
-  /** Whether a SQLite store is attached. */
+  /** Whether a persistence store is attached. */
   hasPersistence(): boolean {
     return this.store !== null;
   }
 
-  /** Close the SQLite store, if any. */
+  /** Close the attached store, if any. */
   closeStore(): void {
     this.store?.close();
     this.store = null;

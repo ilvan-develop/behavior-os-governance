@@ -179,11 +179,11 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
-### SQLite Persistence (opt-in)
+### Persistence (opt-in)
 
-State survives restarts using the built-in `node:sqlite` module (Node ≥ 22.5, **no
-external dependency**). `missions`, `learnings`, `agents`, `audit_log`,
-`pipeline_runs`, `decisions` and a key/value `meta` table are stored in a local database:
+State survives restarts. The default store uses the built-in `node:sqlite` module
+(Node ≥ 22.5, **no external dependency**): `missions`, `learnings`, `agents`,
+`audit_log`, `pipeline_runs`, `decisions` and a key/value `meta` table.
 
 ```ts
 const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
@@ -191,6 +191,16 @@ const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
 
 For the MCP server, set `BEHAVIOROS_DB_PATH` instead. Without a path the engine
 runs fully in memory; an unusable path degrades to memory rather than throwing.
+
+Any store implementing the `Store` interface can be injected — for example
+`PostgresStore` (which resolves the optional `pg` driver lazily and keeps an
+in-memory mirror with async write-through):
+
+```ts
+const store = new PostgresStore({ connectionString: process.env.DATABASE_URL });
+await store.connect();
+const bos = new BehaviorOS({ persistence: { store } });
+```
 
 ### CLI Reference
 
@@ -215,8 +225,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 44 |
-| Test cases (`it`/`test` blocks) | 402 |
+| Test files (`*.test.ts`) | 45 |
+| Test cases (`it`/`test` blocks) | 416 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |

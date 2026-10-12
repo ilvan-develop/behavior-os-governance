@@ -21,6 +21,7 @@ import type {
   Mission,
   PipelineRun,
 } from '@behavior-os/schemas';
+import type { Store } from './store.js';
 
 /** Minimal structural types for the subset of `node:sqlite` we use. */
 interface SqlStatement {
@@ -65,7 +66,7 @@ export interface SqliteStoreConfig {
  * writer method is an idempotent upsert keyed by object id, so re-persisting
  * the same state is safe.
  */
-export class SqliteStore {
+export class SqliteStore implements Store {
   private readonly db: SqlDatabase;
 
   constructor(config: SqliteStoreConfig) {
