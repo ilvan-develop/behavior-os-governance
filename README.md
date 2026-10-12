@@ -44,42 +44,44 @@ pnpm build
 | Agents act unpredictably | DNA patterns enforce deterministic behavior |
 | No audit trail | Every action logged & auditable |
 | Manual governance review | Automated rule evaluation (block/escalate/warn) |
-| Agents don't learn from mistakes | Learning engine detects patterns & auto-applies fixes |
-| Hard to coordinate multiple agents | 7-step protocol + handoff protocol for seamless collaboration |
-| No quality gates | Lint → typecheck → security → coverage gates enforced automatically |
-| Reinventing infrastructure every project | 6 core engines, 11 MCP tools, CLI, SDK — batteries included |
+| Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
+| Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
+| No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
+| Reinventing infrastructure every project | 6 core engines, 12 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────┐
 │                      MISSION LAYER                    │
-│   Lifecycle: create → start → execute → complete      │
+│   Lifecycle: create → start → execute → complete/fail │
 ├──────────────────────────────────────────────────────┤
 │                      LEARNING LAYER                   │
-│   Record events → detect patterns → auto-apply fixes  │
+│   Record events → detect recurring patterns           │
 ├──────────────────────────────────────────────────────┤
 │                      QUALITY LAYER                    │
-│   Gates: coverage ≥ 80% | lint = 0 | typecheck = 0    │
+│   Gates: test_coverage / lint / typecheck / security  │
 ├──────────────────────────────────────────────────────┤
 │                      AUDIT LAYER                      │
 │   Stages: lint → typecheck → security → coverage      │
-├──────────────────────────────────────────────────────┤
-│                    DECISION LAYER                     │
-│   Voting-based decisions | configurable quorum        │
+│   (simulated by default; real checks opt-in)          │
 ├──────────────────────────────────────────────────────┤
 │                   GOVERNANCE LAYER                    │
-│   Rules: block | escalate | warn | log                │
+│   Rules: block | escalate | warn | log | transform    │
 ├──────────────────────────────────────────────────────┤
 │                  BEHAVIORAL LAYER                     │
-│   Load DNA | validate | compose multi-package patterns│
+│   Load DNA (YAML) + validate against Zod schemas      │
 ├──────────────────────────────────────────────────────┤
 │                    SCHEMA LAYER                       │
-│   Zod v4.4.3 schemas for every type                   │
+│   Zod v4 schemas for every domain type                │
 ├──────────────────────────────────────────────────────┤
 │                   DNA LAYER (YAML)                    │
 │   Personas | governance rules | quality gates         │
 └──────────────────────────────────────────────────────┘
+
+> The 9-layer diagram above is documentation of the conceptual stack. Only the
+> **6 engines** listed below are implemented in code; there is no separate
+> "Decision" or "Behavioral" engine.
 ```
 
 ### 6 Core Engines Powering the Stack
@@ -125,42 +127,62 @@ quality:
 
 ### 21 DNA Patterns
 
-| Pattern | Description | Best For |
-|---|---|---|
-| **Surgical Team** | Zero-defect, sterile field, timeout verification, SBAR handoffs | Critical systems, production deploys |
-| **Enterprise Governance** | Compliance, audit trails, access control, change management | Regulated industries |
-| **Military Operations** | Chain of command, mission focus, after-action reviews | High-stakes coordination |
-| **Lean Factory** | Kaizen events, 5S methodology, value stream mapping | Continuous improvement |
-| **Healthcare Operations** | HIPAA compliance, patient data protection | Healthcare apps |
-| **Autonomous Orchestrator** | Self-managing pipelines, auto-scaling agents | Fully autonomous operations |
-| **E-Commerce Platform** | Transactional governance for multi-vendor marketplaces | Payments, checkout, marketplace ops |
-| **Gaming Platform** | Matchmaking, in-game economy, anti-cheat governance | Multiplayer games |
-| **Next.js + NestJS Fullstack** | Stack-specific conventions for a common fullstack pairing | Next.js/NestJS projects |
-| **Python/Go Microservices** | Stack-specific conventions for polyglot microservices | Python/Go backends |
-| **Complex Monorepo** | Cross-package governance for large monorepos | Monorepo maintainers |
-| **EAARG** (Enterprise Agent Architecture Review) | 18-layer framework mapped to enterprise skills | Deep architecture review |
+These are the 21 patterns actually shipped in `dnas/*.yaml`:
 
-### SkillEngine — Two-Stage Routing
+| Pattern (file) | Domain |
+|---|---|
+| **ai-ml-pipeline** | ML training, datasets, drift, inference |
+| **blockchain-web3** | Smart contracts, on-chain, wallets |
+| **cloud-native** | Kubernetes, containers, IaC |
+| **data-engineering** | ETL, warehouses, data quality, lineage |
+| **devops-pipeline** | CI/CD, releases, rollbacks |
+| **enterprise-governance** | Compliance, change control, audit |
+| **enterprise-sox** | SOX, segregation of duties, internal controls |
+| **financial-compliance** | KYC/AML, transaction monitoring |
+| **fintech-trading** | Order books, latency, risk limits |
+| **gaming-studio** | Game pipelines, shaders, anti-cheat |
+| **healthcare-hipaa** | HIPAA, PHI, patient records |
+| **iot-embedded** | Firmware, sensors, RTOS |
+| **lean-factory** | Kaizen, waste reduction, value stream |
+| **legacy-modernization** | Strangler patterns, COBOL migration |
+| **military-operations** | Chain of command, OPSEC, mission focus |
+| **mobile-app** | iOS/Android, app stores |
+| **open-source** | PRs, licensing, changelog/DCO |
+| **quantum-computing** | Qubits, circuits, Qiskit |
+| **research-lab** | Experiments, reproducibility |
+| **startup-agile** | Sprints, MVPs, backlogs |
+| **surgical-team** | Zero-defect, sterile-field, production changes |
 
-```
-Request → DNA Match → Capability Match → Delegate → Validate
-```
+> There is **no** `eaarg`, `e-commerce`, `gaming-platform`, `nextjs-nestjs`,
+> `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
+> Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-Skills are matched in two stages: first by DNA pattern compatibility, then by capability signature. 24 skills registered across 6 agent types.
-
-### MCP Server — 11 Tools + 2 Resources
+### MCP Server — 12 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
 | Category | Tools |
 |---|---|
-| **Governance** | `bos_evaluate_governance`, `bos_select_dna` |
+| **Governance** | `bos_evaluate_governance`, `bos_select_dna`, `bos_list_dna` |
 | **Mission** | `bos_create_mission`, `bos_start_mission`, `bos_list_missions` |
 | **Quality** | `bos_check_quality`, `bos_run_audit` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
 | **Status** | `bos_get_status`, `bos_get_state` |
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
+
+### SQLite Persistence (opt-in)
+
+State survives restarts using the built-in `node:sqlite` module (Node ≥ 22.5, **no
+external dependency**). `missions`, `learnings`, `agents`, `audit_log` and a
+key/value `meta` table are stored in a local database:
+
+```ts
+const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
+```
+
+For the MCP server, set `BEHAVIOROS_DB_PATH` instead. Without a path the engine
+runs fully in memory; an unusable path degrades to memory rather than throwing.
 
 ### CLI Reference
 
@@ -181,15 +203,15 @@ Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
 ## Test Status
 
-| Package | Tests | Status |
-|---|---|---|
-| `@behavior-os/schemas` | 120 | ✅ All passing |
-| `@behavior-os/core` | ~5,000+ | ✅ All passing |
-| `@behavior-os/mcp-server` | 112 | ✅ All passing |
-| **Total** | **~268+** | **✅ 0 failures** |
-| **Typecheck** | All packages | **✅ 0 errors** |
-| **Build** | ESM + CJS + DTS | **✅ <3s per package** |
-| **Coverage** | Core engine | **✅ >80%** |
+Counted from the repository (not aspirational). Run `pnpm test` for the live result.
+
+| Metric | Value |
+|---|---|
+| Test files (`*.test.ts`) | 41 |
+| Test cases (`it`/`test` blocks) | 365 |
+| Typecheck | `pnpm typecheck` (0 errors) |
+| Build | `pnpm build` (ESM + DTS) |
+| Coverage | `pnpm test:coverage` |
 
 ## Quick Start
 
@@ -257,7 +279,7 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 ### OpenCode v2 (recommended — native plugin)
 
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It is
-auto-loaded from `.opencode/plugins/behavioros.ts` and exposes the full 12-tool
+auto-loaded from `.opencode/plugins/behavioros.ts` and exposes the full 14-tool
 surface (`bos_*`) plus governance hooks (`tool:execute.before`) and session
 context — no MCP server registration required.
 
@@ -285,8 +307,8 @@ mcpServers:
 | `@behavior-os/core` | 6 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 11 tools + 2 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 12 tools + hooks | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 12 tools + 2 resources | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 14 tools + hooks | 2.0.0 |
 
 ## License
 

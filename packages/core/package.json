@@ -1,7 +1,7 @@
 {
   "name": "@behavior-os/core",
   "version": "2.0.0",
-  "description": "Core engine with 22 governance, quality, and learning engines",
+  "description": "Core engine with 6 governance, quality, audit, learning, mission and DNA engines",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

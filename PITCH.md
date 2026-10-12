@@ -38,7 +38,7 @@ Padrões YAML que definem roles, regras de governança, gates de qualidade e wor
 │  Lean Factory        → Continuous   │
 │  E-Commerce          → Transactions │
 │  Gaming              → Matchmaking  │
-│  ... e 15+ padrões │
+│  ... 21 padrões em `dnas/`          │
 └─────────────────────────────────────┘
 ```
 
@@ -47,12 +47,14 @@ Cada ação é avaliada automaticamente:
 
 | Camada | Função |
 |--------|--------|
-| Governance | Avalia regras (block/escalate/warn/log) |
-| Decision | Votações com quorum configurável |
-| Quality | Gates automáticos (coverage ≥80%, lint=0, security=0) |
-| Audit | Pipeline multi-estágio (lint → typecheck → security → coverage) |
-| Learning | Detecção de padrões e aplicação automática de correções |
+| Governance | Avalia regras (block/escalate/warn/log/transform) |
+| Quality | Gates automáticos (coverage ≥ 80%, lint=0, security=0) |
+| Audit | Pipeline multi-estágio (lint → typecheck → security → coverage; simulado por padrão) |
+| Learning | Detecção de padrões recorrentes (não aplica correções automaticamente) |
 | Mission | Ciclo de vida completo (criar → executar → completar) |
+| DNA (DNALoader) | Carrega e valida padrões YAML com Zod |
+
+> Não existe uma camada "Decision" com votações/quorum nesta base de código.
 
 ### 3. **Protocolo de 7 Passos**
 Processo determinístico para qualquer tarefa:
@@ -81,7 +83,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | OpenCode v2 | ✅ Plugin nativo |
 | Windsurf | ✅ Pronto |
 
-**11 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, execução de auditorias, registro de aprendizados e mais) + **12 tools nativas `bos_*`** no OpenCode v2 via plugin.
+**12 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, execução de auditorias, registro de aprendizados e mais) + **14 tools nativas `bos_*`** no OpenCode v2 via plugin.
 
 ---
 
@@ -92,8 +94,8 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | Agentes imprevisíveis | Comportamento determinístico via DNA |
 | Sem rastreamento | Auditoria completa de cada ação |
 | Revisão manual constante | Governança automatizada |
-| Erros se repetem | Engine de aprendizado com correção automática |
-| Coordenação difícil | Protocolo de handoff entre agentes |
+| Erros se repetem | Engine de aprendizado deteta padrões recorrentes |
+| Coordenação difícil | Protocolo de 7 passos + missões rastreáveis |
 | Infraestrutura ad-hoc | 6 engines + CLI + SDK prontos |
 
 ---
@@ -101,18 +103,16 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 ## Demonstração Rápida
 
 ```bash
-# Inicialize
-pnpm create behavior-os my-project
-cd my-project
+# Inicialize um projeto com um padrão DNA
+pnpm cli:init -- --directory ./my-project --dna surgical-team
 
-# Selecione um padrão DNA
-npx bos select-dna surgical-team
+# Valide e compile os padrões DNA
+npx behavioros validate
+npx behavioros compile
 
-# Crie uma missão
-npx bos create-mission --title "Implementar checkout" --type feature --priority high
-
-# Execute com governança integrada
-npx bos run
+# Veja o estado do sistema
+npx behavioros status
+npx behavioros simulate --action deploy --agent my-agent
 ```
 
 ---
@@ -128,11 +128,10 @@ npx bos run
 
 ## Status do Projeto
 
-- ✅ 253+ testes passando
+- ✅ 41 ficheiros de teste / 365 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
-- ✅ Build ESM + CJS + DTS
-- ✅ Cobertura >80%
-- ✅ v2.0.0 estável
+- ✅ Build ESM + DTS
+- ✅ v2.0.0
 
 ---
 

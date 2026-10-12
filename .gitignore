@@ -21,6 +21,10 @@ coverage/
 .roo/
 .husky/_
 .behavioros/baseline.json
+# Local SQLite persistence files must never be committed.
+*.db
+*.db-wal
+*.db-shm
 # Guard: build artifacts must never leak into source or test directories.
 # tsc targets ./dist; anything emitted next to .ts sources is stale output.
 **/src/**/*.js

@@ -17,6 +17,11 @@ function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
     behaviorOS = new BehaviorOS({
       dnaPath: process.env.BEHAVIOROS_DNA_PATH,
+      // Optional SQLite persistence: set BEHAVIOROS_DB_PATH to a file to keep
+      // missions/learnings/agents/audit_log across restarts.
+      persistence: process.env.BEHAVIOROS_DB_PATH
+        ? { path: process.env.BEHAVIOROS_DB_PATH }
+        : undefined,
     });
   }
   return behaviorOS;

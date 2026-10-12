@@ -11,6 +11,7 @@ import type {
   MissionPriority,
   MissionType,
 } from '@behavior-os/schemas';
+import { SqliteStore } from '../persistence/sqlite-store.js';
 import { EngineRegistry, type LearningEngine, type MissionEngine } from './index.js';
 
 export interface BehaviorOSConfig {
@@ -19,6 +20,13 @@ export interface BehaviorOSConfig {
   quality?: { enabled?: boolean; minCoverage?: number };
   audit?: { enabled?: boolean };
   learning?: { enabled?: boolean };
+  /**
+   * Opt-in SQLite persistence. When set, missions/learnings/agents/audit reports
+   * are written to a local database (built-in `node:sqlite`, no dependency) so
+   * state survives a restart. `autoHydrate` (default true) restores the engine
+   * from the store on construction.
+   */
+  persistence?: { path: string; autoHydrate?: boolean };
 }
 
 /**
@@ -68,6 +76,7 @@ export class BehaviorOS {
   private agentState: AgentState;
   private agents: Map<string, Agent> = new Map();
   private readonly config: BehaviorOSConfig;
+  private store: SqliteStore | null = null;
 
   constructor(config: BehaviorOSConfig = {}) {
     this.config = config;
@@ -85,6 +94,19 @@ export class BehaviorOS {
     // evaluation does not require an explicit loadDNA() call.
     if (config.dnaPath) {
       void this.loadDNAFromPath(config.dnaPath);
+    }
+
+    // Opt-in SQLite persistence. Best-effort: a missing/unavailable SQLite
+    // must never prevent the engine from starting.
+    if (config.persistence?.path) {
+      try {
+        this.store = new SqliteStore({ path: config.persistence.path });
+        if (config.persistence.autoHydrate !== false) {
+          this.hydrateFromStore();
+        }
+      } catch {
+        this.store = null;
+      }
     }
   }
 
@@ -195,6 +217,7 @@ export class BehaviorOS {
       stages: stages as import('@behavior-os/schemas').AuditStage[],
     });
     this.advanceProtocolStep('bos_run_audit');
+    this.store?.saveAuditReport(report);
     return report;
   }
 
@@ -238,6 +261,7 @@ export class BehaviorOS {
     if (options.advanceProtocol !== false) {
       this.advanceProtocolStep('bos_create_mission');
     }
+    this.store?.saveMission(mission);
     return mission;
   }
 
@@ -250,6 +274,7 @@ export class BehaviorOS {
       if (options.advanceProtocol !== false) {
         this.advanceProtocolStep('bos_start_mission');
       }
+      this.store?.saveMission(mission);
     }
     return mission;
   }
@@ -260,6 +285,7 @@ export class BehaviorOS {
       this.agentState.activeMission = null;
       this.agentState.updatedAt = new Date().toISOString();
     }
+    if (mission) this.store?.saveMission(mission);
     return mission;
   }
 
@@ -269,6 +295,7 @@ export class BehaviorOS {
       this.agentState.activeMission = null;
       this.agentState.updatedAt = new Date().toISOString();
     }
+    if (mission) this.store?.saveMission(mission);
     return mission;
   }
 
@@ -295,6 +322,7 @@ export class BehaviorOS {
     if (options.advanceProtocol !== false) {
       this.advanceProtocolStep('bos_record_learning');
     }
+    this.store?.saveLearning(event);
     return event;
   }
 
@@ -305,6 +333,7 @@ export class BehaviorOS {
   // Agent Management
   registerAgent(agent: Agent): void {
     this.agents.set(agent.id, agent);
+    this.store?.saveAgent(agent);
   }
 
   getAgent(agentId: string): Agent | undefined {
@@ -380,6 +409,41 @@ export class BehaviorOS {
     } catch {
       return false;
     }
+  }
+
+  // Persistence (SQLite) ----------------------------------------------------
+  /** Restore missions/learnings/agents from the attached SQLite store. */
+  private hydrateFromStore(): void {
+    if (!this.store) return;
+    this.getMissionEngine().restore(this.store.listMissions());
+    this.getLearningEngine().restore(this.store.listLearnings(1000));
+    for (const agent of this.store.listAgents()) {
+      this.agents.set(agent.id, agent);
+    }
+  }
+
+  /** Persist all current in-memory state to SQLite (no-op without a store). */
+  persistAll(): void {
+    if (!this.store) return;
+    for (const mission of this.getMissionEngine().snapshot()) this.store.saveMission(mission);
+    for (const event of this.getLearningEngine().snapshot()) this.store.saveLearning(event);
+    for (const agent of this.agents.values()) this.store.saveAgent(agent);
+  }
+
+  /** Read persisted audit reports, newest first. Empty without a store. */
+  listAuditReports(limit = 50): AuditReport[] {
+    return this.store?.listAuditReports(limit) ?? [];
+  }
+
+  /** Whether a SQLite store is attached. */
+  hasPersistence(): boolean {
+    return this.store !== null;
+  }
+
+  /** Close the SQLite store, if any. */
+  closeStore(): void {
+    this.store?.close();
+    this.store = null;
   }
 
   simulateAction(

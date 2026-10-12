@@ -51,16 +51,19 @@ Evaluates actions against governance rules.
 - Actions: `block`, `escalate`, `warn`, `log`
 - Levels: `critical`, `high`, `medium`, `low`
 
-### 5. Decision Layer
-Voting-based decisions with configurable quorum and thresholds.
+### 5. Decision Layer — not implemented
+There is **no** voting/quorum engine in this codebase. All decisions are made by
+`GovernanceEngine` rule evaluation (section 4). This slot is documented only to
+make its absence explicit; it is not shipped behavior.
 
 ### 6. Audit Layer
-Multi-stage audit pipeline:
-1. Lint check
-2. Type check
-3. Security scan
-4. Coverage analysis
-5. Performance metrics
+Multi-stage audit pipeline. `AuditStageSchema` defines **6** stages
+(`lint`, `typecheck`, `security`, `coverage`, `performance`, `governance`); the
+default run uses the first four.
+
+> Audits are **simulated by default** and always pass. Real checks run only when
+> explicitly requested (`simulate: false`) and shell out to `pnpm lint:check`,
+> `pnpm typecheck`, `pnpm audit --audit-level=high`, and the coverage report.
 
 ### 7. Quality Layer
 Quality gates enforcement:
@@ -69,51 +72,61 @@ Quality gates enforcement:
 - Zero security vulnerabilities
 
 ### 8. Learning Layer
-Pattern detection and auto-fix application:
+Pattern detection over recorded events:
 - Record events
-- Detect patterns
-- Apply fixes automatically
+- Detect recurring patterns (an event type seen ≥ 2 times)
+- Surface recommendations
+
+> Fixes are **not** applied automatically; a human/agent must act on a
+> recommendation. There is no confidence-threshold auto-apply.
 
 ### 9. Mission Layer
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
 
-## Core Engines (22 Total)
+## Core Engines (6 Total)
 
-| Engine | Purpose | Ops/sec |
-|--------|---------|---------|
-| AutonomousDecomposer | Task decomposition | 14.6M |
-| AITMPLAdapter | AI template adapter | 15.9M |
-| DecisionEngine | Voting-based decisions | 14.1M |
-| QualityEngine | Quality gate enforcement | 14.1M |
-| LearningEngine | Pattern detection | 13.9M |
-| LoggingEngine | Action logging | 12.7M |
-| DistributedMemory | Cross-agent memory | 10.9M |
-| DNALoader | DNA pattern loading | 10.4M |
-| CognitiveIndex | Cognitive indexing | 10.6M |
-| SecretsEngine | Secret management | 10.0M |
-| MissionEngine | Mission lifecycle | 8.4M |
-| EvaluationEngine | Governance evaluation | 8.7M |
-| AuditEngine | Audit pipeline | 1.8M |
-| PipelineEngine | Pipeline orchestration | 1.6M |
-| GovernanceEngine | Rule evaluation | 1.3M |
-| ContextRecoveryEngine | Context recovery | 487K |
-| LocalRuntime | Local execution | 2.9M |
-| Registry | Service registry | 9.6M |
-| AIResourceManager | Resource management | 9.8M |
-| CapabilityCatalog | Capability matching | 7.3M |
-| QueueManager | Task queuing | 7.7M |
-| KnowledgeGraph | Knowledge graph | 8.6M |
+These are the only engines that exist in `packages/core/src/engine/`. Earlier
+revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
+only the six below are real, and no throughput numbers are claimed.
+
+| Engine | File | Purpose |
+|--------|------|---------|
+| GovernanceEngine | `governance-engine.ts` | Rule evaluation with TTL cache |
+| QualityEngine | `quality-engine.ts` | Quality gate enforcement (gte/lte/eq/neq) |
+| AuditEngine | `audit-engine.ts` | Multi-stage audit (simulated or real) |
+| LearningEngine | `learning-engine.ts` | Pattern detection from learning events |
+| MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
+| DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
+
+## Persistence (SQLite)
+
+Opt-in SQLite persistence in the core package, using the built-in `node:sqlite`
+module (Node ≥ 22.5) so **no external dependency** is needed. Five tables keep
+state across restarts:
+
+| Table | Contents |
+|---|---|
+| `missions` | one row per mission (+ indexed status/type/priority) |
+| `learnings` | one row per learning event |
+| `agents` | one row per registered agent |
+| `audit_log` | one row per audit report (append-only by convention) |
+| `meta` | key/value metadata |
+
+Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
+set `BEHAVIOROS_DB_PATH` when running the MCP server. Without a path the engine
+runs fully in memory; an unusable path degrades to memory instead of throwing.
+See `packages/core/src/persistence/sqlite-store.ts`.
 
 ## Integration Points
 
 ### MCP Server (standalone)
-- 11 tools + 2 resources exposed via Model Context Protocol
+- 12 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
-- 12 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
+- 14 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`
@@ -150,33 +163,41 @@ Response to Agent
 
 1. **DNA-defined boundaries** - Agents can only operate within defined personas
 2. **Rule-based governance** - Actions evaluated against explicit rules
-3. **Audit trail** - Every action logged with timestamp and context
-4. **Quality gates** - Prevent deployment without passing checks
-5. **Learning from failures** - Patterns detected and auto-corrected
+3. **Audit trail** - Every governance event logged with timestamp and context
+4. **Quality gates** - Evaluate reported metrics against thresholds
+5. **Learning from failures** - Tool failures recorded; recurring patterns detected and surfaced
+
+> Note: the governance log is in-memory plus a bounded JSON tail in host
+> storage, and is now **tamper-evident** via a SHA-256 hash chain
+> (`bos_verify_audit_trail`). Mission/learning/agent/audit-report state is
+> persisted to SQLite when a `persistence.path` is configured. See
+> `docs/CLAIMS.md` for the verified status.
 
 ## Extensibility
 
 ### Adding New DNA Patterns
-1. Create YAML in `dnas/`
-2. Register in `packages/dnas/src/index.ts`
-3. Add tests in `packages/core/tests/dna/`
+1. Create a YAML file in `dnas/`
+2. It is auto-discovered by the CLI, MCP server and plugin (no central registry file)
+3. Add a test in the relevant package's `tests/` directory
 
 ### Adding MCP Tools
-1. Define tool in `packages/mcp-server/src/tools/`
-2. Register in server
-3. Add schema validation
+1. Add a `server.registerTool(...)` call in `packages/mcp-server/src/server.ts`
+2. Add a Zod input schema in the same call
 
 ### Adding OpenCode Plugin Tools
-1. Use `ctx.tool.transform()` in plugin setup
+1. Use `ctx.tool.transform()` in plugin setup (`plugins/opencode-v2/src/index.ts`)
 2. Register with JSON Schema
-3. Implement execute handler
+3. Implement the execute handler
 
 ## Performance Characteristics
 
-- Schema validation: < 1ms per operation
-- Governance evaluation: < 10ms for 100 rules
-- Audit pipeline: < 100ms for full stack
-- Learning pattern detection: < 50ms for 1000 events
+No benchmarks are checked into the repository. The numbers below are **design
+targets**, not measurements; verify locally with `pnpm benchmark`.
+
+- Schema validation: < 1ms per operation (target)
+- Governance evaluation: < 10ms for 100 rules (target)
+- Audit pipeline: < 100ms for full stack (target)
+- Learning pattern detection: < 50ms for 1000 events (target)
 
 ## Testing Strategy
 
