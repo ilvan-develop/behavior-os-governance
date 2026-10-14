@@ -331,8 +331,9 @@ confundida com marketing nem com defeito escondido.
 
 ### Limitações abertas (medidas, ainda **não** fechadas)
 
-Lacunas reais que continuam abertas. Não são afirmações falsas: são ausências, e
-por isso são listadas em vez de corrigidas por texto.
+Lacunas reais que continuam abertas — ausências e afirmações que **não podem ser
+verificadas a partir do repositório**. Não são afirmações falsas: são listadas em
+vez de corrigidas por texto.
 
 | # | Limitação | Estado medido |
 |---|---|---|
@@ -342,6 +343,7 @@ por isso são listadas em vez de corrigidas por texto.
 | C4 | `@behavior-os/orchestrator` sem testes | Não tem suite nenhuma (o script `test` falso foi removido em vez de mantido). |
 | C5 | `behavioros agent` não lista agentes | Mostra o agente resolvido, não o registo de agentes. |
 | C6 | `drift-check` é um subconjunto | Compara `currentStep`/`selectedDna` com `baseline.json`; o `DriftEngine` compara também regras e gates. |
+| C7 | Instalação a partir do npm não verificável aqui | `docs/SDK.md` e `QUICKSTART.md` dizem `npx @behavior-os/cli` / `pnpm add @behavior-os/core`, o que pressupõe publicação. Os manifestos não são `private` e existe `release: changeset publish`, mas nenhum artefacto no repositório prova que as versões estão publicadas — não foi possível confirmar sem rede. |
 
 ## Estado dos testes
 
