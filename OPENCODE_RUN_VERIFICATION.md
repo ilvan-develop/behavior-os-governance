@@ -2,8 +2,9 @@
 
 > ⚠️ **HISTÓRICO/SUPERSEDED** — Este relatório reflete o estado antigo da integração
 > (plugin em diretório `.opencode/plugins/behavioros/`, 9 tools sem prefixo `bos_`).
-> A integração atual é um canal único de 12 tools `bos_*` via
-> `.opencode/plugins/behavioros.ts` (auto-discovery). Ver
+> Nenhum dos números abaixo descreve o estado atual. A integração atual é o plugin
+> `plugins/opencode-v2` com **29** tools `bos_*`; a fonte de verdade é
+> [docs/CLAIMS.md](docs/CLAIMS.md). Ver também
 > [docs/OPENCODE_RUN.md](docs/OPENCODE_RUN.md) e [README.md](README.md).
 
 ## ✅ TESTE CONCLUÍDO COM SUCESSO

@@ -1,4 +1,8 @@
 # 🏗️ Behavior-OS — Auditoria Completa de Engenharia
+
+> ⚠️ **Snapshot histórico.** Esta auditoria foi feita quando o core tinha 6
+> engines; hoje tem **11**. Os achados abaixo não foram re-verificados contra o
+> código atual — a fonte de verdade é [`docs/CLAIMS.md`](docs/CLAIMS.md).
 **Data:** 11 de Outubro de 2026  
 **Auditor:** AI Senior Engineer (Agnes)  
 **Versão:** 2.0.0  

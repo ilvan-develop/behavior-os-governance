@@ -1,5 +1,12 @@
 # Behavior-OS Changelog
 
+> **Nota de verificação:** as entradas abaixo foram escritas antes da auditoria de
+> afirmações e continham números aspiracionais (ex.: "22 engines", "45+ tools",
+> "9 resources", "5,200+ testes"). Os valores medidos são: **11 engines**,
+> **27** tools MCP + **2** resources, **29** tools no plugin OpenCode, **21**
+> padrões DNA e **48 ficheiros / 483 casos** de teste. Fonte de verdade:
+> [docs/CLAIMS.md](docs/CLAIMS.md).
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),

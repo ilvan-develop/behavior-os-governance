@@ -174,12 +174,12 @@ reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 ## Integration Points
 
 ### MCP Server (standalone)
-- 23 tools + 2 resources exposed via Model Context Protocol
+- 27 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
-- 25 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
+- 29 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`
@@ -222,12 +222,15 @@ Response to Agent
 4. **Audit trail** - Every governance event logged with timestamp and context
 5. **Quality gates** - Evaluate reported metrics against thresholds
 6. **Learning from failures** - Tool failures recorded; recurring patterns detected and surfaced
+7. **Governed code editing** - Opt-in (`codeEdit.enabled`) + explicit `apply: true`; dry-run by default, workspace-confined, atomic, hashed, and recorded even when refused
 
 > Note: the governance log is in-memory plus a bounded JSON tail in host
-> storage, and is now **tamper-evident** via a SHA-256 hash chain
-> (`bos_verify_audit_trail`). Mission/learning/agent/audit-report state is
-> persisted to SQLite when a `persistence.path` is configured. See
-> `docs/CLAIMS.md` for the verified status.
+> storage, is **tamper-evident** via a SHA-256 hash chain
+> (`bos_verify_audit_trail`), and can additionally be written to a durable
+> append-only JSONL file (`BEHAVIOR_OS_AUDIT_LOG`) that detects truncation,
+> sequence gaps and edits. That is detection, not WORM storage.
+> Mission/learning/agent/audit-report state is persisted to SQLite when a
+> `persistence.path` is configured. See `docs/CLAIMS.md` for the verified status.
 
 ## 7 Real Algorithms
 

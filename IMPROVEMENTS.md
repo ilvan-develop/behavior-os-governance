@@ -1,5 +1,9 @@
 # BehaviorOS v2.0 - Improvement Report
 
+> ⚠️ **Historical snapshot.** The numbers in this document were measured when it
+> was written and do not describe the current repository. The source of truth is
+> [`docs/CLAIMS.md`](docs/CLAIMS.md) (verified with `pnpm test`).
+
 ## Summary of Changes
 
 ### 1. GovernanceEngine Improvements

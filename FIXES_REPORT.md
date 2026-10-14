@@ -1,5 +1,9 @@
 # 🛠️ Relatório de Correções — Engenharia Senior
 
+> ⚠️ **Snapshot histórico.** Os números deste documento foram medidos quando foi
+> escrito e não descrevem o estado atual do repositório. A fonte de verdade é
+> [`docs/CLAIMS.md`](docs/CLAIMS.md) (verificada com `pnpm test`).
+
 **Data:** 11 de Outubro de 2026  
 **Status:** ✅ Todas as correções aplicadas e validadas
 

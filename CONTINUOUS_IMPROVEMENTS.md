@@ -1,5 +1,9 @@
 # 🎯 BehaviorOS v2.0 - Relatório de Melhorias Contínuas
 
+> ⚠️ **Snapshot histórico.** Os números deste documento foram medidos quando foi
+> escrito e não descrevem o estado atual do repositório. A fonte de verdade é
+> [`docs/CLAIMS.md`](docs/CLAIMS.md) (verificada com `pnpm test`).
+
 ## Resumo Executivo
 
 Após análise rigorosa usando as skills de **Software Factory**, **TDD** e **Systematic Debugging**, o projeto BehaviorOS v2.0 foi significativamente melhorado com:

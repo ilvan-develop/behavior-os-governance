@@ -1,5 +1,9 @@
 # OpenCode Run - Instruções de Uso
 
+> ⚠️ **Snapshot histórico.** As contagens de tools citadas abaixo referem-se à
+> integração antiga e não descrevem o estado atual (plugin `plugins/opencode-v2`
+> com **29** tools `bos_*`). A fonte de verdade é [`CLAIMS.md`](CLAIMS.md).
+
 ## Status
 ✅ Plugin instalado e detectado
 ⚠️ `opencode run` requer PowerShell/CMD nativo (não funciona via Git Bash)

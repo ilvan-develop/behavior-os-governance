@@ -36,8 +36,8 @@ Padrões YAML que definem roles, regras de governança, gates de qualidade e wor
 │  Enterprise Gov      → Compliance   │
 │  Military Ops        → Chain of cmd │
 │  Lean Factory        → Continuous   │
-│  E-Commerce          → Transactions │
-│  Gaming              → Matchmaking  │
+│  Fintech Trading     → Risk limits  │
+│  Gaming Studio       → Matchmaking  │
 │  ... 21 padrões em `dnas/`          │
 └─────────────────────────────────────┘
 ```
@@ -50,11 +50,13 @@ Cada ação é avaliada automaticamente:
 | Governance | Avalia regras (block/escalate/warn/log/transform) |
 | Quality | Gates automáticos (coverage ≥ 80%, lint=0, security=0) |
 | Audit | Pipeline multi-estágio (lint → typecheck → security → coverage; simulado por padrão) |
-| Learning | Detecção de padrões recorrentes (não aplica correções automaticamente) |
+| Learning | Deteção de padrões recorrentes; edições de código só com opt-in + `apply:true` (dry-run por padrão) |
+| Decision | Votação ponderada + quorum (majority/supermajority/unanimous) |
 | Mission | Ciclo de vida completo (criar → executar → completar) |
 | DNA (DNALoader) | Carrega e valida padrões YAML com Zod |
 
-> Não existe uma camada "Decision" com votações/quorum nesta base de código.
+> O `PipelineEngine` (core) executa gates ordenados de forma síncrona: um gate
+> `pre` bloqueante veta a ação **antes** de ela correr, em qualquer host.
 
 ### 3. **Protocolo de 7 Passos**
 Processo determinístico para qualquer tarefa:
@@ -83,7 +85,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | OpenCode v2 | ✅ Plugin nativo |
 | Windsurf | ✅ Pronto |
 
-**23 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, evolução de DNA, propostas e aplicação de correções de código, listagem de resultados, recomendações, drift entre DNAs, execução de auditorias, registro de aprendizados e mais) + **25 tools nativas `bos_*`** no OpenCode v2 via plugin.
+**27 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, evolução de DNA, propostas e aplicação de correções de código, edição governada de ficheiros (dry-run por omissão), listagem de resultados, recomendações, drift entre DNAs, execução de auditorias, registro de aprendizados e mais) + **29 tools nativas `bos_*`** no OpenCode v2 via plugin.
 
 ---
 
@@ -96,7 +98,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | Revisão manual constante | Governança automatizada |
 | Erros se repetem | Engine de aprendizado deteta padrões recorrentes |
 | Coordenação difícil | Protocolo de 7 passos + missões rastreáveis |
-| Infraestrutura ad-hoc | 10 engines + CLI + SDK prontos |
+| Infraestrutura ad-hoc | 11 engines + CLI + SDK prontos |
 
 ---
 
@@ -128,7 +130,7 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 47 ficheiros de teste / 449 casos (`pnpm test`)
+- ✅ 48 ficheiros de teste / 483 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
 - ✅ Build ESM + DTS
 - ✅ v2.0.0

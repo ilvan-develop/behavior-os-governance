@@ -1,5 +1,9 @@
 # 🎯 BehaviorOS v2.0.0 - Relatório Final de Qualidade
 
+> ⚠️ **Snapshot histórico.** Os números deste documento foram medidos quando foi
+> escrito e não descrevem o estado atual do repositório. A fonte de verdade é
+> [`docs/CLAIMS.md`](docs/CLAIMS.md) (verificada com `pnpm test`).
+
 ## ✅ Status do Projeto
 
 | Verificação | Resultado | Status |

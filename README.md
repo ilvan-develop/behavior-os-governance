@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-449+-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-483-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -47,7 +47,7 @@ pnpm build
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 10 core engines, 23 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 11 core engines, 27 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -86,11 +86,11 @@ pnpm build
 └──────────────────────────────────────────────────────┘
 
 > The 9-layer diagram above is documentation of the conceptual stack. Only the
-> **10 engines** listed below are implemented in code; there is no separate
+> **11 engines** listed below are implemented in code; there is no separate
 > "Behavioral" or "Compiler" engine.
 ```
 
-### 10 Core Engines Powering the Stack
+### 11 Core Engines Powering the Stack
 
 | Engine | Purpose |
 |---|---|
@@ -103,6 +103,7 @@ pnpm build
 | DecisionEngine | Weighted voting/quorum (majority/supermajority/unanimous) |
 | RecommendationEngine | Scored recommendations from learning events |
 | DriftEngine | Behavioral drift between DNA snapshots |
+| CodeEditEngine | Guarded dry-run-by-default file edits with before/after hashes |
 | DNALoader | YAML pattern loading with Zod validation |
 
 ## Features Deep Dive
@@ -167,7 +168,7 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 23 Tools + 2 Resources
+### MCP Server — 27 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
@@ -178,6 +179,7 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 | **Quality** | `bos_check_quality`, `bos_run_audit` |
 | **Decision** | `bos_decide` |
 | **Evolution** | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes` |
+| **Code editing** | `bos_code_edit` (dry-run by default), `bos_list_code_edits` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
 | **Status** | `bos_get_status`, `bos_get_state` |
 | **Listing** | `bos_list_decisions`, `bos_list_pipeline_runs`, `bos_list_audit_reports` |
@@ -187,14 +189,14 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (25 tools in total), which are host-specific.
+`bos_verify_audit_trail` (29 tools in total), which are host-specific.
 
 ### Persistence (opt-in)
 
 State survives restarts. The default store uses the built-in `node:sqlite` module
 (Node ≥ 22.5, **no external dependency**): `missions`, `learnings`, `agents`,
-`audit_log`, `pipeline_runs`, `decisions`, `code_fix_results` and a key/value
-`meta` table (8 tables total).
+`audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `code_edits` and a
+key/value `meta` table (9 tables total).
 
 ```ts
 const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
@@ -212,6 +214,34 @@ const store = new PostgresStore({ connectionString: process.env.DATABASE_URL });
 await store.connect();
 const bos = new BehaviorOS({ persistence: { store } });
 ```
+
+### Governed Code Editing (opt-in)
+
+Behavior-OS can apply a code change, but never by surprise:
+
+```ts
+// Dry run: computes hashes + a unified diff, writes nothing.
+const preview = bos.applyCodeEdit({ file: 'src/app.ts', find: 'const t = 1;', replace: 'const t = 2;' });
+// { applied: false, reason: 'dry-run', preview: { beforeHash, afterHash, diff, … } }
+
+// A write needs the opt-in *and* an explicit apply.
+const bos2 = new BehaviorOS({ codeEdit: { enabled: true, root: process.cwd() } });
+bos.applyCodeEdit({ file: 'src/app.ts', find: 'const x = 1;', replace: 'const x = 2;', apply: true });
+```
+
+Guard rails: the file must resolve (realpath) **inside** the workspace root, the
+extension must be on the allowlist, the `find` text must occur **exactly once**,
+the file must stay under 1 MiB, and a stale `expectedBeforeHash` is refused
+instead of overwritten. The write itself is atomic (temp file + rename). Every
+evaluation — dry-runs and refusals included — is persisted with both hashes, so
+the history of refusals is auditable:
+
+```ts
+bos.listCodeEdits(); // CodeEditRecord[] with beforeHash / afterHash / reason
+```
+
+Enable it with env vars: `BEHAVIOR_OS_CODE_EDIT=true` (plugin) or
+`BEHAVIOROS_CODE_EDIT=true` (MCP), plus `*_CODE_EDIT_ROOT` to bound the tree.
 
 ### CLI Reference
 
@@ -236,8 +266,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 47 |
-| Test cases (`it`/`test` blocks) | 449 |
+| Test files (`*.test.ts`) | 48 |
+| Test cases (`it`/`test` blocks) | 483 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |
@@ -333,11 +363,11 @@ mcpServers:
 | Package | Description | Version |
 |---|---|---|
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
-| `@behavior-os/core` | 10 engines + EngineRegistry | 2.0.0 |
+| `@behavior-os/core` | 11 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 23 tools + 2 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 25 tools + hooks | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 27 tools + 2 resources | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 29 tools + hooks | 2.0.0 |
 
 ## License
 

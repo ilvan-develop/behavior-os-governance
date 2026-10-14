@@ -1,38 +1,39 @@
 # CLAIMS — Verificação de afirmações (Behavior-OS)
 
-> Documento único de verdade. Cada afirmação pública é cruzada com o código real.
-> Sempre que algo não existe, é dito explicitamente. Última auditoria: ver
-> `git log` e os comandos no fim deste ficheiro.
+> Documento único de verdade. Cada afirmação pública é cruzada com o código.
+> Nada aqui é aspiracional: ou está **verificado**, ou está **retirado** com o
+> valor real medido ao lado. Ver `pnpm test` / `pnpm typecheck` / `pnpm lint`
+> para o resultado vivo e `git log` para a data da última medição.
 
 ## Como verificar (comandos)
 
 ```bash
-# Motores reais: 12 ficheiros = 10 motores + fachada (behavior-os.ts) + registo (index.ts)
-# Esperado: audit, behavior-os, decision, drift, dna-loader, governance, index,
-#           learning, mission, pipeline, quality, recommendation
+# Motores reais: 13 ficheiros = 11 motores + fachada (behavior-os.ts) + registo (index.ts)
+# Esperado: audit, behavior-os, code-edit, decision, dna-loader, drift, governance,
+#           index, learning, mission, pipeline, quality, recommendation
 ls packages/core/src/engine/*.ts
 
-# Linhas por motor
+# Linhas por motor (números reais, não marketing)
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 23) e resources (esperado: 2)
+# Tools MCP (esperado: 27) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
-# Tools do plugin OpenCode (esperado: 25)
+# Tools do plugin OpenCode (esperado: 29)
 grep -c "name: 'bos_" plugins/opencode-v2/src/index.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 29 objetos, 24 enums)
+# Schemas Zod (esperado: 31 objetos, 25 enums)
 grep -c "z.object(" packages/schemas/src/index.ts
 grep -c "z.enum(" packages/schemas/src/index.ts
 
-# Tabelas SQLite (esperado: 8)
+# Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 47 ficheiros / 449 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 48 ficheiros / 483 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
@@ -43,91 +44,137 @@ ls packages/core/src/persistence/*.ts
 
 # Postgres é opcional (esperado: 0 imports estáticos de "pg")
 grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
+
+# Código só é escrito com opt-in + apply:true (esperado: 1 motor com esta trava)
+grep -n "codeEdit" packages/core/src/engine/behavior-os.ts
 ```
 
-## Tabela de afirmações
+## Afirmações verificadas
 
-| Afirmação | Estado | Realidade verificada |
-|---|---|---|
-| 10 motores operacionais | ✅ | **10** motores reais + fachada `BehaviorOS` + `EngineRegistry`. Listado: audit, behavior-os, decision, drift, dna-loader, governance, learning, mission, pipeline, quality, recommendation. |
-| GovernanceEngine com 609 linhas | ❌ | **147** linhas. |
-| QualityEngine com 618 linhas | ❌ | **96** linhas. |
-| AuditEngine com 1347 linhas | ❌ | **180** linhas. |
-| PipelineEngine com 657 linhas | ⚠️ existe, 161 linhas | `pipeline-engine.ts` **existe** (161 linhas), mas não tem 657 nem 9 camadas — ver secção "Gate pipeline". |
-| 9 camadas de validação (runtime) | ❌ | Existe um pipeline real e configurável, mas o default é 1 gate `pre` + N gates `post` (N = gates de qualidade do DNA) — não 9. |
-| 30 tools & 7 resources MCP | ❌ | **23 tools + 2 resources** (server) / **25 tools** (plugin). |
-| 29 schemas Zod | ✅ | **29** `z.object` (+24 `z.enum`). |
-| Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
-| 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
-| SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com **8** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
-| Persistência plugável + Postgres remoto | ✅ com ressalvas | Interface `Store` sincronizada; `SqliteStore` é o default. `PostgresStore` é opcional (`pg` resolvido só no `connect()`, **não** é dependência), com espelho em memória + write-through assíncrono (`flush()`/`closeAsync()`). Forte consistência para escritores: `store.withTransaction(async () => { store.saveA(); store.saveB() })` garante COMMIT atômico — o espelho só é atualizado após o COMMIT, por isso um leitor concorrente vê tudo ou nada. |
-| Trilho de auditoria imutável | ⚠️ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM/imutável. |
-| 7 algoritmos matemáticos | ✅ | 7 algoritmos reais documentados: (1) confiança `min(1,n/5)*0.6 + avgImpact*0.4`; (2) recência `max(0, 1 - h/72)`; (3) score recomendação `0.4*recency+0.3*freq+0.3*impact`; (4) quorum ponderado (majority/supermajority/unanimous); (5) hash-chain SHA-256; (6) drift simétrico (diff de regras/gates); (7) normalização de recursos em condições. |
-| Recomendações scoreadas | ✅ | `recommendation-engine.ts` + tool `bos_recommendations` (MCP e plugin). Ver secção abaixo. |
-| Drift entre padrões DNA | ✅ | `drift-engine.ts` + tool `bos_drift` (MCP e plugin), resolve padrões **por nome**; compara regras/gates por `id`. Ver secção abaixo. |
-| Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
-| Propostas de correção de código | ✅ leitura + persistência governada | `LearningEngine.proposeCodeFixes()` gera `CodeFixProposal[]` a partir de eventos `fix` repetidos. `BehaviorOS.applyCodeFixes()` persiste resultados na tabela `code_fix_results` com as mesmas 3 travas da evolução (opt-in, `apply:true`, quórum). MCP: `bos_code_fixes` / `bos_apply_code_fixes`. |
-| 10 estágios de auditoria | ❌ | `AuditStageSchema` tem **6**; por omissão corre **4**. |
-| `authority_level: 3` | ❌ | Campo real: `authority: string` (ex.: `operator`). |
-| Gate 2 real (Biome, tsc, pnpm audit) | ⚠️ | Verdade **apenas** com `simulate: false`; por omissão é simulado e passa sempre. |
-| Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
-| Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
-| Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 23 tools + 2 resources funcionais. |
-| 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
-| DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
+| Afirmação | Realidade verificada |
+|---|---|
+| **11 motores operacionais** | 13 ficheiros em `engine/` = 11 motores + fachada `BehaviorOS` + `EngineRegistry`: audit (192 linhas), code-edit (267), decision (107), dna-loader (40), drift (117), governance (147), learning (209), mission (111), pipeline (161), quality (96), recommendation (107). |
+| 29 schemas Zod | **31** `z.object` + **25** `z.enum` (medido, não estimado). |
+| Camada de decisão (votação/quorum) | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous`, quorum, votos com peso; persistida na tabela `decisions`. Tool `bos_decide`. |
+| 21 padrões DNA | 21 ficheiros YAML em `dnas/`, validados por Zod (`DNALoader`). |
+| Recomendações scoreadas | `recommendation-engine.ts` + `bos_recommendations` (MCP e plugin). Ver secção abaixo. |
+| Drift entre padrões DNA | `drift-engine.ts` + `bos_drift`, que resolve padrões **por nome** e compara regras/gates por `id` **incluindo mudanças de corpo com o mesmo `id`**. Ver secção abaixo. |
+| Auto-evolução do DNA (opt-in) | `proposeEvolution()` propõe mudanças com confiança ≥ 0,8. Aplicam-se só com `evolution.enabled` **e** `apply: true`; só acrescentam regras `warn`. Tool `bos_evolution`. |
+| Propostas de correção de código | `proposeCodeFixes()` (leitura pura) + `applyCodeFixes()` (3 travas: opt-in, `apply:true`, votos). As rejeições por votação **ficam persistidas** com `applied: false`, o padrão e a confiança. |
+| Camada de edição de código governada | `CodeEditEngine` (267 linhas) + `BehaviorOS.applyCodeEdit()`. Ver secção abaixo. |
+| Persistência SQLite sem dependências | `SqliteStore` usa o módulo embutido `node:sqlite` (Node ≥ 22.5) e cria **9** tabelas. Ver secção abaixo. |
+| Trilho de auditoria tamper-evident | Hash-chain SHA-256 (`bos_verify_audit_trail`) **mais** sink append-only durável opt-in que deteta truncatura, lacuna de `seq` e adulteração. Não é WORM (ver "Afirmações retiradas"). |
+| Gate pipeline pré-execução | `preflightAction()` corre gates `pre` bloqueantes de forma síncrona. Ver secção abaixo. |
+| Protocolo de 7 passos | `PROTOCOL_STEP_COUNT = 7`; a progressão vive em `AgentState.stepHistory` e é injetada na sessão de cada host. |
+| MCP real (não vaporware) | **27 tools + 2 resources** em `packages/mcp-server/src/server.ts`, com o teste `registers exactly 27 tools` a falhar se a contagem derivar. |
 
-## Cadeia de auditoria (tamper-evidence)
+## Afirmações retiradas ou corrigidas
 
-O log de governança (`plugins/opencode-v2/src/governance-log.ts`) é encadeado por
-hash SHA-256: cada evento carrega `prevHash` e `hash`, e
-`verifyGovernanceLog()` recomputa a cadeia e identifica o primeiro evento
-adulterado. Isto dá **deteção de adulteração** (tamper-evident), não
-imutabilidade por hardware.
+Cada linha é uma afirmação do material antigo que **não** correspondia ao código.
+Nenhuma é item pendente: a afirmação foi retirada e substituída pelo valor real,
+medido com `wc -l`.
 
-Limitações honestas:
-- É memória + uma cauda JSON no storage do host; **não** é uma base de dados.
-- O buffer é limitado (ring buffer); a verificação cobre a janela retida e
-  ancora no `prevHash` do primeiro evento retido.
+| Afirmação antiga | O que o código diz |
+|---|---|
+| GovernanceEngine com 609 linhas | **147** linhas (`governance-engine.ts`). |
+| QualityEngine com 618 linhas | **96** linhas (`quality-engine.ts`). |
+| AuditEngine com 1347 linhas | **192** linhas (`audit-engine.ts`). |
+| PipelineEngine com 657 linhas | **161** linhas (`pipeline-engine.ts`). O número original não tinha qualquer relação com o ficheiro. |
+| 9 camadas de validação (runtime) | **Retirada.** O pipeline é configurável e o default é 1 gate `pre` (`governance`) + N gates `post` (N = gates de qualidade do DNA ativo). Não existe um conjunto fixo de "9 camadas". |
+| 30 tools & 7 resources MCP | **27 tools + 2 resources** no servidor MCP; **29 tools** no plugin OpenCode (as restantes duas são específicas do host). |
+| "8 tabelas" (métrica antiga de persistência) | **9** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `code_edits`, `meta`. |
+| "Trilho de auditoria imutável" | Imutabilidade é um requisito de **armazenamento físico** (WORM), não de software. O que existe é deteção: hash-chain SHA-256 + sink append-only opt-in por ficheiro. Ver a secção "Cadeia de auditoria". |
+| "Learning engine não aplica correções automaticamente" | Já aplica, mas só com `config.codeEdit.enabled` **e** `apply: true` na chamada, `find` único, ficheiro dentro do workspace e (se houver votos) quórum aprovado. Sem isso, é sempre dry-run. |
 
 ## Gate pipeline
 
-`PipelineEngine` (`packages/core/src/engine/pipeline-engine.ts`) runs an ordered
-list of gates synchronously. A gate is `{ id, phase, blocking, evaluate }`; a
-**blocking** gate that returns `failed` halts the run and blocks the action.
+`PipelineEngine` (`packages/core/src/engine/pipeline-engine.ts`) corre uma lista
+ordenada de gates de forma síncrona. Um gate é
+`{ id, phase, blocking, evaluate }`; um gate **bloqueante** que devolve `failed`
+interrompe o run e bloqueia a ação.
 
-- `preflightAction(action, ctx)` runs only the `pre` gates → `{ allowed, blockedBy, run }`.
-  This is a real pre-execution veto that any host can call (the MCP server exposes
-  it as `bos_preflight`), not only the OpenCode plugin.
-- `runPipeline(context)` runs `pre` + `post` gates and persists the run.
-- Default gates: `governance` (pre, blocking) + one `quality:<id>` gate per DNA
-  quality gate (post, blocking). Supplying `pipeline.gates` replaces them;
-  `pipeline.enabled: false` yields a pass-through pipeline.
-- Blocked pre-flights and full runs are persisted in the `pipeline_runs` table.
+- `preflightAction(action, ctx)` corre **apenas** os gates `pre` →
+  `{ allowed, blockedBy, run }`. É um veto real, antes da execução, que qualquer
+  host pode chamar (o servidor MCP expõe-no como `bos_preflight`), não só o
+  plugin do OpenCode.
+- `runPipeline(context)` corre `pre` + `post` e persiste o run.
+- Gates por omissão: `governance` (pre, bloqueante) + um `quality:<id>` por gate
+  de qualidade do DNA (post, bloqueante). Passar `pipeline.gates` substitui-os;
+  `pipeline.enabled: false` deixa uma pass-through.
+- Pre-flights bloqueados e runs completos ficam na tabela `pipeline_runs`.
 
-Limitations honestas:
-- O default são 2 tipos de gate (1 `pre` + N `post`), não "9 camadas".
-- Gates são síncronos e in-process; não há execução distribuída.
+Nota de desenho: os gates são síncronos e in-process. Não há execução
+distribuída — e o nome "9 camadas" foi retirado em vez de fabricado.
 
-## Motor de decisão (votação/quorum)
+## Cadeia de auditoria (tamper-evidence)
 
-`packages/core/src/engine/decision-engine.ts` resolve um assunto por votação
-ponderada:
+O log de governança (`plugins/opencode-v2/src/governance-log.ts`) é uma cadeia
+SHA-256: cada entrada inclui `prevHash` e um `hash` calculado sobre o conteúdo.
+`verifyGovernanceLog()` recalcula a cadeia e devolve também `complete` (a janela
+em memória é um ring buffer) e continuidade de `seq`.
 
-- políticas: `majority` (default), `supermajority` (≥ 2/3), `unanimous`;
-- `quorum` = peso participante mínimo (aprov + rejei + abstenções), default 1;
-- pesos por votante (negativos → 0); abstenções contam para o quórum mas nunca
-  aprovam sozinhas; empate e "tudo abstenção" → `rejected` (fail-safe);
-- `BehaviorOS.decide()` aplica defaults de config e persiste na tabela `decisions`
-  (MCP: `bos_decide`).
+Para sobreviver a um restart — e para tornar a verificação independente do
+processo — existe um **sink append-only opt-in** por ficheiro JSONL
+(`BEHAVIOR_OS_AUDIT_LOG`):
 
-Limitação honesta: é contagem/voto determinístico in-process; **não** há consenso
-distribuído (Raft/Paxos) nem delegação entre agentes.
+- `initGovernanceLogSink` re-semeia a memória a partir do ficheiro; a partir daí
+  o ficheiro é a fonte de verdade entre reinícios;
+- `verifyGovernanceLogFile` deteta **truncatura** (linha final cortada),
+  **lacunas de `seq`** (entradas removidas) e **adulteração** (recomputação do
+  hash discorda), reportando o `seq` ofensivo;
+- falhas de escrita são contadas, não lançadas: um sink partido nunca derruba
+  uma decisão de governança.
 
-## Evolução de DNA (learning-driven)
+O que isto é: deteção de manipulação (tamper-evident) + histórico durável
+append-only. O que **não** é: armazenamento WORM/imutável por hardware, nem
+proteção contra alguém com acesso de escrita ao ficheiro que decida reescrever
+o histórico inteiro (nesse caso a hash-chain não tem âncora externa).
 
-`LearningEngine` (`packages/core/src/engine/learning-engine.ts`) pontua a
-confiança de um padrão recorrente:
+## Camada de edição de código governada
+
+`CodeEditEngine` (`packages/core/src/engine/code-edit-engine.ts`) é o único
+módulo do projeto que escreve em ficheiros, e foi desenhado para que uma
+proposta errada não faça dano:
+
+| Guarda | Comportamento |
+|---|---|
+| Dry-run por omissão | `preview()` calcula conteúdo, `sha256:` antes/depois, tamanho e um diff unificado; o ficheiro **não** é tocado. |
+| Confinamento ao workspace | O caminho é resolvido e passado por `realpath`; fora da raiz (via `../` ou symlink) é recusado. |
+| Allowlist de extensões | 30 extensões de texto; um lockfile, um binário ou uma chave não são editáveis. |
+| `find` exato | O texto tem de ocorrer **exatamente uma vez**; 0 ou 2+ ocorrências falham. |
+| Limite de tamanho | 1 MiB por omissão. |
+| Bloqueio otimista | `expectedBeforeHash` desatualizado → erro, em vez de sobrescrever. |
+| Escrita atómica | Ficheiro temporário na mesma pasta + `rename`. |
+
+`BehaviorOS.applyCodeEdit()` aplica as quatro travas, por ordem:
+
+1. guardas do motor (acima) — falha devolve `error`, não escreve;
+2. `apply: true` — sem isto é **dry-run** (`reason: 'dry-run'`);
+3. `config.codeEdit.enabled === true` — sem isto, `reason: 'opt-in-disabled'`;
+4. se houver `votes`, têm de ser **aprovados** pelo `DecisionEngine`
+   (`reason: 'vote-rejected'`).
+
+**Tudo é registado**, incluindo dry-runs e recusas: cada avaliação válida é
+persistida em `code_edits` (tabela SQLite) com `file`, `beforeHash`,
+`afterHash`, `bytesBefore/After`, `addedLines`, `removedLines`, `occurrences`,
+`applied`, `reason`, `agentId`, `dnaPattern`, `voteOutcome`/`voteTally` e
+`missionId`. `bos_list_code_edits` (MCP e plugin) lê esse histórico — o que faz
+do "não há histórico versionado de propostas rejeitadas" uma frase antiga.
+
+Atribuição: o registo usa a identidade governada (`resolveAgentIdentity()`), ou
+seja o agente registado → o id explícito → a persona da DNA
+(`persona:<role>`) → `unassigned`. **Nunca** o nome do modelo do host.
+
+Ativação por ambiente: `BEHAVIOR_OS_CODE_EDIT=true` (plugin) /
+`BEHAVIOROS_CODE_EDIT=true` (MCP), e `*_CODE_EDIT_ROOT` para limitar a árvore.
+O motor aceita `new BehaviorOS({ codeEdit: { enabled, root, extensions } })`.
+
+Fronteira assumida: é uma substituição textual única por ficheiro. Não há
+refactor estrutural (AST/AST-level), nem multi-ficheiro, nem análise estática —
+para isso a proposta é entregue ao agente, que a executa com as ferramentas do
+host (governadas pelo mesmo hook de permissão).
+
+## Aprendizagem e evolução de DNA
 
 ```
 confiança = min(1, ocorrências / 5) * 0.6 + pesoDeImpactoMédio * 0.4
@@ -135,81 +182,43 @@ pesos de impacto: low 0.25 · medium 0.5 · high 0.75 · critical 1
 ```
 
 `proposeEvolution(dnaName, minConfidence = 0.8)` devolve propostas **puras**
-(não muta nada) para padrões `failure`/`fix` que atinjam o limiar. Cinco falhas
-de impacto `high` chegam a **0.9**.
+(não muta nada) para padrões `failure`/`fix` que atinjam o limiar.
 
 Aplicação — três travas independentes, todas necessárias:
 
 1. `config.evolution.enabled === true`;
 2. a chamada passa explicitamente `apply: true`;
-3. se forem fornecidos `votes`, a alteração tem de ser **aprovada** pelo
-   `DecisionEngine`.
+3. se forem fornecidos `votes`, a alteração tem de ser **aprovada**.
 
-A única alteração possível é acrescentar uma regra de governança `warn` com a
-condição `{ type: 'pattern', value: <tipo> }`. Como `warn` nunca altera o
-veredicto, uma proposta aplicada **nunca bloqueia** uma ação. Cada aplicação
-gera um evento de aprendizagem com `source: 'dna-evolution'`.
+A única alteração possível é acrescentar uma regra `warn` com a condição
+`{ type: 'pattern', value: <tipo> }`; como `warn` nunca altera o veredicto, uma
+proposta aplicada nunca bloqueia uma ação. Cada aplicação gera um evento de
+aprendizagem com `source: 'dna-evolution'`.
 
-Limitações honestas:
-- Só `failure` e `fix` geram propostas; não há minerização de texto (LLM/NLP).
-- A evolução só **acrescenta** regras `warn`; não remove nem bloqueia regras.
-- A proposta é recalculada a partir dos eventos em memória — não há histórico
-  versionado de propostas rejeitadas.
+`applyCodeFixes()` segue as mesmas travas e acrescenta: propostas **rejeitadas
+por votação** ficam persistidas em `code_fix_results` com `applied: false`,
+`pattern`, `confidence`, `voteOutcome` e `voteTally`. Só registos com
+`applied: true` bloqueiam uma re-aplicação do mesmo padrão — uma proposta
+rejeitada uma vez pode ser aprovada depois.
 
-## Persistência plugável (SQLite / Postgres)
+Limites assumidos (não são afirmações falsas): só `failure`/`fix` geram
+propostas; não há mineração de texto (LLM/NLP); a evolução só acrescenta regras
+`warn` — nunca remove nem bloqueia.
 
-`Store` (`packages/core/src/persistence/store.ts`) é o contrato **síncrono** que o
-`BehaviorOS` usa. Implementações:
+## Motor de decisão (votação/quorum)
 
-- `SqliteStore` — default, `node:sqlite`, zero dependências externas, **8** tabelas;
-- `PostgresStore` — opcional, uma tabela `behavior_os_documents` com discriminador
-  `kind`; o driver `pg` é resolvido via `createRequire` **apenas** em `connect()`,
-  pelo que não é uma dependência do pacote.
+- políticas: `majority` (default), `supermajority` (≥ 2/3), `unanimous`;
+- `quorum` = peso participante mínimo (aprovações + rejeições + abstenções),
+  default 1;
+- pesos por votante (negativos → 0); abstenções contam para o quórum mas nunca
+  aprovam sozinhas; empate e "tudo abstenção" → `rejected` (fail-safe);
+- `BehaviorOS.decide()` aplica os defaults de config e persiste na tabela
+  `decisions` (MCP: `bos_decide`).
 
-Injeção: `new BehaviorOS({ persistence: { store } })` (o `store` tem precedência
-sobre `path`).
-
-Consistência forte para escritores: `PostgresStore.withTransaction(fn)` faz
-`BEGIN` / `COMMIT` / `ROLLBACK` numa conexão dedicada e atualiza o espelho
-somente após o COMMIT, pelo que um leitor concorrente vê todas as mudanças ou
-nenhuma. O `BehaviorOS.persistAll()` já invoca automaticamente
-`withTransaction` para que missões, aprendizados e agentes sejam guardados em
-uma só transação atómica.
-
-Limitações honestas do `PostgresStore`:
-- é um **espelho em memória + write-through assíncrono**: leituras normais
-  (fora de `withTransaction`) servem o espelho, não a base de dados;
-- para garantir atomicidade de leitura, o leitor deve chamar
-  `await store.flush()` depois de operações escritoras;
-- o `pg` **não** é declarado como dependência: a instalação é responsabilidade
-  de quem usa o adaptador (`pnpm add pg`), ou passa-se `createPool` próprio.
-
-## Propostas de correção de código
-
-`LearningEngine.proposeCodeFixes(minConfidence = 0.8)` deriva propostas
-**apenas de leitura** de eventos `fix` repetidos. A confiança usa a mesma
-fórmula do motor de evolução (`frequency * 0.6 + avgImpact * 0.4`): três
-eventos `fix` de impacto `critical` atingem ~0.76 (abaixo do limiar default de
-0.8); cinco atingem 1.0.
-
-A interface não edita ficheiros — apenas devolve `CodeFixProposal[]` com
-`suggestion`, `evidence` e `confidence`. `BehaviorOS.proposeCodeFixes()` é o
-ponto de entrada para leitura; `applyCodeFixes()` persiste os resultados na
-tabela `code_fix_results` com as mesmas 3 travas da evolução (opt-in, `apply:true`,
-quórum). O MCP expõe `bos_code_fixes` e `bos_apply_code_fixes`.
-
-Limitações honestas:
-- só eventos do tipo `fix` geram propostas; falhas (`failure`) ficam para
-  evolução de DNA;
-- não há análise estática de ficheiros — as propostas vêm apenas do log de
-  aprendizagens;
-- não há edição automática de código — `applyCodeFixes` só grava registos, não
-  modifica ficheiros.
+Fronteira: é contagem/voto determinístico in-process — não há consenso
+distribuído (Raft/Paxos) nem delegação entre agentes.
 
 ## Recomendações (`RecommendationEngine`)
-
-`packages/core/src/engine/recommendation-engine.ts` agrega eventos de
-aprendizagem recentes por tipo e produz recomendações scoreadas:
 
 ```
 score = 0.4 * recência + 0.3 * frequência + 0.3 * impacto
@@ -219,36 +228,77 @@ impacto    = média(peso) / 4        (low=1 … critical=4)
 ```
 
 `BehaviorOS.recommend(limit, ageLimitHours)` agrupa por tipo, ordena por score e
-devolve até `limit` itens (default 5, janela de 168 h). MCP: `bos_recommendations`.
+devolve até `limit` itens (default 5, janela 168 h). MCP: `bos_recommendations`.
 
-Limitações honestas:
-- agrega **por tipo de evento** (uma recomendação por tipo), não por padrão
-  individual nem por ficheiro;
-- não usa LLM nem NLP — o texto é gerado por template determinístico;
-- a janela temporal é fixa por chamada; não há recomendações persistentes.
+Fronteira: agrega **por tipo de evento** (uma recomendação por tipo), não por
+padrão individual nem por ficheiro; o texto é determinístico (template), sem
+LLM; não há recomendações persistidas.
 
 ## Drift entre DNAs (`DriftEngine`)
 
-`packages/core/src/engine/drift-engine.ts` compara dois snapshots de DNA e calcula
-a **diferença simétrica** de regras de governança (`id`) e gates de qualidade
-(`id`): `rulesAdded`, `rulesRemoved`, `gatesAdded`, `gatesRemoved`,
-`totalChanges`. O drift é classificado como **significativo** quando
-`totalChanges >= 2`. MCP: `bos_drift`.
+`compare()` devolve a diferença simétrica de regras e gates:
 
-Limitações honestas:
-- compara apenas **por `id`** (não deteta alterações dentro de uma regra com o
-  mesmo `id`, ex.: mudar `warn` para `block`);
-- é uma comparação entre dois objetos em memória, não um histórico versionado de
-  DNA nem um cálculo temporal de comportamento observado.
+- `rulesAdded` / `rulesRemoved` — ids presentes num só lado;
+- `rulesChanged` / `gatesChanged` — ids presentes nos dois lados com **corpo
+  diferente** (ex.: `warn` → `block`, ou threshold 80 → 90);
+- `totalChanges` = soma dos quatro tipos; **significativo** quando ≥ 2.
 
-## O que ainda NÃO existe (roadmap)
+O corpo é comparado estruturalmente (chaves ordenadas), pelo que uma regra
+re-serializada com outra ordem de chaves **não** conta como drift.
 
-- Edição automática de código pelo LearningEngine (as propostas e aplicações de
-  correções são apenas leitura/sugestão — não há manipulação de ficheiros). É uma
-  decisão de design, não uma lacuna a fechar: qualquer mutação de código deve
-  passar por revisão humana.
-- Armazenamento WORM/imutável para o trilho de auditoria (o que existe é
-  *tamper-evident*, com hash-chain verificável).
-- Alterações dentro de regras com o mesmo `id` não aparecem no relatório de
-  drift (compara-se por `id`).
-- Histórico versionado de propostas de evolução/correção rejeitadas.
+## Persistência plugável (SQLite / Postgres)
+
+`Store` (`packages/core/src/persistence/store.ts`) é o contrato **síncrono** que
+o `BehaviorOS` usa. Implementações:
+
+- `SqliteStore` — default, `node:sqlite`, zero dependências externas, **9**
+  tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`,
+  `decisions`, `code_fix_results`, `code_edits`, `meta`;
+- `PostgresStore` — opcional, uma tabela `behavior_os_documents` com
+  discriminador `kind`; o driver `pg` é resolvido via `createRequire` **apenas**
+  em `connect()`, pelo que não é dependência do pacote.
+
+Injeção: `new BehaviorOS({ persistence: { store } })` (o `store` tem precedência
+sobre `path`). Sem store, tudo funciona em memória e
+`listCodeEdits()`/`listCodeFixResults()` devolvem `[]`.
+
+Consistência forte para escritores: `PostgresStore.withTransaction(fn)` faz
+`BEGIN` / `COMMIT` / `ROLLBACK` numa conexão dedicada e atualiza o espelho
+somente após o COMMIT, pelo que um leitor concorrente vê todas as mudanças ou
+nenhuma. O `BehaviorOS.persistAll()` invoca automaticamente `withTransaction`.
+
+Limitações honestas do `PostgresStore`:
+
+- é um **espelho em memória + write-through assíncrono**: leituras normais
+  (fora de `withTransaction`) servem o espelho;
+- para garantir atomicidade de leitura, o leitor deve chamar
+  `await store.flush()` depois de operações escritoras;
+- o `pg` **não** é dependência declarada: quem usa o adaptador instala-o
+  (`pnpm add pg`) ou injeta o seu `createPool`.
+
+## Sem lacunas conhecidas
+
+Todas as afirmações do material público (README, PITCH, ARCHITECTURE,
+CONTINUOUS_IMPROVEMENTS) foram cruzadas com o código. As que não correspondiam
+foram **retiradas** e substituídas pelo valor medido — ver a tabela acima.
+
+Não há, portanto, uma lista de "implementado pela metade" a fechar. O que resta
+são fronteiras de desenho, declaradas para não serem confundidas com defeitos:
+
+- **WORM físico**: imutabilidade por hardware é um requisito de infraestrutura.
+  O software entrega deteção (hash-chain + verificação por `seq`).
+- **Consenso distribuído**: a votação é in-process; não há Raft/Paxos nem
+  delegação entre processos.
+- **Gates distribuídos**: o pipeline é síncrono no processo do host.
+- **Reprodução de Postgres em CI**: o adaptador é testado com um *pool* falso;
+  não há servidor Postgres nos testes.
+- **Análise estática/NLP**: as propostas de evolução e de correção vêm de
+  eventos de aprendizagem; a edição de código é substituição textual única.
+
+## Estado dos testes
+
+Medido com `pnpm test` (não aspiracional): **48 ficheiros / 483 casos**,
+`pnpm typecheck` 10/10 tarefas sem erros e `pnpm lint` (Biome) limpo. Os
+números vivem nos próprios testes, que falham se a contagem derivar:
+`packages/mcp-server/tests/mcp.test.ts` ("27 tools") e
+`plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools").

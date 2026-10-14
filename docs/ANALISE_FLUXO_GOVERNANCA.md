@@ -1,5 +1,10 @@
 # Análise do Fluxo de Governação — Behavior-OS × OpenCode v2
 
+> ⚠️ **Snapshot histórico.** Os números deste documento (contagens de tools MCP e
+> do plugin, achados F1..Fn) foram medidos quando foi escrito e não descrevem o
+> estado atual: o servidor MCP tem **27** tools e o plugin tem **29**. A fonte de
+> verdade é [`CLAIMS.md`](CLAIMS.md) (verificada com `pnpm test`).
+
 > Análise de **1000 cenários** do fluxo completo (mensagem do utilizador → missão →
 > bloqueios → audit → learning), com evidência de código e um plano de correção.
 

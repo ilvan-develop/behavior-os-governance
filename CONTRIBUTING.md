@@ -26,7 +26,7 @@ pnpm typecheck
 behavioros/
 ├── packages/
 │   ├── schemas/     # Zod validation schemas
-│   ├── core/        # 22 engines + BehaviorOS class
+│   ├── core/        # 11 engines + BehaviorOS class
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools
 │   ├── mcp-server/  # MCP server implementation
