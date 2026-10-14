@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-426+-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-449+-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -179,16 +179,22 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 | **Decision** | `bos_decide` |
 | **Evolution** | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
-| **Drift** | `bos_drift` |
+| **Status** | `bos_get_status`, `bos_get_state` |
+| **Listing** | `bos_list_decisions`, `bos_list_pipeline_runs`, `bos_list_audit_reports` |
 | **Analytics** | `bos_recommendations` |
+| **Drift** | `bos_drift` |
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
+
+The OpenCode v2 plugin additionally exposes `bos_get_log` and
+`bos_verify_audit_trail` (25 tools in total), which are host-specific.
 
 ### Persistence (opt-in)
 
 State survives restarts. The default store uses the built-in `node:sqlite` module
 (Node ≥ 22.5, **no external dependency**): `missions`, `learnings`, `agents`,
-`audit_log`, `pipeline_runs`, `decisions` and a key/value `meta` table.
+`audit_log`, `pipeline_runs`, `decisions`, `code_fix_results` and a key/value
+`meta` table (8 tables total).
 
 ```ts
 const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
@@ -230,8 +236,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 45 |
-| Test cases (`it`/`test` blocks) | 426 |
+| Test files (`*.test.ts`) | 47 |
+| Test cases (`it`/`test` blocks) | 449 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |

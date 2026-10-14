@@ -1071,10 +1071,10 @@ export default Plugin.define({
         },
       });
 
-      // Tool 25: bos_drift — compare DNA snapshots
+      // Tool 25: bos_drift — compare two DNA patterns by name
       tools.add({
         name: 'bos_drift',
-        description: 'Compare two DNA snapshots and report behavioral drift',
+        description: 'Compare two DNA patterns (by name) and report behavioral drift',
         input: {
           type: 'object',
           properties: {
@@ -1085,24 +1085,21 @@ export default Plugin.define({
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as { dnaA: string; dnaB: string };
-          const drift = bos.compareDNADrift(
-            {
-              name: params.dnaA,
-              version: '0',
-              description: '',
-              personas: [],
-              governance: [],
-              quality: [],
-            } as never,
-            {
-              name: params.dnaB,
-              version: '0',
-              description: '',
-              personas: [],
-              governance: [],
-              quality: [],
-            } as never,
-          );
+          const a = loadedDnaPatterns.get(params.dnaA);
+          const b = loadedDnaPatterns.get(params.dnaB);
+          if (!a || !b) {
+            const missing = [!a ? params.dnaA : null, !b ? params.dnaB : null]
+              .filter(Boolean)
+              .join('", "');
+            return {
+              content: `DNA pattern(s) not found: "${missing}". Available: ${Array.from(
+                loadedDnaPatterns.keys(),
+              )
+                .sort()
+                .join(', ')}`,
+            };
+          }
+          const drift = bos.compareDNADrift(a, b);
           return { content: JSON.stringify(drift, null, 2) };
         },
       });

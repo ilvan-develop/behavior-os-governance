@@ -592,4 +592,60 @@ describe('behavior-os governance log', () => {
     expect(denyNote, 'deny should produce a synthetic on-screen message').toBeDefined();
     expect(denyNote?.sessionID).toBe('ses-test-123');
   });
+
+  it('bos_drift compares two DNA patterns and reports a real drift', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const result = await runTool(addedTools, 'bos_drift', {
+      dnaA: 'lean-factory',
+      dnaB: 'surgical-team',
+    });
+    const drift = JSON.parse(result.content) as {
+      id: string;
+      olderName: string;
+      newerName: string;
+      totalChanges: number;
+      significant: boolean;
+      summary: string;
+    };
+
+    expect(drift.id).toMatch(/^drift-/);
+    expect(drift.olderName).toBeTruthy();
+    expect(drift.newerName).toBeTruthy();
+    expect(drift.summary).not.toContain('No drift engine available');
+    expect(drift.totalChanges).toBeGreaterThan(0);
+    expect(drift.significant).toBe(true);
+  });
+
+  it('bos_drift reports unknown pattern names without throwing', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const result = await runTool(addedTools, 'bos_drift', {
+      dnaA: 'does-not-exist',
+      dnaB: 'lean-factory',
+    });
+
+    expect(result.content).toContain('not found');
+  });
+
+  it('bos_recommendations scores recent learnings', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    await runTool(addedTools, 'bos_record_learning', {
+      type: 'failure',
+      source: 'ci',
+      content: 'pipeline failed at the deploy step',
+      impact: 'critical',
+    });
+
+    const result = await runTool(addedTools, 'bos_recommendations', {});
+    const recs = JSON.parse(result.content) as Array<{ text: string; score: number }>;
+
+    expect(recs.length).toBeGreaterThanOrEqual(1);
+    expect(recs[0].score).toBeGreaterThan(0);
+    expect(recs[0].text).toContain('failure');
+  });
 });

@@ -974,34 +974,33 @@ server.registerTool(
 server.registerTool(
   'bos_drift',
   {
-    description: 'Compare two DNA snapshots and report behavioral drift',
+    description: 'Compare two DNA patterns (by name) and report behavioral drift',
     inputSchema: z.object({
-      dnaA: z.string().describe('Older DNA name'),
-      dnaB: z.string().describe('Newer DNA name'),
+      dnaA: z.string().describe('Older DNA pattern name, e.g. "lean-factory"'),
+      dnaB: z.string().describe('Newer DNA pattern name, e.g. "devops-pipeline"'),
     }),
     annotations: { readOnlyHint: true, title: 'DNA Drift' },
   },
   async ({ dnaA, dnaB }: { dnaA: string; dnaB: string }) => {
     try {
-      const bos = getBehaviorOS();
-      const drift = bos.compareDNADrift(
-        {
-          name: dnaA,
-          version: '0',
-          description: '',
-          personas: [],
-          governance: [],
-          quality: [],
-        } as never,
-        {
-          name: dnaB,
-          version: '0',
-          description: '',
-          personas: [],
-          governance: [],
-          quality: [],
-        } as never,
-      );
+      const dnas = await loadDNAPatterns();
+      const a = dnas[dnaA.toLowerCase()];
+      const b = dnas[dnaB.toLowerCase()];
+      if (!a || !b) {
+        const missing = [!a ? dnaA : null, !b ? dnaB : null].filter(Boolean).join('", "');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `DNA pattern(s) not found: "${missing}". Available: ${Object.keys(dnas)
+                .sort()
+                .join(', ')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const drift = getBehaviorOS().compareDNADrift(a, b);
       return { content: [{ type: 'text', text: JSON.stringify(drift, null, 2) }] };
     } catch (error) {
       return {

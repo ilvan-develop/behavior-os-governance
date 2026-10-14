@@ -138,7 +138,7 @@ concrete database. Inject one with
 built-in SQLite store instead.
 
 **SQLite (default, zero dependency).** Uses the built-in `node:sqlite` module
-(Node ≥ 22.5). Seven tables keep state across restarts:
+(Node ≥ 22.5). Eight tables keep state across restarts:
 
 | Table | Contents |
 |---|---|
@@ -148,6 +148,7 @@ built-in SQLite store instead.
 | `audit_log` | one row per audit report (append-only by convention) |
 | `pipeline_runs` | one row per gate-pipeline run / blocked pre-flight |
 | `decisions` | one row per voting/quorum outcome |
+| `code_fix_results` | one row per applied code-fix result (deduped by `pattern`) |
 | `meta` | key/value metadata |
 
 Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
@@ -178,7 +179,7 @@ reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
-- 14 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
+- 25 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`

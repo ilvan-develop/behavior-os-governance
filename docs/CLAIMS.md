@@ -7,7 +7,9 @@
 ## Como verificar (comandos)
 
 ```bash
-# Motores reais (esperado: audit, behavior-os, decision, drift, dna-loader, governance, learning, mission, pipeline, quality, recommendation)
+# Motores reais: 12 ficheiros = 10 motores + fachada (behavior-os.ts) + registo (index.ts)
+# Esperado: audit, behavior-os, decision, drift, dna-loader, governance, index,
+#           learning, mission, pipeline, quality, recommendation
 ls packages/core/src/engine/*.ts
 
 # Linhas por motor
@@ -17,11 +19,21 @@ wc -l packages/core/src/engine/*.ts
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
+# Tools do plugin OpenCode (esperado: 25)
+grep -c "name: 'bos_" plugins/opencode-v2/src/index.ts
+
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 29 objetos)
+# Schemas Zod (esperado: 29 objetos, 24 enums)
 grep -c "z.object(" packages/schemas/src/index.ts
+grep -c "z.enum(" packages/schemas/src/index.ts
+
+# Tabelas SQLite (esperado: 8)
+grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
+
+# Testes (esperado: 47 ficheiros / 449 casos) — `pnpm test` para o resultado vivo
+ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
 grep -ri "sqlite" packages plugins --include=*.ts
@@ -47,10 +59,12 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | 29 schemas Zod | ✅ | **29** `z.object` (+24 `z.enum`). |
 | Camada de decisão (votação/quorum) | ✅ | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous` + quorum, votos com peso. Tool `bos_decide`. |
 | 16 ficheiros YAML / 4 padrões | ❌ | **21** ficheiros DNA. |
-| SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com tabelas `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
+| SQLite / tabelas relacionais | ✅ | `SqliteStore` no core (módulo nativo `node:sqlite`, sem dependência) com **8** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `meta`. Ativa-se com `persistence: { path }` ou `BEHAVIOROS_DB_PATH`. |
 | Persistência plugável + Postgres remoto | ✅ com ressalvas | Interface `Store` sincronizada; `SqliteStore` é o default. `PostgresStore` é opcional (`pg` resolvido só no `connect()`, **não** é dependência), com espelho em memória + write-through assíncrono (`flush()`/`closeAsync()`). Forte consistência para escritores: `store.withTransaction(async () => { store.saveA(); store.saveB() })` garante COMMIT atômico — o espelho só é atualizado após o COMMIT, por isso um leitor concorrente vê tudo ou nada. |
 | Trilho de auditoria imutável | ⚠️ tamper-evident | Log append-ordered com **hash-chain SHA-256** (`verifyGovernanceLog`, tool `bos_verify_audit_trail`). É deteção de adulteração, não armazenamento WORM/imutável. |
 | 7 algoritmos matemáticos | ✅ | 7 algoritmos reais documentados: (1) confiança `min(1,n/5)*0.6 + avgImpact*0.4`; (2) recência `max(0, 1 - h/72)`; (3) score recomendação `0.4*recency+0.3*freq+0.3*impact`; (4) quorum ponderado (majority/supermajority/unanimous); (5) hash-chain SHA-256; (6) drift simétrico (diff de regras/gates); (7) normalização de recursos em condições. |
+| Recomendações scoreadas | ✅ | `recommendation-engine.ts` + tool `bos_recommendations` (MCP e plugin). Ver secção abaixo. |
+| Drift entre padrões DNA | ✅ | `drift-engine.ts` + tool `bos_drift` (MCP e plugin), resolve padrões **por nome**; compara regras/gates por `id`. Ver secção abaixo. |
 | Auto-evolução do DNA com confiança > 80% | ⚠️ opt-in | `LearningEngine.proposeEvolution()` propõe mudanças com confiança ≥ 0,8 (default). Só se aplicam com `evolution.enabled` **e** `apply: true`, e só acrescentam regras `warn` (nunca bloqueiam). MCP: `bos_evolution`. |
 | Propostas de correção de código | ✅ leitura + persistência governada | `LearningEngine.proposeCodeFixes()` gera `CodeFixProposal[]` a partir de eventos `fix` repetidos. `BehaviorOS.applyCodeFixes()` persiste resultados na tabela `code_fix_results` com as mesmas 3 travas da evolução (opt-in, `apply:true`, quórum). MCP: `bos_code_fixes` / `bos_apply_code_fixes`. |
 | 10 estágios de auditoria | ❌ | `AuditStageSchema` tem **6**; por omissão corre **4**. |
@@ -59,7 +73,7 @@ grep -n "from 'pg'" packages/core/src/persistence/postgres-store.ts
 | Hierarquia block → escalate → warn → log | ✅ | Implementada em `governance-engine.ts`. |
 | Bloqueio antes da execução | ✅ | **Plugin:** `ctx.permission.hook('evaluate')` → `deny`/`ask`. **Core:** `BehaviorOS.preflightAction()` corre os gates `pre` de forma síncrona e veta antes de executar (tool MCP `bos_preflight`). |
 | Protocolo de 7 passos rastreável | ✅ | `behavior-os.ts` + `AgentState.stepHistory`. |
-| MCP real (não vaporware) | ✅ | 21 tools + 2 resources funcionais. |
+| MCP real (não vaporware) | ✅ | 23 tools + 2 resources funcionais. |
 | 21 padrões DNA | ✅ | `dnas/*.yaml` = 21. |
 | DNA em YAML validado com Zod | ✅ | `schemas/src/index.ts`; Zod `^4.4.3`. |
 
@@ -147,7 +161,7 @@ Limitações honestas:
 `Store` (`packages/core/src/persistence/store.ts`) é o contrato **síncrono** que o
 `BehaviorOS` usa. Implementações:
 
-- `SqliteStore` — default, `node:sqlite`, zero dependências externas, 7 tabelas;
+- `SqliteStore` — default, `node:sqlite`, zero dependências externas, **8** tabelas;
 - `PostgresStore` — opcional, uma tabela `behavior_os_documents` com discriminador
   `kind`; o driver `pg` é resolvido via `createRequire` **apenas** em `connect()`,
   pelo que não é uma dependência do pacote.
@@ -192,7 +206,49 @@ Limitações honestas:
 - não há edição automática de código — `applyCodeFixes` só grava registos, não
   modifica ficheiros.
 
+## Recomendações (`RecommendationEngine`)
+
+`packages/core/src/engine/recommendation-engine.ts` agrega eventos de
+aprendizagem recentes por tipo e produz recomendações scoreadas:
+
+```
+score = 0.4 * recência + 0.3 * frequência + 0.3 * impacto
+recência   = max(0, 1 - idade_horas / 72)
+frequência = min(1, n_eventos / 5)
+impacto    = média(peso) / 4        (low=1 … critical=4)
+```
+
+`BehaviorOS.recommend(limit, ageLimitHours)` agrupa por tipo, ordena por score e
+devolve até `limit` itens (default 5, janela de 168 h). MCP: `bos_recommendations`.
+
+Limitações honestas:
+- agrega **por tipo de evento** (uma recomendação por tipo), não por padrão
+  individual nem por ficheiro;
+- não usa LLM nem NLP — o texto é gerado por template determinístico;
+- a janela temporal é fixa por chamada; não há recomendações persistentes.
+
+## Drift entre DNAs (`DriftEngine`)
+
+`packages/core/src/engine/drift-engine.ts` compara dois snapshots de DNA e calcula
+a **diferença simétrica** de regras de governança (`id`) e gates de qualidade
+(`id`): `rulesAdded`, `rulesRemoved`, `gatesAdded`, `gatesRemoved`,
+`totalChanges`. O drift é classificado como **significativo** quando
+`totalChanges >= 2`. MCP: `bos_drift`.
+
+Limitações honestas:
+- compara apenas **por `id`** (não deteta alterações dentro de uma regra com o
+  mesmo `id`, ex.: mudar `warn` para `block`);
+- é uma comparação entre dois objetos em memória, não um histórico versionado de
+  DNA nem um cálculo temporal de comportamento observado.
+
 ## O que ainda NÃO existe (roadmap)
 
 - Edição automática de código pelo LearningEngine (as propostas e aplicações de
-  correções são apenas leitura/sugestão — não há manipulação de ficheiros).
+  correções são apenas leitura/sugestão — não há manipulação de ficheiros). É uma
+  decisão de design, não uma lacuna a fechar: qualquer mutação de código deve
+  passar por revisão humana.
+- Armazenamento WORM/imutável para o trilho de auditoria (o que existe é
+  *tamper-evident*, com hash-chain verificável).
+- Alterações dentro de regras com o mesmo `id` não aparecem no relatório de
+  drift (compara-se por `id`).
+- Histórico versionado de propostas de evolução/correção rejeitadas.
