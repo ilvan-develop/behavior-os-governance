@@ -8,16 +8,33 @@
 // `[Behavior-OS:LOG:*]` lines).
 //
 // State is module-level (like the engine singleton in index.ts) and purely
-// diagnostic: it never influences governance decisions. A bounded tail of the
-// most recent events IS persisted (inside the snapshot envelope) so activity
-// survives a restart — see GOVERNANCE_LOG_PERSIST_LIMIT.
+// diagnostic: it never influences governance decisions.
 //
-// Tamper-evidence: every event carries `prevHash` + `hash`, forming a SHA-256
-// chain. `verifyGovernanceLog()` recomputes it and pinpoints the first changed
-// event. This detects tampering; it is not hardware immutability, and because
-// the buffer is a ring buffer verification is anchored on the retained window.
+// Append-only by design: `appendGovernanceLog` is the only writer, every entry
+// is linked into a SHA-256 hash chain (`prevHash` -> `hash`) and entries are
+// never updated in place. Two levels of assurance, honestly separated:
+//
+// - In memory (always on): a ring buffer of the most recent GOVERNANCE_LOG_MAX
+//   events, plus a bounded tail persisted in the snapshot envelope
+//   (GOVERNANCE_LOG_PERSIST_LIMIT) so recent history survives a restart.
+//   `verifyGovernanceLog()` recomputes the chain over that window and detects an
+//   edited or reordered entry inside it; after eviction it can only attest the
+//   retained window (`complete: false`).
+// - Durable sink (opt-in via GOVERNANCE_LOG_FILE_ENV): each entry is appended to
+//   a JSONL file with flag 'a' (never rewritten). The file holds the whole
+//   history, so `verifyGovernanceLogFile()` additionally detects a truncated
+//   head, a deleted middle line and any reordering — the first entry must be
+//   seq 1 with the genesis hash and seq must be contiguous. On init the sink is
+//   read back, so it is the source of truth for the chain across restarts.
+//
+// Neither level is WORM storage: a root user with write access to the file can
+// rewrite the whole chain and its hashes. What IS guaranteed is that a partial
+// or edited log cannot pass verification unnoticed, and that `instance` marks
+// which process produced each entry (two OpenCode sessions share persisted
+// storage but not memory, so their state can diverge).
 
 import { createHash } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
 
 export type GovernanceLogKind =
   | 'dna_selected'
@@ -76,6 +93,13 @@ export type GovernanceLogInput = Omit<
 export const GOVERNANCE_LOG_MAX = 200;
 
 /**
+ * Environment variable that points at a durable, append-only JSONL sink for the
+ * audit trail. Off by default: without it the trail is in-memory + the bounded
+ * snapshot tail, and `verifyGovernanceLog` can only attest the retained window.
+ */
+export const GOVERNANCE_LOG_FILE_ENV = 'BEHAVIOR_OS_AUDIT_LOG';
+
+/**
  * Maximum number of recent events embedded in a persisted snapshot, so a
  * restarted process can still show what happened before it started. Smaller
  * than the in-memory cap on purpose, to keep the envelope compact.
@@ -103,6 +127,76 @@ let sequence = 0;
 let lastHash = GENESIS_HASH;
 /** Hash before the retained window; the verification anchor after eviction. */
 let anchorHash = GENESIS_HASH;
+/** Durable append-only sink (JSONL), when enabled via the env var. */
+let sinkPath: string | null = null;
+/** Number of failed sink writes; surfaced so a broken sink is never silent. */
+let sinkWriteErrors = 0;
+
+/**
+ * Enable a durable, append-only JSONL sink for the audit trail.
+ *
+ * When the file already exists it is read back on init: the in-memory buffer is
+ * re-seeded from the sink (the sink is the source of truth across restarts) and
+ * the sequence/hash pointers resume from its last entry, so new events keep the
+ * single chain intact even when the persisted snapshot only holds a short tail.
+ * Passing `null` disables the sink.
+ */
+export function initGovernanceLogSink(filePath: string | null): void {
+  sinkPath = filePath?.trim() ? filePath : null;
+  sinkWriteErrors = 0;
+  if (!sinkPath) return;
+  const stored = readGovernanceLogFile(sinkPath);
+  if (stored.length === 0) return;
+  const tail = stored.slice(-GOVERNANCE_LOG_MAX);
+  events = tail;
+  sequence = tail[tail.length - 1].seq;
+  lastHash = tail[tail.length - 1].hash;
+  // Anchor on the event before the retained window; genesis for a short log.
+  anchorHash =
+    tail.length < stored.length ? stored[stored.length - tail.length - 1].hash : GENESIS_HASH;
+}
+
+/** Current sink status: `path` is null when the durable sink is disabled. */
+export function getGovernanceLogSinkStatus(): { path: string | null; writeErrors: number } {
+  return { path: sinkPath, writeErrors: sinkWriteErrors };
+}
+
+/**
+ * Read and parse an append-only JSONL audit log. Lines that cannot be parsed
+ * are skipped here and reported by {@link verifyGovernanceLogFile}, so a
+ * corrupted line is never silently ignored during verification.
+ */
+export function readGovernanceLogFile(filePath: string): GovernanceLogEvent[] {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
+  const parsed: GovernanceLogEvent[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line) as GovernanceLogEvent;
+      if (typeof entry.seq === 'number' && typeof entry.hash === 'string') parsed.push(entry);
+    } catch {
+      // Ignored: verification reports unparsable lines explicitly.
+    }
+  }
+  return parsed;
+}
+
+/** Append one event to the durable sink. Never throws: governance must not break. */
+function writeToSink(entry: GovernanceLogEvent): void {
+  if (!sinkPath) return;
+  try {
+    appendFileSync(sinkPath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', flag: 'a' });
+  } catch {
+    // A failing sink must not stop governance, but it must not look healthy
+    // either: the counter is reported by bos_verify_audit_trail.
+    sinkWriteErrors += 1;
+  }
+}
 
 /** Deterministic SHA-256 over an event's canonical fields (excluding `hash`). */
 export function computeGovernanceHash(entry: Omit<GovernanceLogEvent, 'hash'>): string {
@@ -145,6 +239,8 @@ export function appendGovernanceLog(input: GovernanceLogInput): GovernanceLogEve
     anchorHash = events[drop - 1].hash;
     events = events.slice(drop);
   }
+  // Mirror to the durable append-only sink (best effort, never throws).
+  writeToSink(entry);
   if (ECHOED_OUTCOMES.has(entry.outcome)) {
     console.log(serializeGovernanceLog(entry));
   }
@@ -163,6 +259,7 @@ export function clearGovernanceLog(): void {
   sequence = 0;
   lastHash = GENESIS_HASH;
   anchorHash = GENESIS_HASH;
+  sinkWriteErrors = 0;
 }
 
 /**
@@ -183,6 +280,10 @@ export function exportGovernanceLog(limit = GOVERNANCE_LOG_PERSIST_LIMIT): Gover
  * recomputed and re-linked. Returns how many entries were restored.
  */
 export function seedGovernanceLog(input: unknown): number {
+  // A durable sink already restored the log on init and is the source of truth
+  // across restarts; seeding the shorter snapshot tail on top of it would fork
+  // the chain (and re-use sequence numbers).
+  if (events.length > 0) return 0;
   if (!Array.isArray(input) || input.length === 0) return 0;
   const restored: GovernanceLogEvent[] = [];
   for (const item of input) {
@@ -231,24 +332,44 @@ export interface ChainVerification {
   brokenAt?: number;
   /** Human-readable reason for the first failure. */
   reason?: string;
+  /**
+   * True when verification started at the real head of the chain (`seq === 1`
+   * with the genesis `prevHash`). False means only a retained window was
+   * attested — what the in-memory buffer can guarantee after eviction.
+   */
+  complete: boolean;
 }
 
 /**
  * Recompute and verify the hash chain over the retained events (or a supplied
  * slice). The first entry is anchored on its own `prevHash`, so verification
- * covers the retained window rather than the whole (evicted) history.
+ * covers the retained window rather than the whole (evicted) history. Sequence
+ * continuity is checked too, so a deleted or reordered entry is reported even
+ * when the neighbouring hashes happen to line up.
  */
 export function verifyGovernanceLog(
   entries: readonly GovernanceLogEvent[] = events,
 ): ChainVerification {
-  if (entries.length === 0) return { valid: true, checked: 0 };
+  if (entries.length === 0) return { valid: true, checked: 0, complete: false };
+  const complete = entries[0].seq === 1 && entries[0].prevHash === GENESIS_HASH;
   let prev = entries[0].prevHash || GENESIS_HASH;
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
+    const expectedSeq = entries[0].seq + index;
+    if (entry.seq !== expectedSeq) {
+      return {
+        valid: false,
+        checked: index,
+        complete,
+        brokenAt: entry.seq,
+        reason: `sequence gap at seq ${entry.seq} (expected ${expectedSeq})`,
+      };
+    }
     if (entry.prevHash !== prev) {
       return {
         valid: false,
         checked: index,
+        complete,
         brokenAt: entry.seq,
         reason: `prevHash mismatch at seq ${entry.seq}`,
       };
@@ -258,13 +379,98 @@ export function verifyGovernanceLog(
       return {
         valid: false,
         checked: index,
+        complete,
         brokenAt: entry.seq,
         reason: `hash mismatch at seq ${entry.seq}`,
       };
     }
     prev = entry.hash;
   }
-  return { valid: true, checked: entries.length };
+  return { valid: true, checked: entries.length, complete };
+}
+
+/**
+ * Verify a durable append-only audit log (JSONL) end to end: genesis head,
+ * sequence continuity and hash chain.
+ *
+ * This is stronger than {@link verifyGovernanceLog}: the file keeps the whole
+ * history, so a truncated head, a deleted middle line, a reordered entry or an
+ * edited field is detected — the in-memory buffer can only attest its window.
+ * A missing or empty file reports `valid: false` instead of silently passing.
+ */
+export function verifyGovernanceLogFile(filePath: string): ChainVerification {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch {
+    return { valid: false, checked: 0, complete: false, reason: 'audit log not found' };
+  }
+
+  const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) {
+    return { valid: false, checked: 0, complete: false, reason: 'audit log is empty' };
+  }
+
+  const entries: GovernanceLogEvent[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    try {
+      entries.push(JSON.parse(lines[index]) as GovernanceLogEvent);
+    } catch {
+      return {
+        valid: false,
+        checked: index,
+        complete: false,
+        reason: `unparsable audit log line ${index + 1}`,
+      };
+    }
+  }
+
+  if (entries[0].seq !== 1 || entries[0].prevHash !== GENESIS_HASH) {
+    return {
+      valid: false,
+      checked: 0,
+      complete: false,
+      brokenAt: entries[0].seq,
+      reason: `truncated head: first entry is seq ${entries[0].seq}`,
+    };
+  }
+
+  let prev = GENESIS_HASH;
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const expectedSeq = index + 1;
+    if (entry.seq !== expectedSeq) {
+      return {
+        valid: false,
+        checked: index,
+        complete: false,
+        brokenAt: entry.seq,
+        reason: `sequence gap at line ${index + 1}: seq ${entry.seq} (expected ${expectedSeq})`,
+      };
+    }
+    if (entry.prevHash !== prev) {
+      return {
+        valid: false,
+        checked: index,
+        complete: false,
+        brokenAt: entry.seq,
+        reason: `prevHash mismatch at seq ${entry.seq}`,
+      };
+    }
+    const expected = computeGovernanceHash(entry);
+    if (entry.hash !== expected) {
+      return {
+        valid: false,
+        checked: index,
+        complete: false,
+        brokenAt: entry.seq,
+        reason: `hash mismatch at seq ${entry.seq}`,
+      };
+    }
+    prev = entry.hash;
+  }
+
+  return { valid: true, checked: entries.length, complete: true };
 }
 
 /** Current chain head + anchor, for diagnostics and external attestation. */

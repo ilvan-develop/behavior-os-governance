@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendGovernanceLog,
   clearGovernanceLog,
@@ -7,9 +10,12 @@ import {
   GOVERNANCE_LOG_MAX,
   getGovernanceChainHead,
   getGovernanceLog,
+  getGovernanceLogSinkStatus,
+  initGovernanceLogSink,
   seedGovernanceLog,
   serializeGovernanceLog,
   verifyGovernanceLog,
+  verifyGovernanceLogFile,
 } from '../src/governance-log.js';
 
 function sampleInput(overrides: Partial<Parameters<typeof appendGovernanceLog>[0]> = {}) {
@@ -134,7 +140,7 @@ describe('governance log hash chain (tamper-evidence)', () => {
     expect(second.prevHash).toBe(first.hash);
     expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(second.hash).not.toBe(first.hash);
-    expect(verifyGovernanceLog()).toEqual({ valid: true, checked: 2 });
+    expect(verifyGovernanceLog()).toEqual({ valid: true, checked: 2, complete: true });
   });
 
   it('reports the first tampered event instead of the whole chain', () => {
@@ -192,5 +198,138 @@ describe('governance log hash chain (tamper-evidence)', () => {
     const [stored] = getGovernanceLog(1);
     expect(stored.hash).toBe(computeGovernanceHash(stored));
     expect(verifyGovernanceLog().valid).toBe(true);
+  });
+});
+
+describe('durable append-only audit sink', () => {
+  let dir: string;
+  let file: string;
+
+  function setup(): void {
+    dir = mkdtempSync(join(tmpdir(), 'bos-audit-'));
+    file = join(dir, 'audit.jsonl');
+  }
+
+  beforeEach(() => {
+    // deny/escalate events echo to the console; keep the test output readable.
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    initGovernanceLogSink(null);
+    clearGovernanceLog();
+    vi.restoreAllMocks();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('appends every event to the JSONL file and verifies the whole history', () => {
+    setup();
+    initGovernanceLogSink(file);
+
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    appendGovernanceLog(sampleInput({ action: 'b' }));
+    appendGovernanceLog(sampleInput({ detail: 'Deploy requires approval', action: 'bash' }));
+
+    const lines = readFileSync(file, 'utf8').trim().split(/\r?\n/);
+    expect(lines).toHaveLength(3);
+    expect(getGovernanceLogSinkStatus()).toEqual({ path: file, writeErrors: 0 });
+
+    const verification = verifyGovernanceLogFile(file);
+    expect(verification).toEqual({ valid: true, checked: 3, complete: true });
+  });
+
+  it('restores the log from the sink on init and keeps one continuous chain', () => {
+    setup();
+    initGovernanceLogSink(file);
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    appendGovernanceLog(sampleInput({ action: 'b' }));
+
+    // Simulate a restart: fresh memory, same sink.
+    clearGovernanceLog();
+    initGovernanceLogSink(file);
+
+    expect(getGovernanceLog(10)).toHaveLength(2);
+    const next = appendGovernanceLog(sampleInput({ action: 'c' }));
+
+    expect(next.seq).toBe(3);
+    expect(verifyGovernanceLogFile(file).valid).toBe(true);
+    expect(verifyGovernanceLogFile(file).checked).toBe(3);
+  });
+
+  it('does not clobber a sink-restored log with a shorter snapshot tail', () => {
+    setup();
+    initGovernanceLogSink(file);
+    for (let index = 0; index < 5; index += 1) {
+      appendGovernanceLog(sampleInput({ action: `a-${index}` }));
+    }
+    const tail = getGovernanceLog(2);
+
+    clearGovernanceLog();
+    initGovernanceLogSink(file);
+    expect(seedGovernanceLog(tail)).toBe(0);
+    expect(getGovernanceLog(10)).toHaveLength(5);
+  });
+
+  it('detects a truncated head', () => {
+    setup();
+    initGovernanceLogSink(file);
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    appendGovernanceLog(sampleInput({ action: 'b' }));
+
+    const lines = readFileSync(file, 'utf8').trim().split(/\r?\n/);
+    writeFileSync(file, `${lines.slice(1).join('\n')}\n`);
+
+    const verification = verifyGovernanceLogFile(file);
+    expect(verification.valid).toBe(false);
+    expect(verification.reason).toContain('truncated head');
+  });
+
+  it('detects a deleted middle line through the sequence gap', () => {
+    setup();
+    initGovernanceLogSink(file);
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+    appendGovernanceLog(sampleInput({ action: 'b' }));
+    appendGovernanceLog(sampleInput({ action: 'c' }));
+
+    const lines = readFileSync(file, 'utf8').trim().split(/\r?\n/);
+    writeFileSync(file, [lines[0], lines[2], ''].join('\n'));
+
+    const verification = verifyGovernanceLogFile(file);
+    expect(verification.valid).toBe(false);
+    expect(verification.reason).toContain('sequence gap');
+  });
+
+  it('detects an edited entry and reports a missing file', () => {
+    setup();
+    initGovernanceLogSink(file);
+    appendGovernanceLog(sampleInput({ action: 'a' }));
+
+    const [line] = readFileSync(file, 'utf8').trim().split(/\r?\n/);
+    const edited = JSON.parse(line) as Record<string, unknown>;
+    edited.detail = 'rewritten after the fact';
+    writeFileSync(file, `${JSON.stringify(edited)}\n`);
+
+    const tampered = verifyGovernanceLogFile(file);
+    expect(tampered.valid).toBe(false);
+    expect(tampered.reason).toContain('hash mismatch');
+
+    const missing = verifyGovernanceLogFile(join(dir, 'does-not-exist.jsonl'));
+    expect(missing.valid).toBe(false);
+    expect(missing.reason).toBe('audit log not found');
+  });
+
+  it('counts a failed sink write instead of breaking governance', () => {
+    setup();
+    initGovernanceLogSink(join(dir, 'nested', 'missing', 'audit.jsonl'));
+
+    expect(() => appendGovernanceLog(sampleInput({ action: 'a' }))).not.toThrow();
+
+    expect(getGovernanceLogSinkStatus()).toEqual({
+      path: join(dir, 'nested', 'missing', 'audit.jsonl'),
+      writeErrors: 1,
+    });
+    // The in-memory trail still records the event.
+    expect(getGovernanceLog(10)).toHaveLength(1);
   });
 });

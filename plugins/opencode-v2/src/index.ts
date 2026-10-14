@@ -18,12 +18,16 @@ import {
   appendGovernanceLog,
   exportGovernanceLog,
   GOVERNANCE_INSTANCE_ID,
+  GOVERNANCE_LOG_FILE_ENV,
   type GovernanceLogKind,
   type GovernanceLogOutcome,
   getGovernanceChainHead,
   getGovernanceLog,
+  getGovernanceLogSinkStatus,
+  initGovernanceLogSink,
   seedGovernanceLog,
   verifyGovernanceLog,
+  verifyGovernanceLogFile,
 } from './governance-log.js';
 import {
   detectOvertake,
@@ -186,7 +190,8 @@ async function restorePersistedState(ctx: Context): Promise<boolean> {
     if (restored) {
       storageRevision = revision;
       // Bring the persisted governance-log tail back into this process so the
-      // log continues across restarts.
+      // log continues across restarts. When a durable sink is enabled it already
+      // restored the log on init, so this is a no-op then (the sink wins).
       seedGovernanceLog((raw as { log?: unknown }).log);
       console.log('[Behavior-OS] Restored persisted state from ctx.storage');
     }
@@ -310,6 +315,11 @@ const PROTOCOL_STEPS: ProtocolStep[] = [
 export default Plugin.define({
   id: 'behavior-os',
   async setup(ctx: Context): Promise<void> {
+    // Opt-in durable, append-only audit sink (JSONL). When set, the file keeps
+    // the whole history and is the source of truth for the chain across
+    // restarts; without it the trail is in-memory + a bounded snapshot tail.
+    initGovernanceLogSink(process.env[GOVERNANCE_LOG_FILE_ENV] ?? null);
+
     const bos = getBehaviorOS();
 
     // Load DNA patterns from directory
@@ -848,17 +858,34 @@ export default Plugin.define({
       });
 
       // Tool 14: bos_verify_audit_trail — recompute the hash chain and report
-      // whether the retained governance log is intact (tamper-evident audit).
+      // whether the governance log is intact (tamper-evident audit). With a
+      // durable sink enabled it also verifies the whole persisted history.
       tools.add({
         name: 'bos_verify_audit_trail',
         description:
-          'Verify the SHA-256 hash chain of the governance log (tamper-evident audit trail)',
+          'Verify the SHA-256 hash chain of the governance log: the in-memory window plus, when BEHAVIOR_OS_AUDIT_LOG is set, the whole append-only JSONL history',
         input: { type: 'object', properties: {} },
         execute: async (): Promise<{ content: string }> => {
           const verification = verifyGovernanceLog();
           const chain = getGovernanceChainHead();
+          const sink = getGovernanceLogSinkStatus();
           return {
-            content: JSON.stringify({ ...verification, ...chain }, null, 2),
+            content: JSON.stringify(
+              {
+                ...verification,
+                ...chain,
+                sink: {
+                  enabled: sink.path !== null,
+                  path: sink.path,
+                  writeErrors: sink.writeErrors,
+                  // Whole-history verification: catches a truncated head, a
+                  // deleted line or a reordered entry. `null` when disabled.
+                  durable: sink.path ? verifyGovernanceLogFile(sink.path) : null,
+                },
+              },
+              null,
+              2,
+            ),
           };
         },
       });
