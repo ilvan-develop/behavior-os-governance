@@ -72,7 +72,8 @@ Processo determinístico para qualquer tarefa:
 ```
 
 Cada passo só avança quando a ferramenta correspondente corre
-(`PROTOCOL_TOOL_STEPS` em `packages/core/src/engine/behavior-os.ts`).
+(`PROTOCOL_STEPS` em `packages/core/src/engine/behavior-os.ts`; o resource MCP
+`behavioros://protocol/steps` serve a mesma lista).
 
 ---
 
@@ -133,7 +134,7 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 50 ficheiros de teste / 514 casos (`pnpm test`)
+- ✅ 51 ficheiros de teste / 521 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
 - ✅ Build ESM + DTS
 - ✅ v2.0.0

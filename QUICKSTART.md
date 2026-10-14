@@ -44,13 +44,13 @@ DNA patterns define the behavioral rules for AI agents. Each DNA includes:
 
 ### The 7-Step Protocol
 
-1. **Select DNA** (`bos_select_dna`) — choose the behavioural pattern
-2. **Confirm DNA rules** (`bos_list_dna`) — see what the pattern allows
-3. **Resolve state** (`bos_get_state`) — read the current protocol state
-4. **Create mission** (`bos_create_mission`) — define the task
-5. **Start mission** (`bos_start_mission`) — begin the mission
-6. **Run audit** (`bos_run_audit`) — validate compliance
-7. **Record learning** (`bos_record_learning`) — feed the learning engine
+1. **Select DNA Pattern** (`bos_select_dna`) — choose the behavioural pattern
+2. **Confirm DNA Rules** (`bos_list_dna`) — see what the pattern allows
+3. **Resolve State** (`bos_get_state`) — read the current protocol state
+4. **Create Mission** (`bos_create_mission`) — define the task
+5. **Start Mission** (`bos_start_mission`) — begin the mission
+6. **Run Audit** (`bos_run_audit`) — validate compliance
+7. **Record Learning** (`bos_record_learning`) — feed the learning engine
 
 ### Mission Lifecycle
 

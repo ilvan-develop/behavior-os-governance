@@ -16,17 +16,18 @@ does not use these files — it persists its state through `ctx.storage`
 ## Protocol steps
 
 The 7 steps and the tool that completes each one are defined once, in
-`packages/core/src/engine/behavior-os.ts` (`PROTOCOL_TOOL_STEPS`):
+`PROTOCOL_STEPS` (`packages/core/src/engine/behavior-os.ts`); the MCP resource
+`behavioros://protocol/steps` and the OpenCode plugin serve that same list:
 
 | Step | Tool | Name |
 |------|------|------|
-| 1 | `bos_select_dna` | Select DNA |
-| 2 | `bos_list_dna` | Confirm DNA rules |
-| 3 | `bos_get_state` | Resolve state |
-| 4 | `bos_create_mission` | Create mission |
-| 5 | `bos_start_mission` | Start mission |
-| 6 | `bos_run_audit` | Run audit |
-| 7 | `bos_record_learning` | Record learning |
+| 1 | `bos_select_dna` | Select DNA Pattern |
+| 2 | `bos_list_dna` | Confirm DNA Rules |
+| 3 | `bos_get_state` | Resolve State |
+| 4 | `bos_create_mission` | Create Mission |
+| 5 | `bos_start_mission` | Start Mission |
+| 6 | `bos_run_audit` | Run Audit |
+| 7 | `bos_record_learning` | Record Learning |
 
 ## Inspecting it
 

@@ -12,11 +12,14 @@
 | 6 | `bos_run_audit` | running the audit |
 | 7 | `bos_record_learning` | recording the learning event |
 
-The mapping is `PROTOCOL_TOOL_STEPS` in `packages/core/src/engine/behavior-os.ts`
-(`PROTOCOL_STEP_COUNT = 7`). The step advances **only** when the matching tool
-runs, never goes backwards, and every step after `bos_select_dna` requires a DNA
-to be selected first — so browsing tools cannot fake progress. The current step
-is surfaced by the plugin's `session.context` hook.
+The steps are declared once, as `PROTOCOL_STEPS` in
+`packages/core/src/engine/behavior-os.ts`; the tool→step mapping
+(`PROTOCOL_TOOL_STEPS`) and `PROTOCOL_STEP_COUNT = 7` are derived from it, and
+the MCP resource `behavioros://protocol/steps` renders that same list. A step
+advances **only** when the matching tool runs, never goes backwards, and every
+step after `bos_select_dna` requires a DNA to be selected first — so browsing
+tools cannot fake progress. The current step is surfaced by the plugin's
+`session.context` hook.
 
 ## DNA patterns
 

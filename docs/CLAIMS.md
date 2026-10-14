@@ -33,7 +33,7 @@ grep -c "z.enum(" packages/schemas/src/index.ts
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 50 ficheiros / 514 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 51 ficheiros / 521 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
 
 # Cada DNA tem de passar o DNASchema (22 casos: 1 lista + 21 padrões)
@@ -92,7 +92,7 @@ medido com `wc -l`.
 | "8 tabelas" (métrica antiga de persistência) | **9** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `code_edits`, `meta`. |
 | "Trilho de auditoria imutável" | Imutabilidade é um requisito de **armazenamento físico** (WORM), não de software. O que existe é deteção: hash-chain SHA-256 + sink append-only opt-in por ficheiro. Ver a secção "Cadeia de auditoria". |
 | "Learning engine não aplica correções automaticamente" | Já aplica, mas só com `config.codeEdit.enabled` **e** `apply: true` na chamada, `find` único, ficheiro dentro do workspace e (se houver votos) quórum aprovado. Sem isso, é sempre dry-run. |
-| Regras de protocolo "Display DNA Block" / "Resolve Truth" / "Delegate" | Retirado. Os passos são `PROTOCOL_TOOL_STEPS` (`bos_select_dna`, `bos_list_dna`, `bos_get_state`, `bos_create_mission`, `bos_start_mission`, `bos_run_audit`, `bos_record_learning`). O texto do resource MCP `behavioros://protocol/steps` dizia outra coisa e foi corrigido. |
+| Regras de protocolo "Display DNA Block" / "Resolve Truth" / "Delegate" | Retirado. Os passos são `PROTOCOL_STEPS` (`bos_select_dna`, `bos_list_dna`, `bos_get_state`, `bos_create_mission`, `bos_start_mission`, `bos_run_audit`, `bos_record_learning`). O texto do resource MCP `behavioros://protocol/steps` dizia outra coisa e foi corrigido; e uma vez que o texto é agora gerado a partir dessa constante (e o plugin reexporta-a), MCP, plugin e docs já não conseguem divergir no nome dos passos. |
 | Tools `bos_resolve_truth`, `bos_display_dna`, `bos_validate_dna`, `bos_get_patterns`, `bos_get_dna_pattern`, `bos_complete_mission`, `bos_fail_mission`, `bos_get_mission`, `bos_get_audit_report`, `bos_list_dna_patterns` | **Não existem.** Estavam citadas em `docs/API_REFERENCE.md`, `.cursor/rules/*.mdc`, `.windsurfrules` e `.github/copilot-instructions.md`; foram retiradas. Um teste (`docs-consistency.test.ts`) falha se voltarem a aparecer em documentação atual. |
 | `bos_list_missions` com filtros `status` / `type` / `priority` | Os filtros eram anunciados no schema e **ignorados** no handler; passaram a ser aplicados de facto (sobre a lista do motor, antes do `limit`). |
 | CLI "corre a governança" em `compile`/`validate`/`simulate`/`status`/`deploy`/`agent` | Cinco comandos imprimiam resultados fabricados. Agora: `compile`/`validate` carregam os YAML com `DNALoader`/`DNASchema` (exit 1 se falharem); `status`/`simulate`/`deploy`/`autonomous` resolvem o DNA ativo (`BEHAVIOROS_DNA_PATH` → `dnas/<padrão>.yaml`); `simulate` chama `evaluateGovernance()` real; `deploy` imprime o plano de gates do DNA e o resultado real de `preflightAction()`; `protocol` conta os passos presentes em `AgentState.stepHistory`. |
@@ -112,6 +112,10 @@ medido com `wc -l`.
 | "45+ tools MCP", "5.200+ testes", "12 padrões DNA", "22 engines" nas regras de editor | Retirado: 27 tools + 2 resources, 21 padrões, 11 motores. As contagens vivem em `docs/CLAIMS.md`. |
 | `plugins/opencode-v2/tests/plugin-basic.test.ts` ("OpenCode Plugin Structure") | O ficheiro assertava literais escritos à mão e **não importava o plugin**: passava mesmo que o plugin divergisse. Reescrito para importar o export real (`PROTOCOL_STEPS`) e ler `dnas/`. |
 | `.behavioros/README.md` "regenerado automaticamente" com `${STEP_2_STATUS}` | Nada o regenera e os placeholders nunca eram substituídos. Passou a documento estático com o mapa real dos passos e dos ficheiros de estado. |
+| `@behavior-os/mcp-server` `package.json`: `"description": "... 11 tools ..."` | O manifesto publicável anunciava **11** tools; o servidor regista **27**. Corrigido para "27 tools and 2 resources", com um teste (`mcp.test.ts`) que falha se o número deixar de bater com os `registerTool(` reais. |
+| Nomes dos 7 passos divergiam entre superfícies de código | O plugin servia "Delegate" para o passo 5 (`bos_start_mission`) enquanto o resource MCP `behavioros://protocol/steps` servia "Start Mission" — e o comentário do próprio plugin dizia que evitava "a copied literal" sendo ele a cópia. Agora existe **uma** definição, `PROTOCOL_STEPS` em `packages/core/src/engine/behavior-os.ts`; o resource MCP é **gerado** a partir dela e o plugin reexporta-a, pelo que a divergência deixou de ser possível por construção. `PROTOCOL_TOOL_STEPS` e `PROTOCOL_STEP_COUNT` passaram a ser derivados. |
+| `PROTOCOL_STEP_COUNT` documentado como "0-based index into this list" | A lista não existia: o valor era o literal `7`. Agora é `PROTOCOL_STEPS.length` e a lista existe (validada contra `ProtocolStepSchema` em `protocol-steps-catalog.test.ts`). |
+| `scripts/count-tests.mjs` | Removido: nada o corria (nem `package.json`, nem CI), contava testes por regex (o que contradiz o número medido pelo vitest), tinha ramos só do Jest (`xit`/`xtest`), deixava `fileDetails` com Promises por resolver e uma função morta. Uma segunda contagem divergente é uma fonte de afirmações falsas. |
 
 ## Gate pipeline
 
@@ -341,12 +345,13 @@ por isso são listadas em vez de corrigidas por texto.
 
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **50 ficheiros / 514 casos**,
+Medido com `pnpm test` (não aspiracional): **51 ficheiros / 521 casos**,
 `pnpm typecheck` 10/10 tarefas sem erros e `pnpm lint:check` (Biome) limpo. Os
 números vivem nos próprios testes, que falham se a contagem derivar:
-`packages/mcp-server/tests/mcp.test.ts` ("27 tools"),
+`packages/mcp-server/tests/mcp.test.ts` ("27 tools" + descrição do manifesto),
 `plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools"),
-`packages/core/tests/dnas.test.ts` (os 21 YAML passam `DNASchema`) e
-`packages/core/tests/docs-consistency.test.ts` (documentação atual não pode citar
-tools, comandos CLI, scripts `pnpm`, métodos de `BehaviorOS` ou variáveis de
-ambiente que não existam).
+`packages/core/tests/protocol-steps-catalog.test.ts` (os 7 `PROTOCOL_STEPS`
+passam `ProtocolStepSchema`), `packages/core/tests/dnas.test.ts` (os 21 YAML
+passam `DNASchema`) e `packages/core/tests/docs-consistency.test.ts`
+(documentação atual não pode citar tools, comandos CLI, scripts `pnpm`, métodos
+de `BehaviorOS` ou variáveis de ambiente que não existam).
