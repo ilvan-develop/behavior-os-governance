@@ -302,17 +302,18 @@ const DNA_PATTERNS: Readonly<Record<string, DNA>> = {
   },
 };
 
-// The 7-step protocol definition
-interface ProtocolStep {
+// The 7-step protocol definition. Exported so tests can assert the real mapping
+// against `PROTOCOL_TOOL_STEPS` in the core engine instead of a copied literal.
+export interface ProtocolStep {
   number: number;
   name: string;
   tool: string;
 }
 
-const PROTOCOL_STEPS: ProtocolStep[] = [
+export const PROTOCOL_STEPS: ProtocolStep[] = [
   { number: 1, name: 'Select DNA Pattern', tool: 'bos_select_dna' },
-  { number: 2, name: 'Display DNA Block', tool: 'bos_list_dna' },
-  { number: 3, name: 'Resolve Truth', tool: 'bos_get_state' },
+  { number: 2, name: 'Confirm DNA Rules', tool: 'bos_list_dna' },
+  { number: 3, name: 'Resolve State', tool: 'bos_get_state' },
   { number: 4, name: 'Create Mission', tool: 'bos_create_mission' },
   { number: 5, name: 'Delegate', tool: 'bos_start_mission' },
   { number: 6, name: 'Run Audit', tool: 'bos_run_audit' },

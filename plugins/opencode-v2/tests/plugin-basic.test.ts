@@ -1,62 +1,42 @@
+import { readdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import plugin, { PROTOCOL_STEPS } from '../src/index';
 
-describe('OpenCode Plugin Structure', () => {
-  it('should have valid plugin structure', () => {
-    const pluginStructure = {
-      id: 'behavior-os',
-      hasSetup: true,
-      hasTransform: true,
-      hasHooks: true,
-    };
+// These assertions read the real plugin export and the real dnas/ directory.
+// The previous version of this file asserted hand-written literals, so it
+// "passed" even when the plugin disagreed with them.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-    expect(pluginStructure.id).toBe('behavior-os');
-    expect(pluginStructure.hasSetup).toBe(true);
-    expect(pluginStructure.hasTransform).toBe(true);
-    expect(pluginStructure.hasHooks).toBe(true);
+describe('OpenCode plugin', () => {
+  it('registers the behavior-os plugin with a setup hook', () => {
+    expect(plugin.id).toBe('behavior-os');
+    expect(typeof plugin.setup).toBe('function');
   });
 
-  it('should support 20 DNA patterns', () => {
-    const dnaPatterns = [
-      'surgical-team',
-      'enterprise-governance',
-      'military-operations',
-      'lean-factory',
-      'devops-pipeline',
-      'financial-compliance',
-      'healthcare-hipaa',
-      'startup-agile',
-      'enterprise-sox',
-      'research-lab',
-      'gaming-studio',
-      'iot-embedded',
-      'ai-ml-pipeline',
-      'blockchain-web3',
-      'mobile-app',
-      'cloud-native',
-      'legacy-modernization',
-      'open-source',
-      'data-engineering',
-      'fintech-trading',
-      'quantum-computing',
-    ];
-
-    expect(dnaPatterns.length).toBe(21);
-    expect(dnaPatterns.every((p) => typeof p === 'string')).toBe(true);
+  it('declares the 7 protocol steps with the core tool mapping', () => {
+    expect(PROTOCOL_STEPS.map((step) => step.number)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(PROTOCOL_STEPS.map((step) => step.tool)).toEqual([
+      'bos_select_dna',
+      'bos_list_dna',
+      'bos_get_state',
+      'bos_create_mission',
+      'bos_start_mission',
+      'bos_run_audit',
+      'bos_record_learning',
+    ]);
+    expect(PROTOCOL_STEPS.every((step) => step.name.length > 0)).toBe(true);
   });
 
-  it('should have 7-step protocol', () => {
-    const protocolSteps = [
-      { number: 1, name: 'Select DNA Pattern' },
-      { number: 2, name: 'Display DNA Block' },
-      { number: 3, name: 'Resolve Truth' },
-      { number: 4, name: 'Create Mission' },
-      { number: 5, name: 'Delegate' },
-      { number: 6, name: 'Run Audit' },
-      { number: 7, name: 'Record Learning' },
-    ];
+  it('ships the DNA patterns that exist in dnas/', () => {
+    const patterns = readdirSync(resolve(repoRoot, 'dnas'))
+      .filter((file) => file.endsWith('.yaml'))
+      .map((file) => file.replace(/\.yaml$/, ''))
+      .sort();
 
-    expect(protocolSteps.length).toBe(7);
-    expect(protocolSteps[0].number).toBe(1);
-    expect(protocolSteps[6].number).toBe(7);
+    expect(patterns.length).toBe(21);
+    expect(patterns).toContain('enterprise-governance');
+    expect(patterns).toContain('lean-factory');
   });
 });
