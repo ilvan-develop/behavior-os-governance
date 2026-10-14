@@ -20,6 +20,7 @@ import type {
   MissionPriority,
   MissionType,
   PipelineRun,
+  ProtocolStep,
   RankedRecommendation,
   Vote,
 } from '@behavior-os/schemas';
@@ -131,22 +132,73 @@ export interface CodeFixApplyResult {
 }
 
 /**
- * The canonical 7-step agent protocol. `currentStep` tracks the next step the
- * agent should perform (0-based index into this list), advancing monotonically
- * as the corresponding tool is exercised.
+ * The canonical 7-step agent protocol — the single source of truth for step
+ * numbers, names and the tool that completes each step. The MCP resource
+ * `behavioros://protocol/steps` and the OpenCode plugin both serve this list,
+ * so the three can no longer disagree.
+ *
+ * `currentStep` tracks the next step the agent should perform (0-based index
+ * into this list), advancing monotonically as the corresponding tool runs.
  */
-export const PROTOCOL_STEP_COUNT = 7;
+export const PROTOCOL_STEPS: readonly ProtocolStep[] = [
+  {
+    number: 1,
+    name: 'Select DNA Pattern',
+    description: 'Choose the behavioural DNA that will govern the session.',
+    tool: 'bos_select_dna',
+    required: true,
+  },
+  {
+    number: 2,
+    name: 'Confirm DNA Rules',
+    description: 'Read the rules, quality gates and personas of the selected DNA.',
+    tool: 'bos_list_dna',
+    required: true,
+  },
+  {
+    number: 3,
+    name: 'Resolve State',
+    description: 'Read the current protocol state before acting.',
+    tool: 'bos_get_state',
+    required: true,
+  },
+  {
+    number: 4,
+    name: 'Create Mission',
+    description: 'Record the work as a mission so that it is auditable.',
+    tool: 'bos_create_mission',
+    required: true,
+  },
+  {
+    number: 5,
+    name: 'Start Mission',
+    description: 'Start the mission and begin its governed execution.',
+    tool: 'bos_start_mission',
+    required: true,
+  },
+  {
+    number: 6,
+    name: 'Run Audit',
+    description: 'Run the audit stages against the mission evidence.',
+    tool: 'bos_run_audit',
+    required: true,
+  },
+  {
+    number: 7,
+    name: 'Record Learning',
+    description: 'Record what the run taught the organisation.',
+    tool: 'bos_record_learning',
+    required: true,
+  },
+];
+
+/** Number of steps in {@link PROTOCOL_STEPS}. */
+export const PROTOCOL_STEP_COUNT = PROTOCOL_STEPS.length;
 
 /** Tool name → step number that is completed by running that tool. */
-const PROTOCOL_TOOL_STEPS: Readonly<Record<string, number>> = {
-  bos_select_dna: 1,
-  bos_list_dna: 2,
-  bos_get_state: 3,
-  bos_create_mission: 4,
-  bos_start_mission: 5,
-  bos_run_audit: 6,
-  bos_record_learning: 7,
-};
+const PROTOCOL_TOOL_STEPS: Readonly<Record<string, number>> = Object.fromEntries(
+  PROTOCOL_STEPS.map((step) => [step.tool, step.number]),
+);
 
 /** Current schema version of the persisted {@link BehaviorOSSnapshot}. */
 export const BEHAVIOROS_SNAPSHOT_VERSION = 1;
