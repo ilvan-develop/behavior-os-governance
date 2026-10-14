@@ -188,6 +188,10 @@ export const AuditReportSchema = z.object({
   id: z.string(),
   missionId: z.string(),
   agentId: z.string(),
+  /** DNA pattern active when the audit ran. */
+  dnaPattern: z.string().nullable().optional(),
+  /** Persona that authorized the audit, when the DNA defines one. */
+  persona: z.string().nullable().optional(),
   stages: z.array(AuditResultSchema),
   overall: z.enum(['pass', 'fail', 'warning']),
   summary: z.string(),
@@ -335,6 +339,14 @@ export const ProtocolStepSchema = z.object({
 export const AgentStateSchema = z.object({
   currentStep: z.number().default(0),
   selectedDna: z.string().nullable(),
+  /**
+   * Id of the governed agent acting in this session. Never a model name: it is
+   * either an explicitly registered agent id, or a DNA persona identity such as
+   * `persona:architect`, or `null` when no DNA/agent has been selected yet.
+   */
+  agentId: z.string().nullable().default(null),
+  /** Persona name/role selected from the active DNA, if any. */
+  persona: z.string().nullable().default(null),
   activeMission: z.string().nullable(),
   stepHistory: z.array(z.record(z.string(), z.unknown())),
   createdAt: z.string(),

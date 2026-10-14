@@ -4,7 +4,15 @@ import type { AuditReport, AuditResult, AuditStage } from '@behavior-os/schemas'
 
 export interface AuditOptions {
   missionId: string;
+  /**
+   * Governed agent id (`persona:<role>` when no agent is registered). Resolved
+   * by {@link BehaviorOS.runAudit} from the active DNA, never from a model name.
+   */
   agentId: string;
+  /** DNA pattern active when the audit ran. */
+  dnaPattern?: string | null;
+  /** Persona that authorized the audit, when the DNA defines one. */
+  persona?: string | null;
   stages?: AuditStage[];
   metadata?: Record<string, unknown>;
   simulate?: boolean;
@@ -41,6 +49,8 @@ export class AuditEngine {
       id: `audit-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       missionId: options.missionId,
       agentId: options.agentId,
+      dnaPattern: options.dnaPattern ?? null,
+      persona: options.persona ?? null,
       stages,
       overall,
       summary: this.generateSummary(stages, overall),
@@ -138,6 +148,8 @@ export class AuditEngine {
       id: `audit-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       missionId: options.missionId,
       agentId: options.agentId,
+      dnaPattern: options.dnaPattern ?? null,
+      persona: options.persona ?? null,
       stages,
       overall,
       summary: this.generateSummary(stages, overall),

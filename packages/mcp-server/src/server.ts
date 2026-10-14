@@ -296,6 +296,104 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'bos_set_agent',
+  {
+    description:
+      'Set the governed agent identity for this session (from a registered agent id, or a persona defined by the active DNA). Used to attribute audits/governance to a role instead of a model name.',
+    inputSchema: z.object({
+      id: z.string().optional().describe('Registered agent ID'),
+      name: z.string().optional().describe('Agent name (registers the agent when the id is new)'),
+      type: z
+        .enum(['orchestrator', 'developer', 'architect', 'reviewer', 'operator', 'analyst'])
+        .optional()
+        .describe('Agent type (defaults to operator)'),
+      capabilities: z.array(z.string()).optional().describe('Agent capabilities'),
+      persona: z
+        .string()
+        .optional()
+        .describe('Persona role/name from the active DNA (e.g. "architect")'),
+    }),
+    annotations: {
+      title: 'Set Agent',
+    },
+  },
+  async (input: {
+    id?: string;
+    name?: string;
+    type?: string;
+    capabilities?: string[];
+    persona?: string;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const identity = bos.setActiveAgent(input);
+      if (!identity) {
+        const personas = bos.getDNA()?.personas.map((p) => p.role) ?? [];
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no agent or persona matched. Available personas: ${personas.length ? personas.join(', ') : '(none — select a DNA first)'}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: 'text', text: JSON.stringify(identity, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_whoami',
+  {
+    description:
+      'Resolve the governed agent identity acting in this session (agent id, DNA pattern, persona, source) plus the personas/agents that can be selected',
+    inputSchema: z.object({}),
+    annotations: {
+      readOnlyHint: true,
+      title: 'Who Am I',
+    },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const identity = bos.resolveAgentIdentity();
+      const payload = {
+        ...identity,
+        personas: bos.getDNA()?.personas.map((p) => p.role) ?? [],
+        registeredAgents: bos.listAgents().map((a) => ({ id: a.id, name: a.name, type: a.type })),
+      };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // ============================================================
 // QUALITY TOOLS
 // ============================================================
@@ -303,10 +401,14 @@ server.registerTool(
 server.registerTool(
   'bos_run_audit',
   {
-    description: 'Run a full audit pipeline for a mission',
+    description:
+      'Run a full audit pipeline for a mission. agentId is optional and defaults to the session identity resolved from the active DNA (persona or registered agent) — never the model name.',
     inputSchema: z.object({
       missionId: z.string().describe('Mission ID'),
-      agentId: z.string().describe('Agent ID'),
+      agentId: z
+        .string()
+        .optional()
+        .describe('Explicit agent ID (defaults to the DNA-derived identity)'),
       stages: z.array(z.string()).optional().describe('Stages to audit'),
     }),
     annotations: {
@@ -319,7 +421,7 @@ server.registerTool(
     stages,
   }: {
     missionId: string;
-    agentId: string;
+    agentId?: string;
     stages?: string[];
   }) => {
     try {

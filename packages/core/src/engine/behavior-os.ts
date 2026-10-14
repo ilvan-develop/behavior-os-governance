@@ -1,6 +1,7 @@
 import type {
   Agent,
   AgentState,
+  AgentType,
   AuditReport,
   CodeFixProposal,
   CodeFixResult,
@@ -133,6 +134,34 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/** Agent id used when a session has not selected a DNA/persona or an agent. */
+export const UNASSIGNED_AGENT_ID = 'unassigned';
+
+/** Deterministic identity for a DNA persona acting without a registered agent. */
+export function personaIdentity(persona: string): string {
+  return `persona:${persona}`;
+}
+
+/**
+ * The governed agent acting in a session.
+ *
+ * `agentId` is always derivable from the DNA/persona or an explicitly
+ * registered agent — never from the model name — so an audit or governance
+ * entry can be traced back to a role that the DNA actually authorises.
+ */
+export interface AgentIdentity {
+  /** Id recorded in audits, governance decisions and the governance log. */
+  agentId: string;
+  /** Registered agent, when one is active. */
+  agent: Agent | null;
+  /** Persona selected from the active DNA. */
+  persona: string | null;
+  /** Active DNA pattern name. */
+  dnaPattern: string | null;
+  /** Where the identity came from. */
+  source: 'registered' | 'explicit' | 'persona' | 'unassigned';
+}
+
 export class BehaviorOS {
   private registry: EngineRegistry;
   private currentDNA: DNA | null = null;
@@ -148,6 +177,8 @@ export class BehaviorOS {
     this.agentState = {
       currentStep: 0,
       selectedDna: null,
+      agentId: null,
+      persona: null,
       activeMission: null,
       stepHistory: [],
       createdAt: new Date().toISOString(),
@@ -202,8 +233,128 @@ export class BehaviorOS {
     // Rebuild the gate pipeline so per-DNA quality gates reflect the new pattern.
     this.pipeline = null;
     this.agentState.selectedDna = dna.name;
+    // Selecting a DNA also selects its first persona as the acting identity, so
+    // audits and governance logs carry a DNA-derived agent rather than a model
+    // name. A registered agent bound to this DNA wins over the persona.
+    const registered = [...this.agents.values()].find((a) => a.dnaPattern === dna.name);
+    if (registered) {
+      this.agentState.agentId = registered.id;
+      this.agentState.persona = registered.name;
+    } else {
+      const first = dna.personas[0];
+      this.agentState.agentId = null;
+      this.agentState.persona = first ? first.role || first.name : null;
+    }
     this.agentState.updatedAt = new Date().toISOString();
     this.advanceProtocolStep('bos_select_dna');
+  }
+
+  // Governed agent identity -------------------------------------------------
+  /**
+   * Resolves the governed identity acting in this session.
+   *
+   * Priority: an activated registered agent → the DNA persona → `unassigned`.
+   * A model name is never used as an agent id: a session that has not selected
+   * a DNA/persona is reported as `unassigned` so the gap is visible instead of
+   * being masked by whatever model happens to be running.
+   */
+  resolveAgentIdentity(): AgentIdentity {
+    const dnaPattern = this.currentDNA?.name ?? null;
+    const persona = this.agentState.persona;
+    const active = this.agentState.agentId ? this.agents.get(this.agentState.agentId) : undefined;
+
+    if (active) {
+      return {
+        agentId: active.id,
+        agent: cloneJson(active),
+        persona,
+        dnaPattern,
+        source: 'registered',
+      };
+    }
+    if (this.agentState.agentId) {
+      // Activated explicitly but no longer registered (e.g. after a snapshot
+      // import): keep the id the session declared instead of silently dropping it.
+      return {
+        agentId: this.agentState.agentId,
+        agent: null,
+        persona,
+        dnaPattern,
+        source: 'explicit',
+      };
+    }
+    if (persona) {
+      return {
+        agentId: personaIdentity(persona),
+        agent: null,
+        persona,
+        dnaPattern,
+        source: 'persona',
+      };
+    }
+    return {
+      agentId: UNASSIGNED_AGENT_ID,
+      agent: null,
+      persona: null,
+      dnaPattern,
+      source: 'unassigned',
+    };
+  }
+
+  /**
+   * Activates the agent identity for the session, from a registered agent id or
+   * from a persona defined by the active DNA.
+   *
+   * Passing `name` (plus an unknown `id`) registers a new agent on the fly, so a
+   * host command/prompt can name the acting agent without a separate setup step.
+   * Returns the resolved identity, or `null` when nothing matched.
+   */
+  setActiveAgent(selector: {
+    id?: string;
+    name?: string;
+    type?: string;
+    capabilities?: string[];
+    persona?: string;
+  }): AgentIdentity | null {
+    if (selector.id && !this.agents.has(selector.id) && selector.name) {
+      this.registerAgent({
+        id: selector.id,
+        name: selector.name,
+        type: (selector.type as AgentType) ?? 'operator',
+        status: 'idle',
+        dnaPattern: this.currentDNA?.name ?? 'default',
+        capabilities: selector.capabilities ?? [],
+        currentMission: this.agentState.activeMission,
+        metrics: {
+          tasksCompleted: 0,
+          tasksFailed: 0,
+          avgResponseTime: 0,
+          governanceViolations: 0,
+        },
+      });
+    }
+
+    if (selector.id && this.agents.has(selector.id)) {
+      const agent = this.agents.get(selector.id) as Agent;
+      this.agentState.agentId = agent.id;
+      this.agentState.persona = agent.name;
+      this.agentState.updatedAt = new Date().toISOString();
+      return this.resolveAgentIdentity();
+    }
+
+    if (selector.persona) {
+      const wanted = selector.persona.toLowerCase();
+      const match = this.currentDNA?.personas.find(
+        (p) => p.role.toLowerCase() === wanted || p.name.toLowerCase() === wanted,
+      );
+      if (!match) return null;
+      this.agentState.agentId = null;
+      this.agentState.persona = match.role || match.name;
+      this.agentState.updatedAt = new Date().toISOString();
+      return this.resolveAgentIdentity();
+    }
+
+    return null;
   }
 
   // Protocol state machine --------------------------------------------------
@@ -377,9 +528,18 @@ export class BehaviorOS {
   }
 
   // Audit
+  /**
+   * Runs an audit attributed to the session's governed identity.
+   *
+   * `agentId` is optional on purpose: when omitted, the id is resolved with
+   * {@link resolveAgentIdentity} from the active DNA persona (or a registered
+   * agent), so an audit can never be attributed to the model name. An explicit
+   * id is honoured as-is, but the DNA pattern and persona are always stamped on
+   * the report so the entry stays traceable.
+   */
   runAudit(options: {
     missionId: string;
-    agentId: string;
+    agentId?: string;
     stages?: string[];
     simulate?: boolean;
   }): AuditReport {
@@ -387,9 +547,13 @@ export class BehaviorOS {
     const stages = options.stages?.length
       ? options.stages
       : ['lint', 'typecheck', 'security', 'coverage'];
+    const identity = this.resolveAgentIdentity();
 
     const report = auditEngine.run({
       ...options,
+      agentId: options.agentId ?? identity.agentId,
+      dnaPattern: identity.dnaPattern,
+      persona: identity.persona,
       stages: stages as import('@behavior-os/schemas').AuditStage[],
     });
     this.advanceProtocolStep('bos_run_audit');
@@ -788,7 +952,14 @@ export class BehaviorOS {
     if (!snapshot || snapshot.version !== BEHAVIOROS_SNAPSHOT_VERSION) return false;
     try {
       if (snapshot.agentState && typeof snapshot.agentState === 'object') {
-        this.agentState = cloneJson(snapshot.agentState);
+        const restored = cloneJson(snapshot.agentState) as AgentState;
+        // Snapshots written before agent identity existed have no `agentId`/
+        // `persona`; normalise them so the identity resolver always has a value.
+        this.agentState = {
+          ...restored,
+          agentId: restored.agentId ?? null,
+          persona: restored.persona ?? null,
+        };
       }
       this.currentDNA = snapshot.dna ?? null;
       // The rebuilt pipeline must reflect the restored DNA's quality gates.

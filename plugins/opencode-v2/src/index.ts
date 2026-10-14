@@ -616,7 +616,8 @@ export default Plugin.define({
       // Tool 7: bos_run_audit
       tools.add({
         name: 'bos_run_audit',
-        description: 'Run audit pipeline for a mission',
+        description:
+          'Run audit pipeline for a mission. `agentId` is optional and defaults to the session identity resolved from the active DNA (persona or registered agent) — never the model name.',
         input: {
           type: 'object',
           properties: {
@@ -624,20 +625,89 @@ export default Plugin.define({
             agentId: { type: 'string' },
             stages: { type: 'array', items: { type: 'string' } },
           },
-          required: ['missionId', 'agentId'],
+          required: ['missionId'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { missionId: string; agentId: string; stages?: string[] };
+          const params = input as { missionId: string; agentId?: string; stages?: string[] };
           const report = bos.runAudit({
             missionId: params.missionId,
             agentId: params.agentId,
             stages: params.stages,
           });
           await persistState(ctx);
-          recordLog('tool', 'info', 'bos_run_audit', `Audit complete: ${report.overall}`);
+          recordLog(
+            'tool',
+            'info',
+            'bos_run_audit',
+            `Audit complete: ${report.overall} by ${report.agentId}`,
+          );
           return {
-            content: `Audit complete: ${report.overall}`,
+            content: `Audit complete: ${report.overall} (agent: ${report.agentId}, dna: ${report.dnaPattern ?? 'none'})`,
           };
+        },
+      });
+
+      // Tool 26: bos_set_agent — pick the governed agent identity for the session
+      tools.add({
+        name: 'bos_set_agent',
+        description:
+          'Set the governed agent identity for this session: a registered agent id (optionally registering it via `name`/`type`) or a persona role from the active DNA',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            type: { type: 'string' },
+            capabilities: { type: 'array', items: { type: 'string' } },
+            persona: { type: 'string' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id?: string;
+            name?: string;
+            type?: string;
+            capabilities?: string[];
+            persona?: string;
+          };
+          const identity = bos.setActiveAgent(params);
+          if (!identity) {
+            const personas = bos.getDNA()?.personas.map((p) => p.role) ?? [];
+            return {
+              content: `No agent or persona matched. Available personas: ${
+                personas.length
+                  ? personas.join(', ')
+                  : '(none — select a DNA first with bos_select_dna)'
+              }`,
+            };
+          }
+          await persistState(ctx);
+          recordLog(
+            'tool',
+            'info',
+            'bos_set_agent',
+            `Active agent: ${identity.agentId} (${identity.source})`,
+          );
+          return { content: JSON.stringify(identity, null, 2) };
+        },
+      });
+
+      // Tool 27: bos_whoami — report the resolved governed identity
+      tools.add({
+        name: 'bos_whoami',
+        description:
+          'Resolve the governed agent identity acting in this session (agent id, DNA pattern, persona, source)',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          const identity = bos.resolveAgentIdentity();
+          const payload = {
+            ...identity,
+            personas: bos.getDNA()?.personas.map((p) => p.role) ?? [],
+            registeredAgents: bos
+              .listAgents()
+              .map((a) => ({ id: a.id, name: a.name, type: a.type })),
+          };
+          return { content: JSON.stringify(payload, null, 2) };
         },
       });
 
@@ -1135,7 +1205,9 @@ export default Plugin.define({
           metadata: event.metadata,
         });
         const decision = bos.evaluateGovernance(event.action, {
-          agent: event.agent ?? 'opencode-agent',
+          // Attribute to the governed identity (DNA persona / registered agent),
+          // never to the host's model-facing agent name.
+          agent: bos.resolveAgentIdentity().agentId,
           context,
         });
 
@@ -1201,7 +1273,7 @@ export default Plugin.define({
           metadata: asRecord(eventTyped.input),
         });
         const decision = bos.evaluateGovernance(toolName, {
-          agent: eventTyped.agent ?? 'opencode-agent',
+          agent: bos.resolveAgentIdentity().agentId,
           context,
         });
         if (decision.verdict === 'escalate') {
@@ -1315,10 +1387,16 @@ export default Plugin.define({
         const stepLine = nextStep
           ? `Protocol step ${currentState.currentStep + 1}/${PROTOCOL_STEPS.length}: ${nextStep.name} (use ${nextStep.tool})`
           : `Protocol complete (${PROTOCOL_STEPS.length}/${PROTOCOL_STEPS.length})`;
+        // Surface the governed identity so the model attributes audits and
+        // governance entries to a DNA-derived role instead of its model name.
+        const identity = bos.resolveAgentIdentity();
         event.system.push({
           type: 'text',
           text: [
             `[Behavior-OS] Active DNA: ${currentState.selectedDna}`,
+            `Acting agent: ${identity.agentId}${
+              identity.persona ? ` (persona: ${identity.persona})` : ''
+            } [${identity.source}] — use it as \`agentId\`, never the model name`,
             stepLine,
             `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
           ].join('\n'),

@@ -177,8 +177,10 @@ const EXPECTED_TOOLS = [
   'bos_record_learning',
   'bos_run_audit',
   'bos_select_dna',
+  'bos_set_agent',
   'bos_start_mission',
   'bos_verify_audit_trail',
+  'bos_whoami',
 ];
 
 describe('behavior-os plugin registration', () => {
@@ -191,7 +193,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 25 bos_* tools', async () => {
+  it('registers exactly the 27 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -203,7 +205,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(25);
+    expect(addedTools).toHaveLength(27);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -230,7 +232,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(25);
+    expect(addedTools).toHaveLength(27);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -647,5 +649,65 @@ describe('behavior-os governance log', () => {
     expect(recs.length).toBeGreaterThanOrEqual(1);
     expect(recs[0].score).toBeGreaterThan(0);
     expect(recs[0].text).toContain('failure');
+  });
+
+  it('bos_whoami reports the DNA-derived identity instead of a model name', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'lean-factory' });
+
+    const after = JSON.parse((await runTool(addedTools, 'bos_whoami', {})).content) as {
+      agentId: string;
+      persona: string;
+      dnaPattern: string;
+      source: string;
+      personas: string[];
+    };
+    expect(after.persona).toBe('operator');
+    expect(after.agentId).toBe(`persona:${after.persona}`);
+    expect(after.dnaPattern).toBe('Lean Factory');
+    expect(after.source).toBe('persona');
+    expect(after.personas).toContain('operator');
+  });
+
+  it('bos_run_audit defaults to the DNA identity when agentId is omitted', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'lean-factory' });
+    const report = await runTool(addedTools, 'bos_run_audit', { missionId: 'mission-1' });
+
+    expect(report.content).toContain('agent: persona:operator');
+    expect(report.content).toContain('dna: Lean Factory');
+  });
+
+  it('bos_set_agent switches the acting persona from the active DNA', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'lean-factory' });
+
+    const unknown = await runTool(addedTools, 'bos_set_agent', { persona: 'compliance' });
+    expect(unknown.content).toContain('No agent or persona matched');
+    expect(unknown.content).toContain('operator');
+
+    const identity = JSON.parse(
+      (await runTool(addedTools, 'bos_set_agent', { persona: 'Process Engineer' })).content,
+    ) as { agentId: string; persona: string; source: string };
+    expect(identity.agentId).toBe('persona:operator');
+    expect(identity.source).toBe('persona');
+
+    const registered = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_set_agent', {
+          id: 'agent-audit',
+          name: 'Nightly Auditor',
+          type: 'reviewer',
+        })
+      ).content,
+    ) as { agentId: string; source: string; agent: { name: string } | null };
+    expect(registered.agentId).toBe('agent-audit');
+    expect(registered.source).toBe('registered');
+    expect(registered.agent?.name).toBe('Nightly Auditor');
   });
 });
