@@ -263,8 +263,9 @@ The system ships with **seven** real, measurable algorithms (not synthetic
 
 ## Performance Characteristics
 
-No benchmarks are checked into the repository. The numbers below are **design
-targets**, not measurements; verify locally with `pnpm benchmark`.
+No benchmarks are checked into the repository: they are **design targets**, not
+measurements. There is no benchmark script — measure whatever you need with your
+own harness (vitest or a plain `node` script importing the built package).
 
 - Schema validation: < 1ms per operation (target)
 - Governance evaluation: < 10ms for 100 rules (target)

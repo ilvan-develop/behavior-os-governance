@@ -28,8 +28,8 @@ const decision = bos.evaluateGovernance('deploy-production', {
   scope: 'production',
 })
 
-// Create mission
-const mission = await bos.createMission({
+// Create mission (synchronous — no await)
+const mission = bos.createMission({
   title: 'Implement payment module',
   type: 'feature',
   priority: 'high',
@@ -157,31 +157,31 @@ interface AgentState {
 ## CLI Usage
 
 ```bash
-# Initialize project
+# Initialize project (creates dnas/, .behavioros/state.json, .mcp.json)
 npx @behavior-os/cli init --directory ./my-project --dna enterprise-governance
 
-# Compile DNA patterns
+# Parse and validate every DNA pattern in dnas/
 npx @behavior-os/cli compile
 
-# Validate configuration
+# Validate the project layout plus every DNA pattern
 npx @behavior-os/cli validate
 
-# Check system status
+# Show engine status plus .behavioros/state.json
 npx @behavior-os/cli status
 
-# Detect behavioral drift
+# Compare dnas/*.yaml with .behavioros/baseline.json
 npx @behavior-os/cli diff
 
-# Simulate governance decisions
+# Evaluate one action against the loaded DNA rules
 npx @behavior-os/cli simulate --action deploy --agent devops-agent
 
-# Deploy with quality gates
+# Print the deployment gate plan + a real pre-flight (does not deploy)
 npx @behavior-os/cli deploy
 
-# Check protocol compliance
-npx @behavior-os/cli protocol check
+# Check the 7 steps against the local state file
+npx @behavior-os/cli protocol
 
-# Compare behavior baselines
+# Compare selectedDna/currentStep with the baseline
 npx @behavior-os/cli drift-check
 ```
 
@@ -204,21 +204,16 @@ Add to `.mcp.json`:
 ```
 
 ### OpenCode v2
-Add to `opencode.json`:
+
+Inside this repository OpenCode discovers `.opencode/plugins/behavioros.ts`, which
+re-exports the built package. The MCP server is deliberately **not** registered in
+OpenCode, so a session sees one tool catalog (the plugin's 29 `bos_*` tools):
+
 ```json
+// opencode.json
 {
-  "mcpServers": {
-    "behavioros": {
-      "command": "node",
-      "args": ["packages/mcp-server/dist/server.js"]
-    }
-  },
-  "plugins": [
-    {
-      "path": "./plugins/opencode-v2",
-      "enabled": true
-    }
-  ]
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md"]
 }
 ```
 

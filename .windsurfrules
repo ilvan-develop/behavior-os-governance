@@ -2,33 +2,42 @@
 
 ## 7-Step Protocol
 
-### Step 1: Select DNA Pattern
-Use `bos_select_dna` to choose governance pattern.
+The step names and the tool that completes each step are fixed by
+`PROTOCOL_TOOL_STEPS` in `packages/core/src/engine/behavior-os.ts`.
 
-### Step 2: Display DNA Block
-Show selected DNA for verification.
+### Step 1: Select DNA
+Use `bos_select_dna` with a pattern name from `dnas/*.yaml` (21 patterns).
 
-### Step 3: Resolve Truth
-Verify requirements with `bos_resolve_truth`.
+### Step 2: Confirm DNA rules
+Use `bos_list_dna` to list the available patterns and their rule counts.
 
-### Step 4: Create Mission
-Define mission with `bos_create_mission`.
+### Step 3: Resolve state
+Use `bos_get_state` to read the current protocol state.
 
-### Step 5: Delegate
-Execute work through delegation.
+### Step 4: Create mission
+Define the mission with `bos_create_mission`.
 
-### Step 6: Run Audit
-Validate with `bos_run_audit`.
+### Step 5: Start mission
+Start it with `bos_start_mission`.
 
-### Step 7: Record Learning
-Capture insights with `bos_record_learning`.
+### Step 6: Run audit
+Run `bos_run_audit`. The audit is never attributed to a model name: the identity
+is a registered agent, an explicit agent id, or the DNA persona
+(`persona:<role>`), otherwise `unassigned`.
+
+### Step 7: Record learning
+Capture the insight with `bos_record_learning`.
 
 ## Rules
 
-- Read `.behavioros/state.json` at session start
-- Update state after each step
-- Select DNA before every task
-- Show DNA block to human
-- Delegate all file operations
-- Run audit before completion
-- Record learning after every mission
+- Select a DNA with `bos_select_dna` before any governed action. Without a DNA
+  the pipeline reports its gates as `skipped` — it is not an implicit allow.
+- Read state with `bos_get_state`; the OpenCode plugin also restores persisted
+  state automatically from `ctx.storage`.
+- Run the audit (`bos_run_audit`) before declaring work complete.
+- Record a learning (`bos_record_learning`) at the end of a mission.
+- File changes are **not** delegated: they go through the optional fail-closed
+  `bos_code_edit` path (dry-run unless code editing is enabled **and**
+  `apply: true`, optionally gated by votes).
+
+Reference: `docs/PROTOCOL.md`, `docs/CLAIMS.md`.

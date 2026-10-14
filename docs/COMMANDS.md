@@ -1,218 +1,81 @@
 # Behavior-OS Command Reference
 
-## Core Commands
+Two surfaces expose the engine: the **MCP server** (`packages/mcp-server`, 27
+tools + 2 resources) and the **OpenCode plugin** (`plugins/opencode-v2`, the same
+27 tools plus `bos_get_log` and `bos_verify_audit_trail`). Names and arguments
+below are the ones actually registered in `packages/mcp-server/src/server.ts`.
 
-### DNA Management
-```bash
-# Load a DNA pattern
-bos_select_dna --pattern surgical-team
+For the CLI (`behavioros init|compile|validate|status|diff|simulate|deploy|ecosystem|agent|autonomous|protocol|drift-check`)
+see [`CLI.md`](./CLI.md).
 
-# Display current DNA
-bos_display_dna
+## Governance
 
-# Validate DNA
-bos_validate_dna --pattern ./path/to/dna.yaml
-```
+| Tool | Arguments |
+|------|-----------|
+| `bos_evaluate_governance` | `action`, `agent` (required); `scope?`, `context?` |
+| `bos_select_dna` | `pattern` |
+| `bos_list_dna` | — |
+| `bos_preflight` | `action`, `agentId`; `context?` |
+| `bos_check_quality` | `metrics` (number map) |
+| `bos_decide` | `subject`, `votes`, `policy`; `quorum?`, `missionId?` |
 
-### Mission Management
-```bash
-# Create a mission
-bos_create_mission --title "Deploy feature" --type feature --priority high
+## Missions & identity
 
-# Start a mission
-bos_start_mission --id <mission-id>
+| Tool | Arguments |
+|------|-----------|
+| `bos_create_mission` | `title`, `type`, `priority`; `description?`, `tags?` |
+| `bos_start_mission` | `missionId` |
+| `bos_list_missions` | `status?`, `type?`, `priority?`, `limit?` |
+| `bos_set_agent` | `type`, `persona`; `id?`, `name?`, `capabilities?` |
+| `bos_whoami` | — |
 
-# Complete a mission
-bos_complete_mission --id <mission-id> --result "Success"
+## Audit, state & reporting
 
-# Fail a mission
-bos_fail_mission --id <mission-id> --reason "Something went wrong"
+| Tool | Arguments |
+|------|-----------|
+| `bos_run_audit` | `missionId`, `agentId`; `stages?` |
+| `bos_get_state` | — |
+| `bos_get_status` | — |
+| `bos_list_audit_reports` | `limit?` (requires persistence) |
+| `bos_list_pipeline_runs` | `limit?` (requires persistence) |
+| `bos_list_decisions` | `limit?` (requires persistence) |
 
-# List missions
-bos_list_missions --status active
-```
+## Learning, evolution & recommendations
 
-### Governance
-```bash
-# Evaluate governance rule
-bos_evaluate_governance --action deploy --agent devops-agent --context production=true
+| Tool | Arguments |
+|------|-----------|
+| `bos_record_learning` | `type`, `source`, `content`, `impact`; `relatedMission?` |
+| `bos_get_insights` | `limit?` |
+| `bos_recommendations` | `limit?`, `ageLimitHours?` |
+| `bos_evolution` | `minConfidence?`, `apply?`, `votes?`, `policy?` |
+| `bos_drift` | `dnaA`, `dnaB` |
 
-# Check quality gates
-bos_check_quality --metrics test_coverage=90 lint_errors=0
-```
+## Code fixes & governed editing
 
-### Audit
-```bash
-# Run audit
-bos_run_audit --mission <mission-id> --agent <agent-id>
+| Tool | Arguments |
+|------|-----------|
+| `bos_code_fixes` | `minConfidence?` |
+| `bos_apply_code_fixes` | `minConfidence?`, `apply?`, `votes?`, `policy?` |
+| `bos_list_code_fixes` | `limit?` |
+| `bos_code_edit` | `file`, `find`, `replace`; `apply?`, `expectedBeforeHash?`, `missionId?`, `applyVotes?`, `policy?` |
+| `bos_list_code_edits` | `limit?` |
 
-# Get audit report
-bos_get_audit_report --id <audit-id>
-```
+## Plugin-only tools
 
-### Learning
-```bash
-# Record learning
-bos_record_learning --type insight --source post-mortem --content "Learned X" --impact high
-```
+| Tool | Arguments |
+|------|-----------|
+| `bos_get_log` | `limit?` |
+| `bos_verify_audit_trail` | — |
 
-## CLI Commands
+## Notes
 
-### Init
-```bash
-# Initialize a new Behavior-OS project
-npx @behavior-os/cli init --directory ./my-project
+- `bos_run_audit` never attributes the audit to a model name: the identity is a
+  registered agent, an explicitly set agent id, or the DNA persona
+  (`persona:<role>`), otherwise `unassigned`.
+- `bos_code_edit` is a dry-run unless code editing is enabled
+  (`BEHAVIOROS_CODE_EDIT=true` in the MCP server, `BEHAVIOR_OS_CODE_EDIT=true` in
+  the plugin) **and** `apply: true`.
+- Tools documented as "requires persistence" return empty lists when no `Store`
+  is attached (SQLite via `persistence.path`, or Postgres).
 
-# Options:
-#   --project-name      Name of the project (default: "my-project")
-#   --dna-pattern       DNA pattern to use (default: "enterprise-governance")
-#   --framework         Framework to scaffold (default: "none")
-#   --no-git            Skip git initialization
-```
-
-### Compile
-```bash
-# Compile DNA patterns
-npx @behavior-os/cli compile --patterns ./dnas/*.yaml
-
-# Options:
-#   --output            Output directory (default: "./dist")
-#   --watch             Watch for changes
-#   --validate          Validate before compile
-```
-
-### Validate
-```bash
-# Validate a DNA pattern
-npx @behavior-os/cli validate --pattern ./dnas/surgical-team.yaml
-
-# Validate all patterns
-npx @behavior-os/cli validate --all
-```
-
-### Status
-```bash
-# Check system status
-npx @behavior-os/cli status
-
-# Check protocol compliance
-npx @behavior-os/cli protocol check
-```
-
-### Diff
-```bash
-# Compare DNA versions
-npx @behavior-os/cli diff --base ./dnas/v1.yaml --current ./dnas/v2.yaml
-```
-
-### Simulate
-```bash
-# Simulate agent behavior
-npx @behavior-os/cli simulate --dna surgical-team --agent devops-agent --actions deploy,test
-
-# Options:
-#   --steps            Number of simulation steps (default: 10)
-```
-
-### Deploy
-```bash
-# Deploy with governance checks
-npx @behavior-os/cli deploy --target production --verify
-
-# Options:
-#   --verify           Run quality gates before deploy
-#   --dry-run          Preview deploy without executing
-```
-
-### Protocol
-```bash
-# Check protocol compliance
-npx @behavior-os/cli protocol check
-
-# Show protocol status
-npx @behavior-os/cli protocol status
-```
-
-### Dashboard
-```bash
-# Start observability dashboard
-npx @behavior-os/cli dashboard --port 3000
-```
-
-### Config
-```bash
-# Initialize configuration
-npx @behavior-os/cli config init
-
-# Get configuration
-npx @behavior-os/cli config get
-
-# Set configuration
-npx @behavior-os/cli config set key value
-```
-
-### Check
-```bash
-# Run comprehensive health check
-npx @behavior-os/cli check
-
-# Check dependencies
-npx @behavior-os/cli check deps
-```
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BOS_LOG_LEVEL` | Logging level | info |
-| `BOS_DATA_DIR` | Data directory | ~/.behavioros |
-| `BOS_ENFORCE` | Governance mode | PERMISSIVE |
-| `BOS_PORT` | Dashboard port | 3000 |
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Generic error |
-| 2 | Validation failed |
-| 3 | Governance block |
-| 4 | Configuration error |
-
-## Examples
-
-### Quick Start
-```bash
-# 1. Initialize
-npx @behavior-os/cli init --project-name my-app --dna-pattern surgical-team
-
-# 2. Create mission
-npx @behavior-os/cli create-mission --title "Setup API" --type feature --priority high
-
-# 3. Run protocol
-npx @behavior-os/cli protocol check
-
-# 4. Check status
-npx @behavior-os/cli status
-```
-
-### Development Workflow
-```bash
-# While developing
-npx @behavior-os/cli compile --watch
-
-# Test governance
-npx @behavior-os/cli simulate --dna enterprise-governance --actions deploy,rollback
-
-# Run full check
-npx @behavior-os/cli check --all
-```
-
-### Production Deployment
-```bash
-# Deploy with verification
-npx @behavior-os/cli deploy --target production --verify --env prod
-
-# Check post-deployment
-npx @behavior-os/cli status --verbose
-```
+Verified inventory: [`CLAIMS.md`](./CLAIMS.md).

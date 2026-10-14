@@ -1,186 +1,193 @@
 # Behavior-OS CLI Reference
 
+The CLI is `@behavior-os/cli` (binary `behavioros`). Every command below exists in
+`packages/cli/src/cli.ts`; options are listed exactly as implemented.
+
+```bash
+npx @behavior-os/cli <command> [options]
+# or, in this repo:
+pnpm cli:init
+```
+
 ## Commands
 
+| Command | Purpose |
+|---------|---------|
+| `init` | Scaffold a project (dirs, `.behavioros/state.json`, `.mcp.json`, sample DNA) |
+| `compile` | Parse and validate **every** `dnas/*.yaml` against the DNA schema |
+| `validate` | Validate the project layout plus every DNA pattern |
+| `status` | Engine status (DNA, governance level, missions, agents) + `.behavioros/state.json` |
+| `diff` | Compare `dnas/*.yaml` against `.behavioros/baseline.json` |
+| `simulate` | Evaluate one action against the loaded DNA rules |
+| `deploy` | Print the deployment gate plan (does not run the gates) |
+| `ecosystem` | Report what can be read from disk (DNA patterns, verdicts) |
+| `agent` | Show the local `.behavioros/state.json` summary |
+| `autonomous` | Dry-run the 7-step protocol on a task (no work executed) |
+| `protocol` | Check the 7 steps against the local state file |
+| `drift-check` | Compare `selectedDna`/`currentStep` with the baseline |
+
 ### init
-Initialize a new Behavior-OS project.
 
 ```bash
 npx @behavior-os/cli init [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Target directory (default: ".")
-- `--dna <pattern>` - Initial DNA pattern (default: "enterprise-governance")
+- `-d, --directory <path>` — target directory (default `.`)
+- `--dna <pattern>` — initial DNA pattern (default `enterprise-governance`)
 
-**Example:**
-```bash
-npx @behavior-os/cli init --directory ./my-project --dna surgical-team
-```
+Creates `dnas/`, `src/`, `tests/`, `.behavioros/`, writes
+`.behavioros/state.json`, `.mcp.json` and a **minimal sample** pattern at
+`dnas/<pattern>.yaml`. The sample is a scaffold, not the shipped pattern: copy the
+real one from this repo's `dnas/` if you want the full rule set.
 
 ### compile
-Compile DNA patterns and validate configuration.
 
 ```bash
 npx @behavior-os/cli compile [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
+
+Loads every `dnas/*.yaml` through `DNALoader` (the same Zod schema the engine
+uses) and exits `1` if any pattern is invalid or `dnas/` is missing.
 
 ### validate
-Validate DNA configurations and project structure.
 
 ```bash
 npx @behavior-os/cli validate [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
+
+Checks `.behavioros/state.json` (required), `.mcp.json` (optional, reported as
+`○` when absent) and `dnas/`, then validates every pattern. Exits `1` on failure.
 
 ### status
-Show system status and health information.
 
 ```bash
 npx @behavior-os/cli status [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
+- `--dna <pattern>` — DNA pattern to load (default `enterprise-governance`)
+
+Prints the engine status (`getStatus()`: DNA, governance level, mission/agent
+counts) and the local state file. Throughput/health metrics are not simulated.
 
 ### diff
-Detect behavioral drift between DNA versions.
 
 ```bash
 npx @behavior-os/cli diff [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
+
+First run writes the current patterns to `.behavioros/baseline.json`; later runs
+report patterns that are new or whose content changed.
 
 ### simulate
-Simulate governance decisions for testing.
 
 ```bash
 npx @behavior-os/cli simulate [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
-- `--action <action>` - Action to simulate (default: "deploy")
-- `--agent <agent>` - Agent ID (default: "test-agent")
+- `--action <action>` — action to evaluate (default `deploy`)
+- `--agent <agent>` — agent id (default `test-agent`)
+- `--dna <pattern>` — DNA pattern to load (default `enterprise-governance`)
+- `-d, --directory <path>` — project directory (default `.`)
 
-**Example:**
-```bash
-npx @behavior-os/cli simulate --action deploy-production --agent devops-1
-```
+Without a loadable DNA there are no rules to evaluate, and the command says so.
 
 ### deploy
-Deploy with quality gates validation.
 
 ```bash
 npx @behavior-os/cli deploy [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
-- `--mission-id <id>` - Mission ID to deploy
+- `--mission-id <id>` — mission this deployment belongs to
+- `--dna <pattern>` — DNA pattern to load (default `enterprise-governance`)
+- `-d, --directory <path>` — project directory (default `.`)
+
+Prints the gate plan (`governance` pre gate + one `quality:<id>` post gate per DNA
+quality gate) and runs the **real** `governance` pre-flight for the `deploy`
+action, exiting `1` when it is blocked. It does not run lint, typecheck, security
+or coverage — run those yourself (`pnpm lint:check && pnpm typecheck && pnpm test`).
 
 ### ecosystem
-Show ecosystem component information.
 
 ```bash
-npx @behavior-os/cli ecosystem
+npx @behavior-os/cli ecosystem [options]
 ```
 
-**Output:**
-- Registered skills count
-- Available MCP servers
-- Built-in DNA patterns
-- Design systems available
+- `-d, --directory <path>` — project directory (default `.`)
+
+Lists the DNA patterns actually present on disk and the four verdicts
+(`allow | deny | escalate | transform`) from the schema.
 
 ### agent
-Manage agents in the system.
 
 ```bash
-npx @behavior-os/cli agent [command]
+npx @behavior-os/cli agent [options]
 ```
 
-**Commands:**
-- `list` - List all agents
-- `register` - Register a new agent
-- `metrics` - Get agent metrics
+- `-d, --directory <path>` — project directory (default `.`)
+
+Shows the DNA pattern, active mission and step from `.behavioros/state.json`.
+Agent registration lives in the SDK/engine (`registerAgent`), not in the CLI.
 
 ### autonomous
-Run fully autonomous task with protocol enforcement.
 
 ```bash
-npx @behavior-os/cli autonomous run [options]
+npx @behavior-os/cli autonomous [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
-- `-t, --task <task>` - Task description (required)
+- `-t, --task <task>` — task description (**required**)
+- `--dna <pattern>` — DNA pattern to use (default `enterprise-governance`)
+- `--priority <level>` — mission priority (default `medium`)
+- `-d, --directory <path>` — project directory (default `.`)
 
-**Example:**
-```bash
-npx @behavior-os/cli autonomous run --task "Implement user authentication"
-```
+Runs the protocol steps it can perform non-interactively (1, 4, 5, 6, 7), with a
+**simulated** audit (`simulate: true`); steps 2–3 are interactive
+(`bos_list_dna`/`bos_get_state`). It updates `.behavioros/state.json` when that
+file exists. No work is executed on your behalf.
 
 ### protocol
-Check 7-step protocol compliance.
 
 ```bash
-npx @behavior-os/cli protocol check [options]
+npx @behavior-os/cli protocol [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
 
-**Output:**
-- Protocol step completion status
-- Current step indicator
-- Pending actions
+Prints the 7 steps and whether each appears in the local state file. Live protocol
+state lives in the host (the OpenCode plugin stores it via `ctx.storage`).
 
 ### drift-check
-Compare current behavior vs baseline.
 
 ```bash
 npx @behavior-os/cli drift-check [options]
 ```
 
-**Options:**
-- `-d, --directory <path>` - Project directory (default: ".")
+- `-d, --directory <path>` — project directory (default `.`)
 
-## Environment Variables
+Compares `selectedDna` and `currentStep` in `.behavioros/state.json` against
+`.behavioros/baseline.json` (created by `diff`). It is a subset of the
+`DriftEngine` (rules/gates comparison) exposed by `bos_drift`.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BEHAVIOROS_DNA_PATH` | Path to DNA file | "./dnas/enterprise-governance.yaml" |
-| `BEHAVIOROS_PROJECT` | Project identifier | undefined |
-| `BEHAVIOROS_LOG_LEVEL` | Logging level | "info" |
-| `BEHAVIOROS_STATE_DIR` | State directory | ".behavioros" |
+## Exit codes
 
-## Exit Codes
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | `dnas/` missing, invalid DNA, failed validation, blocked `deploy` pre-flight, or `autonomous` without `--task` |
 
-| Code | Description |
-|------|-------------|
-| 0 | Success |
-| 1 | Validation failed |
-| 2 | Configuration error |
-| 3 | Runtime error |
+## Environment variables
 
-## Hooks
+The CLI reads exactly one variable:
 
-### Pre-flight Checks
-Before any command, the CLI performs:
-1. Node.js version check (>= 22)
-2. pnpm version check (>= 9)
-3. DNA file validation
-4. State file existence
+| Variable | Purpose |
+|----------|---------|
+| `BEHAVIOROS_DNA_PATH` | DNA file loaded before `dnas/<pattern>.yaml` (used by `status`, `deploy`, `simulate`, `autonomous`) |
 
-### Post-flight Actions
-After command execution:
-1. State file update
-2. Audit log entry
-3. Learning event capture (if applicable)
+There are no pre-flight/post-flight hooks (no pnpm version check, no automatic
+audit-log or learning capture) — those are not implemented.

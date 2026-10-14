@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-483-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-514-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -27,14 +27,14 @@ Behavior-OS is a **behavioral governance framework** that gives AI agent teams D
 # Install
 pnpm install
 
+# Build all packages (the CLI in `cli:init` runs from dist/)
+pnpm build
+
 # Initialize project
 pnpm cli:init -- --directory ./my-project
 
 # Run tests
 pnpm test
-
-# Build all packages
-pnpm build
 ```
 
 ## Why Behavior-OS?
@@ -245,20 +245,24 @@ Enable it with env vars: `BEHAVIOR_OS_CODE_EDIT=true` (plugin) or
 
 ### CLI Reference
 
-| Command | Description |
+Run `behavioros <command> --help` for the exact flags. Every command uses exit
+code `0` (success) or `1` (missing `dnas/`, invalid DNA, failed validation,
+blocked `deploy` pre-flight, `autonomous` without `--task`).
+
+| Command | What it actually does |
 |---|---|
-| `npx @behavior-os/cli init` | Scaffold a new Behavior-OS project |
-| `npx @behavior-os/cli compile` | Compile DNA packages |
-| `npx @behavior-os/cli validate` | Validate DNA configurations |
-| `npx @behavior-os/cli status` | Show system status & health |
-| `npx @behavior-os/cli diff` | Detect behavioral drift between DNA versions |
-| `npx @behavior-os/cli simulate` | Simulate governance decisions |
-| `npx @behavior-os/cli deploy` | Deploy with quality gates |
-| `npx @behavior-os/cli ecosystem status` | Show ecosystem status |
-| `npx @behavior-os/cli agent list` | List all agents |
-| `npx @behavior-os/cli autonomous run` | Run fully autonomous task |
-| `npx @behavior-os/cli protocol check` | Check 7-step protocol compliance |
-| `npx @behavior-os/cli drift-check` | Compare current vs baseline behavior |
+| `npx @behavior-os/cli init` | Scaffold a project (`.behavioros/state.json`, `.mcp.json`, sample DNA) |
+| `npx @behavior-os/cli compile` | Parse and validate **every** `dnas/*.yaml` against the DNA schema |
+| `npx @behavior-os/cli validate` | Validate the project layout plus every DNA pattern |
+| `npx @behavior-os/cli status` | Engine status (DNA, missions, agents) + `.behavioros/state.json` |
+| `npx @behavior-os/cli diff` | Compare `dnas/*.yaml` against `.behavioros/baseline.json` |
+| `npx @behavior-os/cli simulate` | Evaluate one action against the loaded DNA rules |
+| `npx @behavior-os/cli deploy` | Print the deployment gate plan + a real pre-flight (**does not deploy**) |
+| `npx @behavior-os/cli ecosystem` | Report what can be read from disk (DNA patterns, verdicts) |
+| `npx @behavior-os/cli agent` | Show the local state summary and how to register agents |
+| `npx @behavior-os/cli autonomous` | Dry-run the 7-step protocol on `--task` (audit simulated, no work executed) |
+| `npx @behavior-os/cli protocol` | Check the 7 steps against the local state file |
+| `npx @behavior-os/cli drift-check` | Compare `selectedDna`/`currentStep` with the baseline |
 
 ## Test Status
 
@@ -266,8 +270,8 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 48 |
-| Test cases (`it`/`test` blocks) | 483 |
+| Test files (`*.test.ts`) | 50 |
+| Test cases (`it`/`test` blocks) | 514 |
 | Typecheck | `pnpm typecheck` (0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
 | Coverage | `pnpm test:coverage` |
@@ -298,7 +302,7 @@ const bos = new BehaviorOS({
   learning: { enabled: true },
 })
 
-const mission = await bos.createMission({
+const mission = bos.createMission({
   title: 'Implement payment module',
   type: 'feature',
   priority: 'high',
@@ -337,10 +341,11 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 
 ### OpenCode v2 (recommended — native plugin)
 
-The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It is
-auto-loaded from `.opencode/plugins/behavioros.ts` and exposes the full 14-tool
-surface (`bos_*`) plus governance hooks (`tool:execute.before`) and session
-context — no MCP server registration required.
+The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. Inside
+this repository it is auto-loaded from `.opencode/plugins/behavioros.ts`, a thin
+loader that re-exports the built package; it exposes the full 29-tool surface
+(`bos_*`) plus governance hooks (`tool:execute.before`) and session context — no
+MCP server registration required.
 
 The MCP server is intentionally **not** registered inside OpenCode so sessions
 see a single, non-duplicated tool catalog. For other MCP-capable hosts use the
@@ -365,7 +370,7 @@ mcpServers:
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
 | `@behavior-os/core` | 11 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
-| `@behavior-os/cli` | CLI: init, compile, validate, status | 2.0.0 |
+| `@behavior-os/cli` | CLI (12 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check) | 2.0.0 |
 | `@behavior-os/mcp-server` | MCP server with 27 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 29 tools + hooks | 2.0.0 |
 

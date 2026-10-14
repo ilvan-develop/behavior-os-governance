@@ -26,39 +26,42 @@ pnpm typecheck
 behavioros/
 ├── packages/
 │   ├── schemas/     # Zod validation schemas
-│   ├── core/        # 11 engines + BehaviorOS class
+│   ├── core/        # 11 engines + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools
-│   ├── mcp-server/  # MCP server implementation
-│   └── e2e-tests/   # End-to-end tests
+│   ├── mcp-server/  # MCP server implementation (27 tools + 2 resources)
+│   └── orchestrator/# AutonomousOrchestrator (no test suite yet)
 ├── plugins/
-│   └── opencode-v2/ # OpenCode v2 plugin
-├── dnas/            # DNA pattern YAML files
-├── docs/            # Documentation
-├── templates/       # Project templates
-└── .behavioros/     # Runtime state (gitignored)
+│   └── opencode-v2/ # OpenCode v2 plugin (29 tools)
+├── dnas/            # 21 DNA pattern YAML files
+├── docs/            # Documentation (CLAIMS.md is the source of truth)
+├── examples/        # Usage examples (outside the pnpm workspace — its tests are not run by `pnpm test`)
+└── .behavioros/     # CLI docs + `state.example.json` (state.json/baseline.json are runtime)
 ```
+
+There is no `packages/e2e-tests/` package: end-to-end coverage lives inside the
+per-package vitest suites.
 
 ## Adding a New DNA Pattern
 
 1. Create YAML file in `dnas/<pattern-name>.yaml`
-2. Add schema validation in `packages/schemas/src/index.ts`
-3. Register in `packages/dnas/src/index.ts`
-4. Write tests in `packages/core/tests/dna/<pattern-name>.test.ts`
+2. Validate it against `DNASchema` (`packages/schemas/src/index.ts`); the
+   `packages/core/tests/dnas.test.ts` suite fails if any shipped pattern
+   does not parse
+3. Update the pattern counts that mention 21 (README, `docs/CLAIMS.md`, …)
 
 ## Adding a New MCP Tool
 
-1. Create tool definition in `packages/mcp-server/src/tools/<category>/`
-2. Register tool in `packages/mcp-server/src/server.ts`
-3. Add schema in `packages/schemas/src/mcp.ts`
-4. Write integration tests
+1. Register the tool in `packages/mcp-server/src/server.ts` (`server.registerTool`)
+2. Add its Zod `inputSchema` in the same call
+3. Update the tool-count assertions in `packages/mcp-server/tests/mcp.test.ts`
 
 ## Adding a New Engine
 
 1. Create engine in `packages/core/src/engine/<engine-name>.ts`
 2. Export from `packages/core/src/engine/index.ts`
 3. Integrate into `BehaviorOS` class
-4. Write comprehensive tests
+4. Write comprehensive tests in `packages/core/tests/*.test.ts`
 
 ## Commit Conventions
 

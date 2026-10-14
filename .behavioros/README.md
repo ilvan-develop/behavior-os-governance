@@ -1,49 +1,47 @@
 # Behavior-OS Runtime State
 
-This file is auto-generated and managed by Behavior-OS.
-Do not edit manually — use the CLI or SDK to update.
+This directory holds the **local** CLI state for a project.
 
-## Protocol Steps
+## Files
 
-| Step | Name | Status |
-|------|------|--------|
-| 1 | Select DNA Pattern | ${STEP_1_STATUS} |
-| 2 | Display DNA Block | ${STEP_2_STATUS} |
-| 3 | Resolve Truth | ${STEP_3_STATUS} |
-| 4 | Create Mission | ${STEP_4_STATUS} |
-| 5 | Delegate | ${STEP_5_STATUS} |
-| 6 | Run Audit | ${STEP_6_STATUS} |
-| 7 | Record Learning | ${STEP_7_STATUS} |
+| File | Written by | Purpose |
+|------|-----------|---------|
+| `state.json` | `behavioros init`, `behavioros autonomous` | Local protocol state (`currentStep`, `selectedDna`, `activeMission`, `stepHistory`) |
+| `baseline.json` | `behavioros diff` | DNA snapshot used by `behavioros drift-check` |
 
-## State Schema
+Nothing regenerates **this** README: it is a static document. The OpenCode plugin
+does not use these files — it persists its state through `ctx.storage`
+(`behavioros:state`).
 
-```typescript
-interface AgentState {
-  currentStep: number;
-  selectedDna: string | null;
-  activeMission: string | null;
-  stepHistory: Array<{
-    step: number;
-    tool: string;
-    result: any;
-    timestamp: string;
-  }>;
-  createdAt: string;
-  updatedAt: string;
-}
-```
+## Protocol steps
 
-## Update via CLI
+The 7 steps and the tool that completes each one are defined once, in
+`packages/core/src/engine/behavior-os.ts` (`PROTOCOL_TOOL_STEPS`):
+
+| Step | Tool | Name |
+|------|------|------|
+| 1 | `bos_select_dna` | Select DNA |
+| 2 | `bos_list_dna` | Confirm DNA rules |
+| 3 | `bos_get_state` | Resolve state |
+| 4 | `bos_create_mission` | Create mission |
+| 5 | `bos_start_mission` | Start mission |
+| 6 | `bos_run_audit` | Run audit |
+| 7 | `bos_record_learning` | Record learning |
+
+## Inspecting it
 
 ```bash
-npx @behavior-os/cli status          # View current state
-npx @behavior-os/cli protocol check  # Check compliance
+npx @behavior-os/cli status      # engine status + state.json summary
+npx @behavior-os/cli protocol    # which steps appear in stepHistory
+npx @behavior-os/cli drift-check # currentStep/selectedDna vs baseline.json
 ```
 
-## Update via SDK
+## Updating it
 
 ```typescript
 const bos = new BehaviorOS();
-const state = bos.getState();
-bos.updateState({ currentStep: 3, selectedDna: "surgical-team" });
+bos.updateState({ currentStep: 3, selectedDna: 'surgical-team' });
 ```
+
+`updateState` changes the in-memory engine state; `state.json` is only rewritten
+by the CLI commands listed above.

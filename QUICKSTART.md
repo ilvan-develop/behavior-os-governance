@@ -26,11 +26,11 @@ pnpm test
 ## Initialize a New Project
 
 ```bash
-# Initialize with enterprise governance
-npx @behavior-os/cli init --project-name my-app --dna-pattern enterprise-governance
+# Initialize with enterprise governance (the default pattern)
+npx @behavior-os/cli init --dna enterprise-governance
 
 # Initialize with surgical team (zero-defect)
-npx @behavior-os/cli init --project-name my-app --dna-pattern surgical-team
+npx @behavior-os/cli init --dna surgical-team
 ```
 
 ## Core Concepts
@@ -44,13 +44,13 @@ DNA patterns define the behavioral rules for AI agents. Each DNA includes:
 
 ### The 7-Step Protocol
 
-1. **Select DNA** — Choose behavioral pattern
-2. **Display DNA Block** — Verify governance rules
-3. **Resolve Truth** — Verify requirements
-4. **Create Mission** — Define the task
-5. **Delegate** — Execute work
-6. **Run Audit** — Validate compliance
-7. **Record Learning** — Improve system
+1. **Select DNA** (`bos_select_dna`) — choose the behavioural pattern
+2. **Confirm DNA rules** (`bos_list_dna`) — see what the pattern allows
+3. **Resolve state** (`bos_get_state`) — read the current protocol state
+4. **Create mission** (`bos_create_mission`) — define the task
+5. **Start mission** (`bos_start_mission`) — begin the mission
+6. **Run audit** (`bos_run_audit`) — validate compliance
+7. **Record learning** (`bos_record_learning`) — feed the learning engine
 
 ### Mission Lifecycle
 
@@ -110,59 +110,67 @@ const report = bos.runAudit({ missionId: mission.id, agentId: "devops-agent" });
 
 ## CLI Commands
 
+Run `npx @behavior-os/cli --help` for the full list (12 commands, exit code `0`/`1`).
+
 ```bash
-# Check status
+# Scaffold a project (dnas/, .behavioros/state.json, .mcp.json, sample DNA)
+npx @behavior-os/cli init --dna surgical-team
+
+# Validate the layout and every DNA pattern in dnas/
+npx @behavior-os/cli validate
+
+# Engine status (DNA, missions, agents) + .behavioros/state.json
 npx @behavior-os/cli status
 
-# Run protocol check
-npx @behavior-os/cli protocol check
+# Check the 7 protocol steps against the local state
+npx @behavior-os/cli protocol
 
-# Validate DNA patterns
-npx @behavior-os/cli validate --pattern ./dnas/surgical-team.yaml
-
-# Start observability dashboard
-npx @behavior-os/cli dashboard --port 3000
+# Print the deployment gate plan and run the real pre-flight (does not deploy)
+npx @behavior-os/cli deploy
 ```
 
 ## Integrations
 
 ### Claude Code
+
+`behavioros init` writes exactly this `.mcp.json` into the scaffolded project:
+
 ```json
-// .mcp.json
 {
   "mcpServers": {
     "behavioros": {
       "command": "node",
-      "args": ["packages/mcp-server/dist/server.js"]
+      "args": ["<mcp-server>/dist/server.js"],
+      "env": {
+        "BEHAVIOROS_DNA_PATH": "./dnas/enterprise-governance.yaml"
+      }
     }
   }
 }
 ```
 
 ### Cursor IDE
-Add to `.cursor/rules/`:
-```
-protocol.mdc
-skill.mdc
-```
+
+Add to `.cursor/rules/`: `protocol.mdc` and `skill.mdc` (this repository ships
+both under `.cursor/rules/`). The MCP server goes in `.cursor/mcp.json` with the
+same shape as the Claude Code config above.
 
 ### OpenCode v2
+
+OpenCode discovers local plugins from `.opencode/plugins/`. This repository
+carries `.opencode/plugins/behavioros.ts`, a one-line loader that re-exports the
+built package (`pnpm build` emits `plugins/opencode-v2/dist/index.js`):
+
 ```json
 // opencode.json
 {
-  "mcpServers": {
-    "behavioros": {
-      "command": "node",
-      "args": ["packages/mcp-server/dist/server.js"]
-    }
-  },
-  "plugins": {
-    "behavioros": {
-      "path": "./plugins/opencode-v2/dist/index.js"
-    }
-  }
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md"]
 }
 ```
+
+The plugin exposes the 29 `bos_*` tools directly; the MCP server is deliberately
+not registered inside OpenCode so a session sees a single tool catalog.
 
 ## Next Steps
 

@@ -62,14 +62,17 @@ Cada ação é avaliada automaticamente:
 Processo determinístico para qualquer tarefa:
 
 ```
-1. Select DNA Pattern     → Escolha o padrão comportamental
-2. Display DNA Block      → Mostre ao humano para aprovação
-3. Resolve Truth          → Verifique requisitos
-4. Create Mission         → Inicie a missão
-5. Delegate               → Execute com delegação
-6. Run Audit              → Audite o resultado
-7. Record Learning        → Aprenda com o processo
+1. Select DNA Pattern     → Escolha o padrão comportamental (bos_select_dna)
+2. Confirm DNA Rules      → Veja o que o padrão permite (bos_list_dna)
+3. Resolve State          → Leia o estado atual do protocolo (bos_get_state)
+4. Create Mission         → Inicie a missão (bos_create_mission)
+5. Start Mission          → Comece a missão (bos_start_mission)
+6. Run Audit              → Audite o resultado (bos_run_audit)
+7. Record Learning        → Aprenda com o processo (bos_record_learning)
 ```
+
+Cada passo só avança quando a ferramenta correspondente corre
+(`PROTOCOL_TOOL_STEPS` em `packages/core/src/engine/behavior-os.ts`).
 
 ---
 
@@ -130,7 +133,7 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 48 ficheiros de teste / 483 casos (`pnpm test`)
+- ✅ 50 ficheiros de teste / 514 casos (`pnpm test`)
 - ✅ 0 erros de typecheck
 - ✅ Build ESM + DTS
 - ✅ v2.0.0
@@ -157,7 +160,7 @@ const bos = new BehaviorOS({
   learning: { enabled: true },
 })
 
-const mission = await bos.createMission({
+const mission = bos.createMission({
   title: 'Implement payment module',
   type: 'feature',
   priority: 'high',

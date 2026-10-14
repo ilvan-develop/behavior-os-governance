@@ -122,16 +122,21 @@ const learning = bos.recordLearning({
 
 ## Configuração MCP Server
 
-### Para Claude
+O servidor MCP fala JSON-RPC por **stdio** (não há transporte HTTP nem porta).
+
+### Para Claude Code
+
+`behavioros init` escreve este `.mcp.json`:
 
 ```json
-// .mcp.json
 {
   "mcpServers": {
     "behavioros": {
       "command": "node",
-      "args": ["dist/mcp-server.js"],
-      "cwd": "/c/www/behavior-os"
+      "args": ["/caminho/para/behavioros/packages/mcp-server/dist/server.js"],
+      "env": {
+        "BEHAVIOROS_DNA_PATH": "./dnas/enterprise-governance.yaml"
+      }
     }
   }
 }
@@ -139,13 +144,11 @@ const learning = bos.recordLearning({
 
 ### Para Cursor
 
-```json
-// .cursor/rules/behavioros-skill.mdc
-{
-  "serverUrl": "http://localhost:3001",
-  "tools": ["bos_evaluate_governance", "bos_select_dna", ...]
-}
-```
+Cria `.cursor/mcp.json` com a mesma forma do `.mcp.json` acima.
+
+As regras de protocolo para o Cursor são ficheiros de texto em
+`.cursor/rules/*.mdc` (este repositório tem `behavioros-protocol.mdc` e
+`behavioros-skill.mdc`); não são JSON, nem declaram `tools` ou `serverUrl`.
 
 ---
 
@@ -153,43 +156,51 @@ const learning = bos.recordLearning({
 
 ### Configuração
 
+O OpenCode descobre plugins locais em `.opencode/plugins/`. Este repositório tem
+`.opencode/plugins/behavioros.ts`, que re-exporta o pacote compilado
+(`plugins/opencode-v2/dist/index.js` — corre `pnpm build` primeiro). O
+`opencode.json` da raiz só declara as instruções injetadas nas sessões:
+
 ```json
-// opencode.json
 {
-  "plugins": [
-    {
-      "package": "./plugins/opencode-v2/dist/index.js",
-      "options": { "enabled": true }
-    }
-  ]
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md"]
 }
 ```
 
+O servidor MCP não é registado dentro do OpenCode: o plugin expõe as 29 tools
+`bos_*` diretamente, para que a sessão veja um único catálogo.
+
 ### Ferramentas Disponíveis
+
+O plugin regista 29 tools `bos_*` (as 27 do servidor MCP **mais** `bos_get_log`
+e `bos_verify_audit_trail`). Lista completa:
 
 | Tool | Descrição |
 |------|-----------|
-| bos_evaluate_governance | Avalia governança |
-| bos_select_dna | Seleciona DNA |
-| bos_list_dna | Lista DNAs |
-| bos_create_mission | Cria missões |
-| bos_run_audit | Executa auditoria |
-| bos_record_learning | Registra aprendizado |
-| bos_get_status | Status do sistema |
-| bos_get_state | Estado completo |
+| bos_select_dna | Seleciona o padrão de governança |
+| bos_list_dna | Lista os padrões disponíveis |
+| bos_get_state | Estado atual do protocolo |
+| bos_create_mission | Cria uma missão |
+| bos_start_mission | Inicia uma missão |
+| bos_run_audit | Executa a auditoria |
+| bos_record_learning | Regista um evento de aprendizagem |
+| bos_evaluate_governance | Avalia uma ação contra as regras |
+| bos_preflight | Corre os gates `pre` de forma síncrona |
+| … | (ver `docs/API_REFERENCE.md` para as 29) |
 
 ---
 
 ## Protocolo 7 Passos
 
 ```
-1. SELECT DNA     → Escolher padrão governança
-2. DISPLAY BLOCK  → Mostrar DNA selecionado  
-3. RESOLVE TRUTH  → Analisar contexto real
-4. CREATE MISSION → Definir objetivo claro
-5. DELEGATE       → Atribuir execução
-6. RUN AUDIT      → Verificar conformidade
-7. RECORD LEARNING → Capturar insights
+1. SELECT DNA      (`bos_select_dna`)     → Escolher o padrão de governança
+2. CONFIRM RULES   (`bos_list_dna`)       → Ver o que o padrão permite
+3. RESOLVE STATE   (`bos_get_state`)      → Ler o estado atual do protocolo
+4. CREATE MISSION  (`bos_create_mission`) → Definir o objetivo
+5. START MISSION   (`bos_start_mission`)  → Começar a missão
+6. RUN AUDIT       (`bos_run_audit`)      → Verificar conformidade
+7. RECORD LEARNING (`bos_record_learning`)→ Capturar aprendizagens
 ```
 
 ---
@@ -240,9 +251,13 @@ pnpm test
 ### Testes por Pacote
 
 ```bash
-pnpm test --filter @behavior-os/core
-pnpm test --filter @behavior-os/schemas
-pnpm test --filter @behavior-os/sdk
+# Por pacote (pnpm escolhe o pacote primeiro, o script depois)
+pnpm --filter @behavior-os/core test
+pnpm --filter @behavior-os/schemas test
+pnpm --filter @behavior-os/sdk test
+
+# Ou a CLI do turbo para tudo
+pnpm test
 ```
 
 ### Cobertura
@@ -266,13 +281,14 @@ class BehaviorOS {
   completeMission(missionId: string): Mission | null
   failMission(missionId: string, reason?: string): Mission | null
   getMission(missionId: string): Mission | null
-  listMissions(): Mission[]
+  listMissions(limit?: number): Mission[]
   runAudit(params: RunAuditInput): AuditReport
-  evaluateQuality(metrics: Record<string, number> | null): QualityResult
+  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown }
   recordLearning(params: RecordLearningInput): LearningEvent
-  getInsights(limit: number): LearningEvent[]
+  getInsights(limit?: number): LearningEvent[]
   getState(): AgentState
-  getAgentState(): AgentMetrics
+  getAgentState(): AgentState
+  getStatus(): Status
 }
 ```
 
@@ -332,7 +348,7 @@ const decision = bos.evaluateGovernance("action", { agent: "test" });
 
 ```typescript
 // Verificar métricas
-const quality = bos.evaluateQuality({
+const quality = bos.checkQuality({
   test_coverage: 85,  // Deve ser >= threshold
   lint_errors: 0,
   security_vulnerabilities: 0,

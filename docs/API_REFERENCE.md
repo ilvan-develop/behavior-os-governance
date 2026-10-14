@@ -1,303 +1,193 @@
 # Behavior-OS API Reference
 
-## Core API
+Verified against `packages/core/src/engine/behavior-os.ts` and
+`packages/sdk/src/index.ts`. Everything listed exists with these shapes; there are
+no planned-but-missing methods. Counts live in [`CLAIMS.md`](./CLAIMS.md),
+commands in [`CLI.md`](./CLI.md) and [`COMMANDS.md`](./COMMANDS.md).
 
-### BehaviorOS Class
+## BehaviorOS (core)
 
 ```typescript
+import { BehaviorOS } from '@behavior-os/core';
+
 class BehaviorOS {
-  // DNA Management
-  loadDNA(dna: DNA): Promise<void>
-  getDNA(): DNA | null
-  listDNAPatterns(): string[]
+  constructor(config?: BehaviorOSConfig);
 
-  // Governance
-  evaluateGovernance(action: string, context: Record<string, any>): GovernanceDecision
+  // DNA
+  loadDNA(dna: DNA): Promise<void>;
+  getDNA(): DNA | null;
 
-  // Mission Management
-  createMission(config: CreateMissionConfig): Mission
-  startMission(missionId: string): Mission | null
-  completeMission(missionId: string): Mission | null
-  failMission(missionId: string, reason: string): Mission | null
-  getMission(missionId: string): Mission | null
-  listMissions(filters?: MissionFilters): Mission[]
+  // Identity (never a model name)
+  resolveAgentIdentity(): AgentIdentity;   // { agentId, agent, persona, dnaPattern, source }
+  setActiveAgent(selector: {
+    id?: string; name?: string; type?: string; capabilities?: string[]; persona?: string;
+  }): AgentIdentity | null;
+  registerAgent(agent: Agent): void;
+  getAgent(id: string): Agent | undefined;
+  listAgents(): Agent[];
+
+  // Protocol
+  advanceProtocolStep(toolName: string): void;
+
+  // Governance, quality, gates
+  evaluateGovernance(
+    action: string,
+    context: { agent: string; scope?: string; [key: string]: unknown },
+  ): GovernanceDecision;                   // throws when no DNA is loaded
+  simulateAction(action: string, context: { agent: string; context?: Record<string, unknown> }): GovernanceDecision;
+  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown };
+  preflightAction(action: string, context?: { agent: string; context?: Record<string, unknown> }): PreflightResult;
+  runPipeline(context?: GateContext): PipelineRun;
+  listPipelineRuns(limit?: number): PipelineRun[];
+  getPipelineEngine(): PipelineEngine;     // addGate / removeGate / getGates / run / preflight
+
+  // Missions
+  createMission(options: {
+    title: string; type: string; priority: string;
+    dnaPattern?: string; createdBy?: string; advanceProtocol?: boolean;
+  }): Mission;
+  startMission(missionId: string, options?: { advanceProtocol?: boolean }): Mission | null;
+  completeMission(missionId: string): Mission | null;
+  failMission(missionId: string, reason?: string): Mission | null;
+  listMissions(limit?: number): Mission[];   // default 50
+  getMission(missionId: string): Mission | null;
 
   // Audit
-  runAudit(options: RunAuditOptions): AuditReport
-  getAuditReport(reportId: string): AuditReport | null
+  runAudit(options: { missionId: string; agentId?: string; stages?: string[]; simulate?: boolean }): AuditReport;
+  listAuditReports(limit?: number): AuditReport[];
 
-  // Learning
-  recordLearning(event: LearningEventConfig): LearningEvent
-  getInsights(limit?: number): LearningEvent[]
-  getPatterns(): LearningPattern[]
+  // Learning, evolution, recommendations
+  recordLearning(options: {
+    type: string; source: string; content: string; impact: string; relatedMission?: string;
+  }): LearningEvent;
+  getInsights(limit?: number): LearningEvent[];                        // default 10
+  proposeEvolution(minConfidence?: number): EvolutionProposal[];        // default 0.8, read-only
+  applyEvolution(options?: {
+    minConfidence?: number; apply?: boolean; votes?: Vote[]; policy?: DecisionPolicy;
+  }): { proposals: EvolutionProposal[]; applied: EvolutionProposal[]; enabled: boolean; decision?: Decision };
+  proposeCodeFixes(minConfidence?: number): CodeFixProposal[];
+  applyCodeFixes(options?: {
+    minConfidence?: number; apply?: boolean; votes?: Vote[]; policy?: DecisionPolicy;
+  }): CodeFixApplyResult;
+  listCodeFixResults(limit?: number): CodeFixResult[];                  // needs a store
+  listCodeEdits(limit?: number): CodeEditRecord[];                      // needs a store
+  recommend(limit?: number, ageLimitHours?: number): RankedRecommendation[]; // defaults 5 / 168
+  decide(options: DecideOptions): Decision;
+  listDecisions(limit?: number): Decision[];
+  compareDNADrift(dnaA: DNA, dnaB: DNA): DriftInfo;
+  compareDNAVersions(dnaA: DNA, dnaB: DNA): {
+    score1: number; score2: number; difference: number; recommendation: string;
+  };
 
-  // State
-  getState(): AgentState
-  updateState(state: Partial<AgentState>): void
-  getStatus(): SystemStatus
+  // Governed code editing (dry-run unless codeEdit.enabled && apply)
+  applyCodeEdit(options: {
+    file: string; find: string; replace: string;
+    apply?: boolean; expectedBeforeHash?: string;
+    votes?: Vote[]; policy?: DecisionPolicy; missionId?: string;
+  }): CodeEditApplyResult;
+  getCodeEditEngine(): CodeEditEngine;
+
+  // State & persistence
+  getState(): AgentState;
+  getAgentState(): AgentState;
+  updateState(updates: Partial<AgentState>): void;
+  getStatus(): {
+    engine: boolean;
+    dna: string | null;
+    missions: number;
+    agents: number;
+    state: AgentState;
+    config: {
+      governance: 'strict' | 'moderate' | 'lenient';
+      qualityEnabled: boolean;
+      auditEnabled: boolean;
+      learningEnabled: boolean;
+    };
+  };
+  exportState(): BehaviorOSSnapshot;
+  importState(snapshot: BehaviorOSSnapshot | null | undefined): boolean;
+  persistAll(): Promise<void>;
+  hasPersistence(): boolean;
+  closeStore(): void;
 }
 ```
 
-### CreateMissionConfig
+### BehaviorOSConfig
 
 ```typescript
-interface CreateMissionConfig {
-  title: string;
-  type: MissionType;
-  priority: MissionPriority;
-  dnaPattern?: string;
-  createdBy: string;
-  metadata?: Record<string, any>;
+interface BehaviorOSConfig {
+  dnaPath?: string;                       // loaded best-effort in the constructor
+  governance?: { enabled?: boolean; level?: 'strict' | 'moderate' | 'lenient' };
+  quality?: { enabled?: boolean };
+  audit?: { enabled?: boolean };
+  learning?: { enabled?: boolean };
+  persistence?: { path?: string; store?: Store; autoHydrate?: boolean };
+  pipeline?: { enabled?: boolean; gates?: PipelineGate[] };
+  decision?: { policy?: DecisionPolicy; quorum?: number };
+  evolution?: { enabled?: boolean; minConfidence?: number };
+  codeEdit?: { enabled?: boolean; root?: string; extensions?: readonly string[] };
 }
 ```
 
-### MissionFilters
+### DecideOptions
 
 ```typescript
-interface MissionFilters {
-  status?: MissionStatus;
-  priority?: MissionPriority;
-  type?: MissionType;
-  createdBy?: string;
+import type { DecideOptions } from '@behavior-os/core';
+
+interface DecideOptions {
+  subject: string;
+  votes: Vote[];
+  policy?: 'majority' | 'supermajority' | 'unanimous';
+  quorum?: number;
+  missionId?: string;
 }
 ```
 
-### RunAuditOptions
+## BehaviorOSSDK
+
+`@behavior-os/sdk` re-exports `BehaviorOS` and the schema types, and adds a thin
+wrapper over the same engine. Its methods are **synchronous** except `loadDNA`:
 
 ```typescript
-interface RunAuditOptions {
-  missionId: string;
-  agentId: string;
-  stages?: AuditStage[];
-}
-```
+import { BehaviorOSSDK } from '@behavior-os/sdk';
 
-### LearningEventConfig
-
-```typescript
-interface LearningEventConfig {
-  type: LearningType;
-  source: string;
-  content: string;
-  impact: LearningImpact;
-  relatedMission?: string;
-  metadata?: Record<string, any>;
-}
-```
-
-## SDK API
-
-### BehaviorOSSDK
-
-```typescript
 class BehaviorOSSDK {
-  constructor(options?: SDKOptions)
-  
-  // Mission Management
-  createMission(config: CreateMissionConfig): Promise<Mission>
-  startMission(missionId: string): Promise<Mission | null>
-  completeMission(missionId: string): Promise<Mission | null>
-  failMission(missionId: string, reason: string): Promise<Mission | null>
-  getMission(missionId: string): Promise<Mission | null>
-  listMissions(filters?: MissionFilters): Promise<Mission[]>
+  constructor(config?: BehaviorOSConfig);   // no separate SDKOptions type
 
-  // Governance
+  loadDNA(dna: DNA): Promise<void>;
+  getDNA(): DNA | null;
+
   evaluateGovernance(
-    action: string, 
-    context: Record<string, any>,
-    agentId?: string
-  ): Promise<GovernanceDecision>
+    action: string,
+    context: { agent: string; scope?: string; [key: string]: unknown },
+  ): GovernanceDecision;
 
-  // Learning
-  recordLearning(event: LearningEventConfig): Promise<LearningEvent>
-  getInsights(limit?: number): Promise<LearningEvent[]>
-  getPatterns(): Promise<LearningPattern[]>
+  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown };
 
-  // Status
-  getStatus(): Promise<SystemStatus>
-  getState(): Promise<AgentState>
+  createMission(options: {
+    title: string; type: string; priority: string; dnaPattern?: string;
+  }): Mission;
+  startMission(missionId: string): Mission | null;
 
-  // Configuration
-  loadConfig(config: Config): Promise<void>
-  saveConfig(config: Config): Promise<void>
+  recordLearning(options: {
+    type: string; source: string; content: string; impact: string; relatedMission?: string;
+  }): LearningEvent;
+  getInsights(limit?: number): LearningEvent[];
+
+  getStatus(): ReturnType<BehaviorOS['getStatus']>;
+  getState(): AgentState;
 }
 ```
 
-### SDKOptions
+## MCP tools
 
-```typescript
-interface SDKOptions {
-  dataDir?: string;
-  enforceMode?: 'ENFORCE' | 'PERMISSIVE' | 'MONITOR';
-  logLevel?: 'error' | 'warn' | 'info' | 'debug';
-}
-```
+The MCP server exposes **27 tools** and 2 resources; the OpenCode plugin adds
+`bos_get_log` and `bos_verify_audit_trail` (29). The full argument list is in
+[`COMMANDS.md`](./COMMANDS.md).
 
-## MCP Tools
-
-### Governance Tools
-
-| Tool | Description |
-|------|-------------|
-| bos_evaluate_governance | Evaluate action against governance rules |
-| bos_select_dna | Select a DNA pattern |
-| bos_get_dna_pattern | Retrieve a DNA pattern |
-| bos_list_dna_patterns | List all available patterns |
-| bos_get_log | Read the recent governance log (how DNA rules were applied) |
-
-### Mission Tools
-
-| Tool | Description |
-|------|-------------|
-| bos_create_mission | Create a new mission |
-| bos_start_mission | Start a mission |
-| bos_complete_mission | Complete a mission |
-| bos_fail_mission | Fail a mission |
-| bos_list_missions | List missions |
-| bos_get_mission | Get mission details |
-
-### Audit Tools
-
-| Tool | Description |
-|------|-------------|
-| bos_run_audit | Run audit for mission |
-| bos_get_audit_report | Get audit report |
-| bos_check_quality | Check quality gates |
-
-### Learning Tools
-
-| Tool | Description |
-|------|-------------|
-| bos_record_learning | Record learning event |
-| bos_get_insights | Get insights |
-| bos_get_patterns | Get detected patterns |
-
-## CLI Commands
-
-### init
-
-Initialize a new Behavior-OS project.
-
-```bash
-npx @behavior-os/cli init [options]
-
-Options:
-  --directory <dir>          Project directory
-  --project-name <name>      Project name
-  --dna-pattern <pattern>    DNA pattern to use
-  --framework <framework>    Framework to scaffold
-  --no-git                   Skip git initialization
-```
-
-### compile
-
-Compile DNA patterns.
-
-```bash
-npx @behavior-os/cli compile [options]
-
-Options:
-  --patterns <paths>         Pattern files to compile
-  --output <dir>             Output directory
-  --watch                    Watch for changes
-  --validate                 Validate before compile
-```
-
-### validate
-
-Validate a DNA pattern.
-
-```bash
-npx @behavior-os/cli validate [options]
-
-Options:
-  --pattern <path>           Pattern file to validate
-  --all                      Validate all patterns
-```
-
-### status
-
-Check system status.
-
-```bash
-npx @behavior-os/cli status [options]
-
-Options:
-  --verbose                  Show detailed status
-  --json                     Output as JSON
-```
-
-### protocol
-
-Protocol commands.
-
-```bash
-npx @behavior-os/cli protocol check
-npx @behavior-os/cli protocol status
-```
-
-### create-mission
-
-Create a mission.
-
-```bash
-npx @behavior-os/cli create-mission [options]
-
-Options:
-  --title <title>            Mission title
-  --type <type>              Mission type
-  --priority <priority>      Priority level
-  --dna-pattern <pattern>    DNA pattern
-  --created-by <agent>       Agent name
-```
-
-### simulate
-
-Simulate agent behavior.
-
-```bash
-npx @behavior-os/cli simulate [options]
-
-Options:
-  --dna <pattern>            DNA pattern
-  --agent <agent>            Agent name
-  --actions <actions>        Actions to simulate
-  --steps <count>            Number of steps
-```
-
-### deploy
-
-Deploy with governance checks.
-
-```bash
-npx @behavior-os/cli deploy [options]
-
-Options:
-  --target <target>          Deployment target
-  --verify                   Run quality gates
-  --dry-run                  Preview without executing
-  --env <environment>        Environment
-```
-
-### dashboard
-
-Start observability dashboard.
-
-```bash
-npx @behavior-os/cli dashboard [options]
-
-Options:
-  --port <port>              Port number
-```
-
-### check
-
-Run health check.
-
-```bash
-npx @behavior-os/cli check [options]
-
-Options:
-  --all                      Run all checks
-  --deps                     Check dependencies
-```
+Tool names used in earlier drafts of this document that **do not exist**:
+`bos_get_dna_pattern`, `bos_list_dna_patterns`, `bos_complete_mission`,
+`bos_fail_mission`, `bos_get_mission`, `bos_get_audit_report`,
+`bos_get_patterns`, `bos_display_dna`, `bos_validate_dna`, `bos_resolve_truth`.
+Completing or failing a mission is an engine/SDK call (`completeMission`,
+`failMission`), not a tool.

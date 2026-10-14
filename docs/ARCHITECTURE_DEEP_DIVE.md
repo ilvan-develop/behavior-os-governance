@@ -21,32 +21,31 @@ Behavior-OS is a behavioral governance platform that provides:
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   LEARNING LAYER                             │
-│  Record → Detect Patterns → Auto-Fix                        │
-│  Continuous improvement engine                              │
+│  Record → Detect Patterns → Insights/Recommendations         │
+│  Fix & evolution proposals (applied only with opt-in+apply)   │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   QUALITY LAYER                              │
-│  Gates: coverage ≥80% | lint = 0 | typecheck = 0            │
-│  Automated quality enforcement                              │
+│  Gates evaluated against caller-supplied metrics             │
+│  (coverage · lint · typecheck · security, per DNA)           │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                    AUDIT LAYER                               │
 │  Stages: lint → typecheck → security → coverage              │
-│  Immutable audit reports with chain of custody              │
+│  Audit reports + SHA-256 hash-chained governance log         │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   DECISION LAYER                             │
-│  Voting-based decisions | configurable quorum                │
-│  Multi-agent consensus engine                               │
+│  Weighted voting + quorum (in-process)                       │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                  GOVERNANCE LAYER                            │
-│  Rules: block | escalate | warn | log                       │
-│  Real-time policy enforcement                               │
+│  Rules: block | escalate | warn | log | transform            │
+│  Verdicts: allow | deny | escalate | transform               │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -92,18 +91,18 @@ Enforces quality gates:
 - Custom operators: `gte`, `lte`, `eq`
 
 ### Audit Engine
-Generates immutable audit reports:
-- Records all governance decisions
-- Tracks quality gate evaluations
-- Maintains chain of custody
-- Supports forensic analysis
+Generates audit reports with a per-stage result:
+- Records governance decisions and quality-gate evaluations
+- Persisted reports are listed with `bos_list_audit_reports` (requires persistence)
+- The governance log is a SHA-256 hash chain: tamper **detection**, not WORM
+  storage (see [`CLAIMS.md`](CLAIMS.md#cadeia-de-auditoria-tamper-evidence))
 
 ### Learning Engine
-Improves system over time:
-- Records insights from completions
-- Detects recurring patterns
-- Suggests auto-fixes
-- Tracks impact metrics
+Improves the system over time:
+- Records insights, patterns, fixes, failures and optimizations
+- Detects recurring patterns and scores recommendations by recency, frequency and impact
+- Proposes code fixes and DNA evolution — applying either needs `enabled: true` **and**
+  an explicit `apply: true` (plus approved votes when votes are supplied)
 
 ### Mission Engine
 Manages mission lifecycle:
@@ -124,17 +123,16 @@ All data is validated through Zod v4.4.3 schemas:
 ## Integration Points
 
 ### MCP Server (standalone for external clients)
-- 27 registered tools + 2 resources
-- Resource templates
-- Prompt management
-- JSON-RPC protocol support
+- 27 registered tools + 2 resources (`behavioros://protocol/steps`, `behavioros://dna/catalog`)
+- JSON-RPC over stdio
 
 ### OpenCode v2 Plugin (single native channel)
-- 29 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
-- `execute.before` governance hook intercepting write/edit/bash actions
+- 29 `bos_*` tools registered via `ctx.tool.transform()` as **direct** tools (`options.codemode: false`)
+- `permission:evaluate` hook is the only typed denial path (mutating actions are refused here)
+- `tool:execute.before` / `tool:execute.after` hooks are advisory telemetry (they never throw)
 - Session context hook injecting protocol state
-- DNA patterns loaded from `dnas/` and merged with built-ins
-- Native TypeScript integration via `.opencode/plugins/` auto-discovery
+- DNA patterns loaded from `dnas/` (or `BEHAVIOROS_DNA_PATH`) and merged with built-ins
+- Native TypeScript integration: `.opencode/plugins/behavioros.ts` re-exports the built package
 
 ### IDE Integrations
 - **Claude Code**: MCP server via `.mcp.json`
@@ -163,45 +161,58 @@ Audit Engine (record event)
     ↓
 Learning Engine (detect patterns)
     ↓
-[Pattern Found] → Suggest Fix
+[Pattern Found] → Insight / Recommendation (fixes are opt-in)
     ↓
-State Update → Dashboard
+Agent state update (`.behavioros/state.json` via the CLI; `ctx.storage` in the plugin)
 ```
 
 ## State Management
 
-Agent state is persisted in `.agent_state.json`:
+The CLI keeps its state in `.behavioros/state.json`:
 - Current protocol step
 - Selected DNA pattern
 - Active mission
 - Step history
 - Timestamps
 
+The OpenCode plugin does not use that file: it persists the same shape in the
+host's storage (`ctx.storage`, key `behavioros:state`) and re-injects it into each
+session.
+
 ## Configuration
 
-| Config | Default | Description |
-|--------|---------|-------------|
-| enforce | PERMISSIVE | Governance mode |
-| logLevel | info | Logging verbosity |
-| dataDir | ~/.behavioros | Storage location |
-| port | 3000 | Dashboard port |
+`new BehaviorOS(config)` accepts the keys declared in
+`packages/core/src/engine/behavior-os.ts`:
+
+| Config | Values | Notes |
+|---|---|---|
+| `dnaPath` | string | Path to the DNA YAML to load at construction |
+| `governance` | `{ enabled?, level?: 'strict' \| 'moderate' \| 'lenient' }` | Rule evaluation |
+| `quality` | `{ enabled?, minCoverage? }` | Quality gates |
+| `audit` | `{ enabled? }` | Audit pipeline |
+| `learning` | `{ enabled? }` | Learning events |
+| `persistence` | `{ path?, store?, autoHydrate? }` | SQLite by `path`, or any injected `Store` |
+| `pipeline` | `{ enabled?, gates? }` | Synchronous gate pipeline (default: 1 `pre` + N `post`) |
+| `decision` | `{ policy?, quorum? }` | Defaults for `decide()` |
+| `evolution` | `{ enabled?, minConfidence? }` | Applying proposals also needs `apply: true` |
+| `codeEdit` | `{ enabled?, root?, extensions? }` | Writing also needs `apply: true` |
+
+There is no dashboard, no `port` and no `dataDir` option.
 
 ## Extensibility
 
 ### Adding New DNA Patterns
-1. Create YAML in `dnas/`
-2. Register in `packages/dnas/src/index.ts`
-3. Add validation in `packages/schemas/src/dna.ts`
-4. Write tests in `packages/core/tests/dna/`
+1. Add `dnas/<name>.yaml`
+2. Validate it against `DNASchema` (the `packages/core/tests/dnas.test.ts` suite fails otherwise)
+3. Update the pattern lists/counts that mention 21 (README, `docs/CLAIMS.md`, …)
 
 ### Adding New MCP Tools
-1. Define tool in `packages/mcp-server/src/tools/`
-2. Register in server.ts
-3. Add schema in `packages/schemas/src/mcp.ts`
-4. Write integration tests
+1. Register the tool in `packages/mcp-server/src/server.ts` (`server.registerTool`)
+2. Add its Zod `inputSchema` in the same call
+3. Update the tool-count assertions in `packages/mcp-server/tests/mcp.test.ts`
 
 ### Adding New Engines
-1. Implement engine class
+1. Implement engine class in `packages/core/src/engine/`
 2. Export from `packages/core/src/engine/index.ts`
-3. Add to BehaviorOS constructor
-4. Write unit tests
+3. Add it to the `BehaviorOS` facade (`behavior-os.ts`)
+4. Write unit tests in `packages/core/tests/*.test.ts`

@@ -33,8 +33,15 @@ grep -c "z.enum(" packages/schemas/src/index.ts
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 48 ficheiros / 483 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 50 ficheiros / 514 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
+
+# Cada DNA tem de passar o DNASchema (22 casos: 1 lista + 21 padrões)
+pnpm --filter @behavior-os/core exec vitest run tests/dnas.test.ts
+
+# Guarda transversal: docs/regras não podem citar tools, comandos CLI, scripts
+# `pnpm`, métodos de `BehaviorOS` ou variáveis de ambiente que não existam (9 casos)
+pnpm --filter @behavior-os/core exec vitest run tests/docs-consistency.test.ts
 
 # SQLite (esperado: >= 1 ficheiro no código)
 grep -ri "sqlite" packages plugins --include=*.ts
@@ -85,6 +92,26 @@ medido com `wc -l`.
 | "8 tabelas" (métrica antiga de persistência) | **9** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `code_edits`, `meta`. |
 | "Trilho de auditoria imutável" | Imutabilidade é um requisito de **armazenamento físico** (WORM), não de software. O que existe é deteção: hash-chain SHA-256 + sink append-only opt-in por ficheiro. Ver a secção "Cadeia de auditoria". |
 | "Learning engine não aplica correções automaticamente" | Já aplica, mas só com `config.codeEdit.enabled` **e** `apply: true` na chamada, `find` único, ficheiro dentro do workspace e (se houver votos) quórum aprovado. Sem isso, é sempre dry-run. |
+| Regras de protocolo "Display DNA Block" / "Resolve Truth" / "Delegate" | Retirado. Os passos são `PROTOCOL_TOOL_STEPS` (`bos_select_dna`, `bos_list_dna`, `bos_get_state`, `bos_create_mission`, `bos_start_mission`, `bos_run_audit`, `bos_record_learning`). O texto do resource MCP `behavioros://protocol/steps` dizia outra coisa e foi corrigido. |
+| Tools `bos_resolve_truth`, `bos_display_dna`, `bos_validate_dna`, `bos_get_patterns`, `bos_get_dna_pattern`, `bos_complete_mission`, `bos_fail_mission`, `bos_get_mission`, `bos_get_audit_report`, `bos_list_dna_patterns` | **Não existem.** Estavam citadas em `docs/API_REFERENCE.md`, `.cursor/rules/*.mdc`, `.windsurfrules` e `.github/copilot-instructions.md`; foram retiradas. Um teste (`docs-consistency.test.ts`) falha se voltarem a aparecer em documentação atual. |
+| `bos_list_missions` com filtros `status` / `type` / `priority` | Os filtros eram anunciados no schema e **ignorados** no handler; passaram a ser aplicados de facto (sobre a lista do motor, antes do `limit`). |
+| CLI "corre a governança" em `compile`/`validate`/`simulate`/`status`/`deploy`/`agent` | Cinco comandos imprimiam resultados fabricados. Agora: `compile`/`validate` carregam os YAML com `DNALoader`/`DNASchema` (exit 1 se falharem); `status`/`simulate`/`deploy`/`autonomous` resolvem o DNA ativo (`BEHAVIOROS_DNA_PATH` → `dnas/<padrão>.yaml`); `simulate` chama `evaluateGovernance()` real; `deploy` imprime o plano de gates do DNA e o resultado real de `preflightAction()`; `protocol` conta os passos presentes em `AgentState.stepHistory`. |
+| "`behavioros deploy` faz o deployment" | **Não faz.** Imprime o plano de gates e o resultado do pre-flight bloqueante (exit 1 se bloqueado) e não corre gates `post` nem publica artefactos. Ver "Limitações abertas". |
+| "`pnpm benchmark` mede a performance" | Script removido do `package.json`: o alvo (`scripts/benchmark.*`) não existe. Os números de performance são **alvos de desenho**, não medições. |
+| Workspace com `apps/*` | Removido de `pnpm-workspace.yaml` — a pasta não existe e o glob não apanhava nada. |
+| Script `test` do `@behavior-os/orchestrator` | Removido: era um `echo` (nenhum teste corria). O pacote não tem suite; está declarado abaixo. |
+| `behavioros init` gera `.mcp.json` a apontar para `mcp-server/dist/server.js` | O caminho não era válido a partir da raiz do projeto. Passa a `join(__dirname, '..', '..', 'mcp-server', 'dist', 'server.js')`. |
+| Códigos de saída `2`/`3` da CLI | **Não existem.** A CLI usa apenas `0` e `1` (documentado em `docs/CLI.md`). |
+| Variáveis `BEHAVIOROS_PROJECT`, `BEHAVIOROS_LOG_LEVEL`, `BEHAVIOROS_STATE_DIR` | **Nenhum código as lê.** `BEHAVIOROS_LOG_LEVEL` ainda era *definida* no `Dockerfile`, no `docker-compose.yml` e em `scripts/smoke-mcp.mjs` — ninguém a consumia; foi removida desses três sítios. A CLI lê `BEHAVIOROS_DNA_PATH`, o plugin `BEHAVIOR_*` e o MCP `BEHAVIOROS_*`. |
+| `EXPOSE 3000` no `Dockerfile` ("MCP server port, if using HTTP transport") | O servidor MCP é **stdio** (zero referências a HTTP/`listen`/SSE no código). `EXPOSE` removido, assim como o mapeamento `3000:3000` do `docker-compose.yml`. |
+| `Dockerfile` a instalar o workspace sem o `packages/orchestrator/package.json` | O `pnpm install --frozen-lockfile` via um grafo de workspace diferente do lockfile. O `COPY` do pacote foi adicionado. |
+| `templates/.agent_state.json.example` e `.agent_state.example.json` (duplicados) | Dois exemplos idênticos, sem referências no código, com o nome **antigo** do ficheiro de estado (o real é `.behavioros/state.json`). Consolidados num só, com o nome correto: `.behavioros/state.example.json`; a pasta `templates/` foi removida. |
+| `CONTRIBUTING.md` dizia `Register in packages/dnas/src/index.ts`, `src/tools/<category>/`, `schemas/src/mcp.ts`, `tests/dna/` | Nenhum desses caminhos existe. Substituídos pelos reais (`server.ts`, `schemas/src/index.ts`, `tests/*.test.ts`). |
+| Script de raiz `cli:init` = `pnpm --filter @behavior-os/cli run init` | O pacote CLI não tem script `init` (o comando falhava). Agora `node packages/cli/dist/cli.js init`; um teste novo (`docs-consistency.test.ts`) valida delegações `pnpm --filter <pkg> run <script>`. |
+| `GUIDE.md`/`docs/SDK.md`: `evaluateQuality()`, `getAgentState(): AgentMetrics`, `.mcp.json` com `dist/mcp-server.js`, Cursor com `serverUrl` HTTP, `opencode.json` com bloco `plugins` | Tudo falso. Nomes/tipos reais: `checkQuality()`, `getAgentState(): AgentState`; MCP é stdio (sem HTTP); o plugin é descoberto em `.opencode/plugins/`. Corrigido. |
+| "45+ tools MCP", "5.200+ testes", "12 padrões DNA", "22 engines" nas regras de editor | Retirado: 27 tools + 2 resources, 21 padrões, 11 motores. As contagens vivem em `docs/CLAIMS.md`. |
+| `plugins/opencode-v2/tests/plugin-basic.test.ts` ("OpenCode Plugin Structure") | O ficheiro assertava literais escritos à mão e **não importava o plugin**: passava mesmo que o plugin divergisse. Reescrito para importar o export real (`PROTOCOL_STEPS`) e ler `dnas/`. |
+| `.behavioros/README.md` "regenerado automaticamente" com `${STEP_2_STATUS}` | Nada o regenera e os placeholders nunca eram substituídos. Passou a documento estático com o mapa real dos passos e dos ficheiros de estado. |
 
 ## Gate pipeline
 
@@ -276,14 +303,17 @@ Limitações honestas do `PostgresStore`:
 - o `pg` **não** é dependência declarada: quem usa o adaptador instala-o
   (`pnpm add pg`) ou injeta o seu `createPool`.
 
-## Sem lacunas conhecidas
+## Fronteiras de desenho e limitações abertas
 
 Todas as afirmações do material público (README, PITCH, ARCHITECTURE,
-CONTINUOUS_IMPROVEMENTS) foram cruzadas com o código. As que não correspondiam
-foram **retiradas** e substituídas pelo valor medido — ver a tabela acima.
+CONTINUOUS_IMPROVEMENTS, regras de editor) foram cruzadas com o código. As que
+não correspondiam foram **retiradas** e substituídas pelo valor medido — ver a
+tabela acima.
 
-Não há, portanto, uma lista de "implementado pela metade" a fechar. O que resta
-são fronteiras de desenho, declaradas para não serem confundidas com defeitos:
+O que resta divide-se em duas categorias, ambas declaradas para que nenhuma seja
+confundida com marketing nem com defeito escondido.
+
+### Fronteiras de desenho (não são defeitos)
 
 - **WORM físico**: imutabilidade por hardware é um requisito de infraestrutura.
   O software entrega deteção (hash-chain + verificação por `seq`).
@@ -295,10 +325,28 @@ são fronteiras de desenho, declaradas para não serem confundidas com defeitos:
 - **Análise estática/NLP**: as propostas de evolução e de correção vêm de
   eventos de aprendizagem; a edição de código é substituição textual única.
 
+### Limitações abertas (medidas, ainda **não** fechadas)
+
+Lacunas reais que continuam abertas. Não são afirmações falsas: são ausências, e
+por isso são listadas em vez de corrigidas por texto.
+
+| # | Limitação | Estado medido |
+|---|---|---|
+| C1 | `deploy` sem deployment | Imprime o plano de gates do DNA e corre o pre-flight bloqueante, mas não executa gates `post` nem publica artefactos. |
+| C2 | Sem rate limiting no servidor MCP | Nenhuma tool tem limite de frequência. |
+| C3 | `examples/` fora do workspace | Os exemplos não são cobertos por `pnpm test` (a pasta está fora dos globs). |
+| C4 | `@behavior-os/orchestrator` sem testes | Não tem suite nenhuma (o script `test` falso foi removido em vez de mantido). |
+| C5 | `behavioros agent` não lista agentes | Mostra o agente resolvido, não o registo de agentes. |
+| C6 | `drift-check` é um subconjunto | Compara `currentStep`/`selectedDna` com `baseline.json`; o `DriftEngine` compara também regras e gates. |
+
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **48 ficheiros / 483 casos**,
-`pnpm typecheck` 10/10 tarefas sem erros e `pnpm lint` (Biome) limpo. Os
+Medido com `pnpm test` (não aspiracional): **50 ficheiros / 514 casos**,
+`pnpm typecheck` 10/10 tarefas sem erros e `pnpm lint:check` (Biome) limpo. Os
 números vivem nos próprios testes, que falham se a contagem derivar:
-`packages/mcp-server/tests/mcp.test.ts` ("27 tools") e
-`plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools").
+`packages/mcp-server/tests/mcp.test.ts` ("27 tools"),
+`plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools"),
+`packages/core/tests/dnas.test.ts` (os 21 YAML passam `DNASchema`) e
+`packages/core/tests/docs-consistency.test.ts` (documentação atual não pode citar
+tools, comandos CLI, scripts `pnpm`, métodos de `BehaviorOS` ou variáveis de
+ambiente que não existam).
