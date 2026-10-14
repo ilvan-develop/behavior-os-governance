@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BehaviorOS } from '@behavior-os/core';
+import { BehaviorOS, DNALoader } from '@behavior-os/core';
 import chalk from 'chalk';
 import { Command } from 'commander';
 
@@ -15,6 +15,41 @@ program
   .name('behavioros')
   .description('Behavior-OS CLI - Governance platform for AI agent teams')
   .version('2.0.0');
+
+/**
+ * Best-effort DNA loader shared by the commands that need governance to be
+ * active. Reads `BEHAVIOROS_DNA_PATH` first, then `<dir>/dnas/<pattern>.yaml`.
+ *
+ * Returns the DNA name that was actually loaded, or `null` when nothing was
+ * loaded. Callers must surface `null` instead of assuming governance ran — an
+ * unloaded DNA means every gate is skipped, not passed.
+ */
+async function loadDnaForCommand(
+  bos: BehaviorOS,
+  dir: string,
+  pattern: string,
+): Promise<string | null> {
+  const candidates = [process.env.BEHAVIOROS_DNA_PATH, join(dir, 'dnas', `${pattern}.yaml`)].filter(
+    (candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0,
+  );
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const yaml = await import('js-yaml');
+      const fs = await import('node:fs/promises');
+      const dna = yaml.load(
+        await fs.readFile(candidate, 'utf-8'),
+      ) as import('@behavior-os/schemas').DNA;
+      await bos.loadDNA(dna);
+      return dna.name;
+    } catch {
+      // Try the next candidate rather than claiming a DNA was loaded.
+    }
+  }
+
+  return null;
+}
 
 // INIT command
 program
@@ -31,7 +66,7 @@ program
       mkdirSync(join(dir, d), { recursive: true });
     }
 
-    // Create .agent_state.json
+    // Create .behavioros/state.json
     const state = {
       currentStep: 0,
       selectedDna: options.dna,
@@ -47,7 +82,7 @@ program
       mcpServers: {
         behavioros: {
           command: 'node',
-          args: [join(__dirname, '..', 'mcp-server', 'dist', 'server.js')],
+          args: [join(__dirname, '..', '..', 'mcp-server', 'dist', 'server.js')],
           env: {
             BEHAVIOROS_DNA_PATH: join(dir, 'dnas', `${options.dna}.yaml`),
           },
@@ -90,7 +125,7 @@ quality:
 // COMPILE command
 program
   .command('compile')
-  .description('Compile DNA patterns')
+  .description('Parse and validate every DNA pattern in dnas/')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
@@ -101,42 +136,45 @@ program
       process.exit(1);
     }
 
-    const files = [
-      'surgical-team.yaml',
-      'enterprise-governance.yaml',
-      'military-operations.yaml',
-      'lean-factory.yaml',
-    ];
-    console.log(chalk.blue('Compiling DNA patterns...'));
+    const fileSystem = await import('node:fs/promises');
+    const files = (await fileSystem.readdir(dnasDir))
+      .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
+      .sort();
+
+    console.log(chalk.blue(`Compiling ${files.length} DNA pattern(s) from dnas/...`));
+
+    const loader = new DNALoader();
+    const yaml = await import('js-yaml');
+    let failed = 0;
 
     for (const file of files) {
-      const filepath = join(dnasDir, file);
-      if (existsSync(filepath)) {
-        try {
-          const content = readFileSync(filepath, 'utf-8');
-          // Basic validation - check for required fields
-          if (content.includes('name:') && content.includes('governance:')) {
-            console.log(chalk.green(`  ✓ ${file}`));
-          } else {
-            console.log(chalk.yellow(`  ⚠ ${file} - missing required fields`));
-          }
-        } catch (_error) {
-          console.log(chalk.red(`  ✗ ${file} - error reading`));
-        }
+      try {
+        // Validated against the full DNASchema, not a substring check.
+        loader.load(yaml.load(readFileSync(join(dnasDir, file), 'utf-8')));
+        console.log(chalk.green(`  ✓ ${file}`));
+      } catch (error) {
+        failed += 1;
+        console.log(chalk.red(`  ✗ ${file} — ${error instanceof Error ? error.message : error}`));
       }
     }
+
+    if (failed > 0) {
+      console.log(chalk.red(`\n✗ ${failed} of ${files.length} pattern(s) failed validation.`));
+      process.exit(1);
+    }
+
+    console.log(chalk.green(`\n✓ ${files.length} pattern(s) compiled and validated.`));
   });
 
 // VALIDATE command
 program
   .command('validate')
-  .description('Validate DNA configurations')
+  .description('Validate the project layout and every DNA pattern in dnas/')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
-    const _bos = new BehaviorOS();
 
-    console.log(chalk.blue('Validating Behavior-OS configuration...'));
+    console.log(chalk.blue('Validating Behavior-OS project...'));
 
     // Check for required files
     const checks = [
@@ -148,11 +186,42 @@ program
     let allPassed = true;
     for (const check of checks) {
       const exists = existsSync(join(dir, check.file));
-      if (check.required && !exists) {
+      if (exists) {
+        console.log(chalk.green(`  ✓ ${check.file}`));
+      } else if (check.required) {
         console.log(chalk.red(`  ✗ ${check.file} - missing`));
         allPassed = false;
       } else {
-        console.log(chalk.green(`  ✓ ${check.file}`));
+        console.log(chalk.gray(`  ○ ${check.file} - optional, not present`));
+      }
+    }
+
+    // Validate every DNA pattern against the schema (the engine's own loader).
+    const dnasDir = join(dir, 'dnas');
+    if (existsSync(dnasDir)) {
+      const fileSystem = await import('node:fs/promises');
+      const files = (await fileSystem.readdir(dnasDir))
+        .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
+        .sort();
+      const loader = new DNALoader();
+      const yaml = await import('js-yaml');
+      let invalid = 0;
+
+      for (const file of files) {
+        try {
+          loader.load(yaml.load(readFileSync(join(dnasDir, file), 'utf-8')));
+        } catch (error) {
+          invalid += 1;
+          console.log(
+            chalk.red(`  ✗ dnas/${file} — ${error instanceof Error ? error.message : error}`),
+          );
+        }
+      }
+
+      if (invalid > 0) {
+        allPassed = false;
+      } else {
+        console.log(chalk.green(`  ✓ dnas/ — ${files.length} pattern(s) valid`));
       }
     }
 
@@ -167,10 +236,22 @@ program
 // STATUS command
 program
   .command('status')
-  .description('Show system status and health')
+  .description('Show engine status plus the local .behavioros/state.json')
   .option('-d, --directory <path>', 'Project directory', '.')
+  .option('--dna <pattern>', 'DNA pattern to load', 'enterprise-governance')
   .action(async (options) => {
     const dir = options.directory;
+
+    const bos = new BehaviorOS();
+    const loaded = await loadDnaForCommand(bos, dir, options.dna);
+    const status = bos.getStatus();
+
+    console.log(chalk.blue('Behavior-OS Status'));
+    console.log(chalk.gray('='.repeat(40)));
+    console.log(`  DNA loaded:  ${loaded ?? 'none'}`);
+    console.log(`  Governance:  ${status.config.governance}`);
+    console.log(`  Missions:    ${status.missions}`);
+    console.log(`  Agents:      ${status.agents}`);
 
     // Load state
     let state = null;
@@ -179,31 +260,28 @@ program
       state = JSON.parse(readFileSync(statePath, 'utf-8'));
     }
 
-    console.log(chalk.blue('Behavior-OS Status'));
-    console.log(chalk.gray('='.repeat(40)));
-
     if (state) {
-      console.log(chalk.cyan(`DNA Pattern: ${state.selectedDna || 'Not selected'}`));
-      console.log(chalk.cyan(`Current Step: ${state.currentStep}/7`));
-      console.log(chalk.cyan(`Active Mission: ${state.activeMission || 'None'}`));
-      console.log(chalk.cyan(`Last Updated: ${state.updatedAt}`));
+      console.log(chalk.cyan(`  State file:  .behavioros/state.json (updated ${state.updatedAt})`));
+      console.log(chalk.cyan(`  DNA Pattern: ${state.selectedDna || 'Not selected'}`));
+      console.log(chalk.cyan(`  Current Step: ${state.currentStep}/7`));
+      console.log(chalk.cyan(`  Active Mission: ${state.activeMission || 'None'}`));
     } else {
-      console.log(chalk.yellow("No state found. Run 'behavioros init' first."));
+      console.log(chalk.yellow('  No .behavioros/state.json (create one with: behavioros init).'));
     }
 
     // Check MCP config
     const mcpPath = join(dir, '.mcp.json');
     if (existsSync(mcpPath)) {
-      console.log(chalk.green('\n✓ MCP configuration found'));
+      console.log(chalk.green('  ✓ .mcp.json present (this command does not start the server)'));
     } else {
-      console.log(chalk.yellow('\n⚠ MCP configuration not found'));
+      console.log(chalk.gray('  ○ .mcp.json not found'));
     }
   });
 
 // DIFF command
 program
   .command('diff')
-  .description('Detect behavioral drift between DNA versions')
+  .description('Compare dnas/*.yaml with .behavioros/baseline.json')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
@@ -273,83 +351,128 @@ program
     }
   });
 
-// EMULATE command
+// SIMULATE command
 program
   .command('simulate')
-  .description('Simulate governance decisions')
+  .description('Evaluate one action against the loaded DNA rules')
   .option('-d, --directory <path>', 'Project directory', '.')
   .option('--action <action>', 'Action to simulate', 'deploy')
   .option('--agent <agent>', 'Agent ID', 'test-agent')
+  .option('--dna <pattern>', 'DNA pattern to load', 'enterprise-governance')
   .action(async (options) => {
     const bos = new BehaviorOS();
+    const loaded = await loadDnaForCommand(bos, options.directory, options.dna);
 
     console.log(chalk.blue(`Simulating: ${options.action}`));
     console.log(chalk.gray(`Agent: ${options.agent}`));
 
-    try {
-      const decision = bos.evaluateGovernance(options.action, {
-        agent: options.agent,
-        context: {},
-      });
-
-      console.log(chalk.green(`Verdict: ${decision.verdict}`));
-      console.log(chalk.gray(`Reason: ${decision.reason}`));
-    } catch (_error) {
-      console.log(chalk.yellow('Simulation completed (no DNA loaded)'));
+    if (!loaded) {
+      console.log(chalk.yellow(`  ⚠ No DNA loaded (looked for dnas/${options.dna}.yaml)`));
+      console.log(chalk.yellow('    Without a DNA there are no rules to evaluate.'));
+      return;
     }
+
+    const decision = bos.evaluateGovernance(options.action, {
+      agent: options.agent,
+      context: { action: options.action },
+    });
+
+    console.log(chalk.gray(`DNA: ${loaded}`));
+    console.log(chalk.green(`Verdict: ${decision.verdict}`));
+    console.log(chalk.gray(`Reason: ${decision.reason}`));
   });
 
 // DEPLOY command
 program
   .command('deploy')
-  .description('Deploy with quality gates')
+  .description('Print the deployment gate plan (does not execute the gates)')
   .option('-d, --directory <path>', 'Project directory', '.')
   .option('--mission-id <id>', 'Mission ID to deploy')
-  .action(async (_options) => {
-    console.log(chalk.blue('Running deployment quality gates...'));
+  .option('--dna <pattern>', 'DNA pattern to load', 'enterprise-governance')
+  .action(async (options) => {
+    const bos = new BehaviorOS();
+    const loaded = await loadDnaForCommand(bos, options.directory, options.dna);
 
-    const gates = ['lint', 'typecheck', 'security', 'coverage'];
-    for (const gate of gates) {
-      console.log(chalk.cyan(`  Checking ${gate}...`));
-      // Simulate check
-      console.log(chalk.green(`    ✓ ${gate} passed`));
+    console.log(chalk.blue('Deployment gate plan'));
+    console.log(chalk.gray('This command prints the plan; it does not run quality gates.'));
+    if (options.missionId) console.log(chalk.gray(`  Mission: ${options.missionId}`));
+
+    if (!loaded) {
+      console.log(chalk.yellow(`  ⚠ No DNA loaded (looked for dnas/${options.dna}.yaml)`));
+      console.log(
+        chalk.gray(
+          '    Quality gates are declared by the DNA: pass --dna or set BEHAVIOROS_DNA_PATH.',
+        ),
+      );
+    } else {
+      console.log(chalk.gray(`  DNA: ${loaded}`));
     }
 
-    console.log(chalk.green('\n✓ All quality gates passed. Ready for deployment.'));
+    const gates = bos.getPipelineEngine().getGates();
+    if (gates.length === 0) {
+      console.log(chalk.gray('  (pipeline disabled or DNA declares no quality gates)'));
+    } else {
+      for (const gate of gates) {
+        console.log(
+          `  ${gate.phase.padEnd(4)} ${gate.id}${gate.blocking ? '' : ' (non-blocking)'}`,
+        );
+      }
+    }
+
+    // The `governance` pre gate is the one gate that can run here for real: it
+    // evaluates the `deploy` action against the loaded DNA and vetoes on `deny`.
+    const identity = bos.resolveAgentIdentity();
+    const preflight = bos.preflightAction('deploy', { agent: identity.agentId });
+    if (preflight.allowed) {
+      console.log(chalk.green(`\n  Pre-flight (governance): allowed — agent ${identity.agentId}`));
+    } else {
+      console.log(
+        chalk.red(`\n  Pre-flight (governance): blocked by ${preflight.blockedBy ?? 'a gate'}`),
+      );
+      process.exitCode = 1;
+    }
+
+    console.log(
+      chalk.gray('\n  Run the real checks with: pnpm lint:check && pnpm typecheck && pnpm test'),
+    );
   });
 
 // ECOSYSTEM command
 program
   .command('ecosystem')
-  .description('Show ecosystem status and statistics')
+  .description('Report what can be read from the project on disk')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
     const dnasDir = join(dir, 'dnas');
 
-    let dnaCount = 0;
+    let dnaNames: string[] = [];
     if (existsSync(dnasDir)) {
       try {
         const files = await import('node:fs/promises');
         const entries = await files.readdir(dnasDir);
-        dnaCount = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml')).length;
+        dnaNames = entries
+          .filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'))
+          .map((f) => f.replace(/\.(yaml|yml)$/, ''))
+          .sort();
       } catch {
         // directory may not exist
       }
     }
 
-    console.log(chalk.blue('Behavior-OS Ecosystem'));
+    console.log(chalk.blue('Behavior-OS ecosystem'));
     console.log(chalk.gray('='.repeat(40)));
-    console.log(`  DNA Patterns:  ${dnaCount} loaded`);
-    console.log('  MCP Tools:     9 registered');
-    console.log('  Governance:    block | escalate | warn | log | transform');
-    console.log('  Quality Gates: configurable per DNA pattern');
+    console.log(`  DNA patterns:  ${dnaNames.length}`);
+    for (const name of dnaNames) console.log(chalk.gray(`    - ${name}`));
+    console.log('  Verdicts:      allow | deny | escalate | transform');
+    console.log(chalk.gray('  Gate plan:     behavioros deploy --dna <pattern>'));
+    console.log(chalk.gray('  Engine/tool inventory: docs/CLAIMS.md'));
   });
 
 // AGENT command
 program
   .command('agent')
-  .description('Manage agents')
+  .description('Show the local state summary and how to register agents')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action((options) => {
     const dir = options.directory;
@@ -371,7 +494,9 @@ program
         console.log(chalk.yellow('  Invalid state file.'));
       }
     } else {
-      console.log(chalk.yellow("  No agents registered. Run 'behavioros init' first."));
+      console.log(
+        chalk.yellow('  No .behavioros/state.json found (create one with: behavioros init).'),
+      );
     }
 
     console.log(chalk.gray('\n  Use the SDK to register and manage agents:'));
@@ -386,7 +511,7 @@ program
 // AUTONOMOUS command
 program
   .command('autonomous')
-  .description('Run fully autonomous task through the 7-step protocol')
+  .description('Dry-run the 7-step protocol on a task (no work is executed; audit is simulated)')
   .option('-d, --directory <path>', 'Project directory', '.')
   .option('-t, --task <task>', 'Task description')
   .option('--dna <pattern>', 'DNA pattern to use', 'enterprise-governance')
@@ -400,37 +525,41 @@ program
     const dir = options.directory;
     const bos = new BehaviorOS();
 
-    console.log(chalk.blue(`Autonomous task: ${options.task}`));
+    console.log(chalk.blue(`Protocol dry run: ${options.task}`));
+    console.log(chalk.gray('No work is executed. The audit below is simulated (simulate: true).'));
     console.log(chalk.gray('='.repeat(40)));
 
-    // Step 1: Load DNA
-    console.log(chalk.cyan('\n[Step 1/7] Loading DNA pattern...'));
-    try {
-      const yaml = await import('js-yaml');
-      const fs = await import('node:fs/promises');
-      const dnaPath = join(dir, 'dnas', `${options.dna}.yaml`);
-      if (existsSync(dnaPath)) {
-        const content = await fs.readFile(dnaPath, 'utf-8');
-        const dna = yaml.load(content) as import('@behavior-os/schemas').DNA;
-        await bos.loadDNA(dna);
-        console.log(chalk.green(`  ✓ Loaded DNA: ${options.dna}`));
-      } else {
-        console.log(chalk.yellow(`  ⚠ DNA file not found: ${dnaPath}, using default`));
-        await bos.loadDNA({
-          name: options.dna,
-          version: '2.0.0',
-          description: 'Default governance',
-          personas: [],
-          governance: [],
-          quality: [],
-        });
-      }
-    } catch (err) {
-      console.log(chalk.yellow(`  ⚠ Could not load DNA: ${err}`));
+    // Protocol step 1 — select DNA.
+    console.log(chalk.cyan('\n[Step 1/7] Select DNA'));
+    const loaded = await loadDnaForCommand(bos, dir, options.dna);
+    if (loaded) {
+      console.log(chalk.green(`  ✓ Loaded DNA: ${loaded}`));
+    } else {
+      console.log(chalk.yellow(`  ⚠ No DNA loaded (looked for dnas/${options.dna}.yaml)`));
+      console.log(chalk.yellow('    Governance rules are unavailable without a DNA.'));
+    }
+    console.log(chalk.gray('  (steps 2–3 run interactively: bos_list_dna / bos_get_state)'));
+
+    // Pre-flight is not a protocol step: it is the real governance check.
+    const identity = bos.resolveAgentIdentity();
+    let verdict: string | null = null;
+    if (loaded) {
+      const decision = bos.evaluateGovernance('execute_task', {
+        agent: identity.agentId,
+        context: { task: options.task },
+      });
+      verdict = decision.verdict;
+      console.log(
+        chalk[decision.verdict === 'deny' ? 'red' : 'green'](
+          `  Pre-flight (governance): ${decision.verdict.toUpperCase()} — ${decision.reason}`,
+        ),
+      );
+    } else {
+      console.log(chalk.yellow('  Pre-flight (governance): skipped — no DNA loaded'));
     }
 
-    // Step 2: Create mission
-    console.log(chalk.cyan('\n[Step 2/7] Creating mission...'));
+    // Protocol step 4 — create mission.
+    console.log(chalk.cyan('\n[Step 4/7] Create mission'));
     const mission = bos.createMission({
       title: options.task,
       type: 'feature',
@@ -438,27 +567,16 @@ program
     });
     console.log(chalk.green(`  ✓ Mission created: ${mission.id}`));
 
-    // Step 3: Evaluate governance
-    console.log(chalk.cyan('\n[Step 3/7] Evaluating governance...'));
-    const decision = bos.evaluateGovernance('execute_task', {
-      agent: 'autonomous-agent',
-      context: { task: options.task },
-    });
-    console.log(
-      chalk[decision.verdict === 'deny' ? 'red' : 'green'](
-        `  ${decision.verdict.toUpperCase()}: ${decision.reason}`,
-      ),
-    );
-
-    // Step 4: Start mission
+    // Protocol step 5 — start mission.
+    console.log(chalk.cyan('\n[Step 5/7] Start mission'));
     bos.startMission(mission.id);
     console.log(chalk.green('  ✓ Mission started'));
 
-    // Step 5: Run audit
-    console.log(chalk.cyan('\n[Step 5/7] Running audit...'));
+    // Protocol step 6 — run audit (simulated).
+    console.log(chalk.cyan('\n[Step 6/7] Run audit (simulated)'));
     const report = bos.runAudit({
       missionId: mission.id,
-      agentId: 'autonomous-agent',
+      agentId: identity.agentId,
       simulate: true,
     });
     console.log(
@@ -467,19 +585,18 @@ program
       ),
     );
 
-    // Step 6: Record learning
-    console.log(chalk.cyan('\n[Step 6/7] Recording learning...'));
+    // Protocol step 7 — record learning.
+    console.log(chalk.cyan('\n[Step 7/7] Record learning'));
     const event = bos.recordLearning({
       type: 'insight',
-      source: 'autonomous-task',
-      content: `Task executed: ${options.task}`,
-      impact: decision.verdict === 'deny' ? 'high' : 'medium',
+      source: 'autonomous-dry-run',
+      content: `Dry run of task: ${options.task}`,
+      impact: verdict === 'deny' ? 'high' : 'medium',
       relatedMission: mission.id,
     });
     console.log(chalk.green(`  ✓ Learning recorded: ${event.id}`));
 
-    // Step 7: Update state
-    console.log(chalk.cyan('\n[Step 7/7] Updating protocol state...'));
+    // Updating a local state file is not one of the 7 protocol steps.
     const statePath = join(dir, '.behavioros', 'state.json');
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -489,19 +606,19 @@ program
       ];
       state.updatedAt = new Date().toISOString();
       writeFileSync(statePath, JSON.stringify(state, null, 2));
+      console.log(chalk.gray('  (state.json updated — not a protocol step)'));
     }
-    console.log(chalk.green('  ✓ Protocol state updated'));
 
-    console.log(chalk.green('\n✅ Autonomous task completed.'));
+    console.log(chalk.green('\n✅ Protocol dry run completed — no work was executed.'));
     console.log(chalk.gray(`  Mission: ${mission.id}`));
-    console.log(chalk.gray(`  Governance: ${decision.verdict}`));
-    console.log(chalk.gray(`  Audit: ${report.overall}`));
+    console.log(chalk.gray(`  Governance: ${verdict ?? 'skipped (no DNA)'}`));
+    console.log(chalk.gray(`  Audit: ${report.overall} (simulated)`));
   });
 
 // PROTOCOL command
 program
   .command('protocol')
-  .description('Check 7-step protocol compliance')
+  .description('Check the 7-step protocol against the local state file')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
@@ -513,14 +630,15 @@ program
     }
 
     const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+    // Mirrors PROTOCOL_TOOL_STEPS in @behavior-os/core (engine/behavior-os.ts).
     const steps = [
       { num: 1, name: 'Select DNA', tool: 'bos_select_dna' },
-      { num: 2, name: 'Display DNA Block', tool: 'visual' },
-      { num: 3, name: 'Resolve Truth', tool: 'bos_resolve_truth' },
-      { num: 4, name: 'Create Mission', tool: 'create-mission' },
-      { num: 5, name: 'Delegate', tool: 'task' },
-      { num: 6, name: 'Run Audit', tool: 'bos_run_audit' },
-      { num: 7, name: 'Record Learning', tool: 'record-learning' },
+      { num: 2, name: 'Confirm DNA rules', tool: 'bos_list_dna' },
+      { num: 3, name: 'Resolve state', tool: 'bos_get_state' },
+      { num: 4, name: 'Create mission', tool: 'bos_create_mission' },
+      { num: 5, name: 'Start mission', tool: 'bos_start_mission' },
+      { num: 6, name: 'Run audit', tool: 'bos_run_audit' },
+      { num: 7, name: 'Record learning', tool: 'bos_record_learning' },
     ];
 
     console.log(chalk.blue('Protocol Compliance Check'));
@@ -531,12 +649,21 @@ program
       const icon = completed ? chalk.green('✓') : chalk.yellow('○');
       console.log(`${icon} Step ${step.num}: ${step.name} (${step.tool})`);
     }
+
+    console.log(
+      chalk.gray(
+        '\nThis reads .behavioros/state.json (written by `behavioros init`/`autonomous`).',
+      ),
+    );
+    console.log(
+      chalk.gray('Live protocol state lives in the host: the plugin stores it via ctx.storage.'),
+    );
   });
 
 // DRIFT-CHECK command
 program
   .command('drift-check')
-  .description('Compare current vs baseline behavior')
+  .description('Compare selectedDna/currentStep in state.json against .behavioros/baseline.json')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
@@ -546,9 +673,7 @@ program
     console.log(chalk.blue('Checking for behavioral drift...'));
 
     if (!existsSync(baselinePath)) {
-      console.log(
-        chalk.yellow('  No baseline found. Create one with: behavioros diff --save-baseline'),
-      );
+      console.log(chalk.yellow('  No baseline found. Create one with: behavioros diff'));
       return;
     }
 
