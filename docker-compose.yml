@@ -1,19 +1,15 @@
-version: '3.8'
-
 services:
   behavioros-mcp:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
+      # The MCP server is stdio-only and reads BEHAVIOROS_DNA_PATH.
       - BEHAVIOROS_DNA_PATH=/app/dnas/enterprise-governance.yaml
-      - BEHAVIOROS_LOG_LEVEL=info
     volumes:
       - .:/app
       - /app/node_modules
     command: ["pnpm", "mcp:start"]
-    ports:
-      - "3000:3000"
 
   behavioros-tests:
     build:

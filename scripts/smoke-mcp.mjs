@@ -19,10 +19,7 @@ const serverCwd = path.join(repoRoot, 'packages', 'mcp-server');
 
 const child = spawn(process.execPath, [serverPath], {
   cwd: serverCwd,
-  env: {
-    ...process.env,
-    BEHAVIOROS_LOG_LEVEL: 'error',
-  },
+  env: process.env,
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 

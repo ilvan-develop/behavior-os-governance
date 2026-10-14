@@ -14,6 +14,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/cli/package.json packages/cli/
 COPY packages/mcp-server/package.json packages/mcp-server/
+COPY packages/orchestrator/package.json packages/orchestrator/
 COPY plugins/opencode-v2/package.json plugins/opencode-v2/
 
 # Install dependencies
@@ -27,10 +28,7 @@ RUN pnpm build
 
 # Set environment
 ENV NODE_ENV=production
-ENV BEHAVIOROS_LOG_LEVEL=info
 
-# Expose MCP server port (if using HTTP transport)
-EXPOSE 3000
-
-# Default command
+# Default command: the MCP server speaks JSON-RPC over stdio (no HTTP transport,
+# so there is no port to expose).
 CMD ["pnpm", "mcp:start"]
