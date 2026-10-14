@@ -3,6 +3,7 @@ import type {
   AgentState,
   AgentType,
   AuditReport,
+  CodeEditRecord,
   CodeFixProposal,
   CodeFixResult,
   Decision,
@@ -24,6 +25,7 @@ import type {
 } from '@behavior-os/schemas';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
+import { CodeEditEngine, type CodeEditPreview } from './code-edit-engine.js';
 import type { DecideOptions } from './decision-engine.js';
 import {
   type DecisionEngine,
@@ -67,6 +69,36 @@ export interface BehaviorOSConfig {
    * call. Evolution can only add `warn` rules — never blocking ones.
    */
   evolution?: { enabled?: boolean; minConfidence?: number };
+  /**
+   * Governed code editing. Off by default: `applyCodeEdit` always computes and
+   * records a preview (the dry-run), but only rewrites a file when
+   * `codeEdit.enabled === true` **and** the call passes `apply: true` (and, when
+   * votes are supplied, the decision engine approves them).
+   */
+  codeEdit?: { enabled?: boolean; root?: string; extensions?: readonly string[] };
+}
+
+/**
+ * Outcome of {@link BehaviorOS.applyCodeEdit}.
+ *
+ * A preview is always computed when the request is valid, even when nothing is
+ * written: that is what makes the dry-run the default and the refusal explicit.
+ */
+export interface CodeEditApplyResult {
+  /** Validation result, diff and hashes; `null` when a guard rail refused it. */
+  preview: CodeEditPreview | null;
+  /** Persisted evaluation record (dry-runs, refusals and applications alike). */
+  record: CodeEditRecord | null;
+  /** Whether the file on disk was rewritten. */
+  applied: boolean;
+  /** Whether `config.codeEdit.enabled` allowed writing. */
+  enabled: boolean;
+  /** Why nothing was written: `dry-run`, `opt-in-disabled`, `vote-rejected`, … */
+  reason?: string;
+  /** Guard-rail message when the request itself was refused. */
+  error?: string;
+  /** Present when votes were supplied to gate the change. */
+  decision?: Decision;
 }
 
 /** Outcome of {@link BehaviorOS.applyEvolution}. */
@@ -85,8 +117,13 @@ export interface EvolutionResult {
 export interface CodeFixApplyResult {
   /** Proposals that met the confidence bar (including already-applied ones). */
   proposals: CodeFixProposal[];
-  /** The subset that was persisted as {@link CodeFixResult} records. */
+  /** The subset that was persisted as `applied: true` {@link CodeFixResult} records. */
   applied: CodeFixResult[];
+  /**
+   * Proposals rejected by a vote, persisted as `applied: false` records so the
+   * refusal is part of the versioned history instead of disappearing.
+   */
+  rejected: CodeFixResult[];
   /** Whether `config.evolution.enabled` allowed writing. */
   enabled: boolean;
   /** Present when votes were supplied to gate the change. */
@@ -170,6 +207,7 @@ export class BehaviorOS {
   private readonly config: BehaviorOSConfig;
   private store: Store | null = null;
   private pipeline: PipelineEngine | null = null;
+  private codeEditEngine: CodeEditEngine | null = null;
 
   constructor(config: BehaviorOSConfig = {}) {
     this.config = config;
@@ -785,7 +823,7 @@ export class BehaviorOS {
     const enabled = this.config.evolution?.enabled === true;
 
     if (options.apply !== true || !enabled) {
-      return { proposals, applied: [], enabled };
+      return { proposals, applied: [], rejected: [], enabled };
     }
 
     let decision: Decision | undefined;
@@ -800,37 +838,71 @@ export class BehaviorOS {
       voteOutcome = decision.outcome;
       voteTally = { approve: decision.approve, reject: decision.reject, abstain: decision.abstain };
       if (decision.outcome !== 'approved') {
-        return { proposals, applied: [], enabled, decision };
+        // Record the refusal so the proposal history stays versioned: a rejected
+        // proposal is evidence, not noise.
+        const rejected = this.recordCodeFixResults(proposals, {
+          applied: false,
+          voteOutcome,
+          voteTally,
+        });
+        return { proposals, applied: [], rejected, enabled, decision };
       }
     }
 
-    const applied: CodeFixResult[] = [];
-    const existingPatterns = new Set(this.listCodeFixResults().map((r) => r.pattern));
-    for (const proposal of proposals) {
-      if (existingPatterns.has(proposal.pattern)) continue;
+    // Only *applied* records block a re-application, so a proposal that was
+    // rejected once can still be approved later.
+    const existingPatterns = new Set(
+      this.listCodeFixResults()
+        .filter((result) => result.applied)
+        .map((result) => result.pattern),
+    );
+    const fresh = proposals.filter((proposal) => !existingPatterns.has(proposal.pattern));
+    const applied = this.recordCodeFixResults(fresh, {
+      applied: true,
+      ...(voteOutcome ? { voteOutcome } : {}),
+      ...(voteTally ? { voteTally } : {}),
+    });
+    for (const result of applied) {
+      this.recordLearning({
+        type: 'optimization',
+        source: 'code-fix-evolution',
+        content: `Applied code fix for pattern ${result.pattern} (confidence ${result.confidence})`,
+        impact: 'medium',
+        relatedPattern: result.pattern,
+        advanceProtocol: false,
+      });
+    }
+
+    return { proposals, applied, rejected: [], enabled, ...(decision ? { decision } : {}) };
+  }
+
+  /**
+   * Persist one {@link CodeFixResult} per proposal. Best effort: without a store
+   * the records are still returned, like the rest of the engine.
+   */
+  private recordCodeFixResults(
+    proposals: CodeFixProposal[],
+    options: {
+      applied: boolean;
+      voteOutcome?: DecisionOutcome;
+      voteTally?: { approve: number; reject: number; abstain: number };
+    },
+  ): CodeFixResult[] {
+    return proposals.map((proposal) => {
       const result: CodeFixResult = {
         id: `fixr-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         proposalId: proposal.id,
         pattern: proposal.pattern,
         confidence: proposal.confidence,
-        applied: true,
-        ...(voteOutcome ? { voteOutcome, voteTally } : {}),
+        applied: options.applied,
+        ...(options.voteOutcome ? { voteOutcome: options.voteOutcome } : {}),
+        ...(options.voteTally ? { voteTally: options.voteTally } : {}),
+        ...(this.agentState.activeMission ? { missionId: this.agentState.activeMission } : {}),
         timestamp: new Date().toISOString(),
-        missionId: this.agentState.activeMission ?? undefined,
       };
       this.store?.saveCodeFixResult(result);
-      this.recordLearning({
-        type: 'optimization',
-        source: 'code-fix-evolution',
-        content: `Applied code-fix proposal ${result.id} (confidence ${result.confidence})`,
-        impact: 'medium',
-        relatedPattern: proposal.pattern,
-        advanceProtocol: false,
-      });
-      applied.push(result);
-    }
-
-    return { proposals, applied, enabled, ...(decision ? { decision } : {}) };
+      return result;
+    });
   }
 
   /**
@@ -838,6 +910,170 @@ export class BehaviorOS {
    */
   listCodeFixResults(limit = 50): CodeFixResult[] {
     return this.store?.listCodeFixResults(limit) ?? [];
+  }
+
+  // Governed code editing ------------------------------------------------
+  /** The lazily created code-edit engine, bound to `config.codeEdit.root`. */
+  getCodeEditEngine(): CodeEditEngine {
+    if (!this.codeEditEngine) {
+      this.codeEditEngine = new CodeEditEngine({
+        root: this.config.codeEdit?.root,
+        extensions: this.config.codeEdit?.extensions,
+      });
+    }
+    return this.codeEditEngine;
+  }
+
+  /** Read persisted code-edit records (dry-runs and refusals included). */
+  listCodeEdits(limit = 50): CodeEditRecord[] {
+    return this.store?.listCodeEdits(limit) ?? [];
+  }
+
+  /**
+   * Validate, preview and (only when the locks allow it) apply a single-text
+   * replacement edit to a file inside the workspace.
+   *
+   * Four independent guards, in order:
+   * 1. the guard rails in {@link CodeEditEngine.preview} (path inside the root,
+   *    editable extension, unique match, size cap);
+   * 2. `apply: true` — without it this is a **dry run** and nothing is written;
+   * 3. `config.codeEdit.enabled === true` — the opt-in lock;
+   * 4. when `votes` are supplied, the decision engine must approve them.
+   *
+   * Every evaluated edit is recorded (applied or not) with the before/after
+   * hashes, so refusals are auditable instead of invisible. The write itself is
+   * atomic and refuses a stale `expectedBeforeHash` instead of overwriting
+   * concurrent changes.
+   */
+  applyCodeEdit(options: {
+    file: string;
+    find: string;
+    replace: string;
+    apply?: boolean;
+    expectedBeforeHash?: string;
+    votes?: Vote[];
+    policy?: DecisionPolicy;
+    missionId?: string;
+  }): CodeEditApplyResult {
+    const enabled = this.config.codeEdit?.enabled === true;
+    const engine = this.getCodeEditEngine();
+
+    let preview: CodeEditPreview;
+    try {
+      preview = engine.preview({
+        file: options.file,
+        find: options.find,
+        replace: options.replace,
+      });
+    } catch (error) {
+      return {
+        preview: null,
+        record: null,
+        applied: false,
+        enabled,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const base = {
+      enabled,
+      preview,
+      missionId: options.missionId,
+    };
+    const record = (
+      applied: boolean,
+      reason: string,
+      vote?: {
+        outcome: DecisionOutcome;
+        tally: { approve: number; reject: number; abstain: number };
+      },
+    ): CodeEditRecord => {
+      const identity = this.resolveAgentIdentity();
+      const entry: CodeEditRecord = {
+        id: `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file: preview.file,
+        beforeHash: preview.beforeHash,
+        afterHash: preview.afterHash,
+        bytesBefore: preview.bytesBefore,
+        bytesAfter: preview.bytesAfter,
+        addedLines: preview.addedLines,
+        removedLines: preview.removedLines,
+        occurrences: preview.occurrences,
+        applied,
+        reason,
+        agentId: identity.agentId,
+        dnaPattern: identity.dnaPattern,
+        ...(vote ? { voteOutcome: vote.outcome, voteTally: vote.tally } : {}),
+        ...((options.missionId ?? this.agentState.activeMission)
+          ? { missionId: options.missionId ?? this.agentState.activeMission ?? undefined }
+          : {}),
+        timestamp: new Date().toISOString(),
+      };
+      this.store?.saveCodeEdit(entry);
+      return entry;
+    };
+
+    if (options.apply !== true) {
+      return { ...base, record: record(false, 'dry-run'), applied: false, reason: 'dry-run' };
+    }
+    if (!enabled) {
+      return {
+        ...base,
+        record: record(false, 'opt-in-disabled'),
+        applied: false,
+        reason: 'opt-in-disabled',
+      };
+    }
+
+    let decision: Decision | undefined;
+    if (options.votes && options.votes.length > 0) {
+      decision = this.decide({
+        subject: `Code edit ${preview.file}`,
+        votes: options.votes,
+        policy: options.policy,
+      });
+      const tally = {
+        approve: decision.approve,
+        reject: decision.reject,
+        abstain: decision.abstain,
+      };
+      if (decision.outcome !== 'approved') {
+        return {
+          ...base,
+          record: record(false, 'vote-rejected', { outcome: decision.outcome, tally }),
+          applied: false,
+          reason: 'vote-rejected',
+          decision,
+        };
+      }
+    }
+
+    try {
+      engine.apply(
+        { file: options.file, find: options.find, replace: options.replace },
+        { expectedBeforeHash: options.expectedBeforeHash },
+      );
+    } catch (error) {
+      return {
+        ...base,
+        record: record(false, 'guard-refused'),
+        applied: false,
+        reason: 'guard-refused',
+        error: error instanceof Error ? error.message : String(error),
+        ...(decision ? { decision } : {}),
+      };
+    }
+
+    const appliedRecord = record(true, 'applied');
+    this.recordLearning({
+      type: 'optimization',
+      source: 'code-edit',
+      content: `Applied governed edit to ${preview.file} (${preview.beforeHash.slice(0, 19)} -> ${preview.afterHash.slice(0, 19)})`,
+      impact: 'medium',
+      relatedMission: appliedRecord.missionId,
+      advanceProtocol: false,
+    });
+    return { ...base, record: appliedRecord, applied: true, ...(decision ? { decision } : {}) };
   }
 
   // Decisions (voting/quorum) ----------------------------------------------

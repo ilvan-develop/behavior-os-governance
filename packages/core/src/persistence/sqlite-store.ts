@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import type {
   Agent,
   AuditReport,
+  CodeEditRecord,
   CodeFixResult,
   Decision,
   LearningEvent,
@@ -138,6 +139,18 @@ export class SqliteStore implements Store {
         vote_outcome TEXT,
         vote_tally TEXT,
         mission_id TEXT,
+        created_at TEXT,
+        json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS code_edits (
+        id TEXT PRIMARY KEY,
+        file TEXT,
+        applied INTEGER,
+        reason TEXT,
+        agent_id TEXT,
+        mission_id TEXT,
+        before_hash TEXT,
+        after_hash TEXT,
         created_at TEXT,
         json TEXT NOT NULL
       );
@@ -357,6 +370,44 @@ export class SqliteStore implements Store {
       .prepare('SELECT json FROM code_fix_results ORDER BY created_at DESC LIMIT ?')
       .all(limit);
     return this.parseRows<CodeFixResult>(rows);
+  }
+
+  // Governed code edits (applyCodeEdit) ------------------------------------
+  saveCodeEdit(record: CodeEditRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO code_edits (id, file, applied, reason, agent_id, mission_id, before_hash, after_hash, created_at, json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           file = excluded.file,
+           applied = excluded.applied,
+           reason = excluded.reason,
+           agent_id = excluded.agent_id,
+           mission_id = excluded.mission_id,
+           before_hash = excluded.before_hash,
+           after_hash = excluded.after_hash,
+           created_at = excluded.created_at,
+           json = excluded.json`,
+      )
+      .run(
+        record.id,
+        record.file,
+        record.applied ? 1 : 0,
+        record.reason ?? null,
+        record.agentId,
+        record.missionId ?? null,
+        record.beforeHash,
+        record.afterHash,
+        record.timestamp,
+        JSON.stringify(record),
+      );
+  }
+
+  listCodeEdits(limit = 50): CodeEditRecord[] {
+    const rows = this.db
+      .prepare('SELECT json FROM code_edits ORDER BY created_at DESC LIMIT ?')
+      .all(limit);
+    return this.parseRows<CodeEditRecord>(rows);
   }
 
   // Key/value metadata -----------------------------------------------------

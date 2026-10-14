@@ -9,6 +9,7 @@
 import type {
   Agent,
   AuditReport,
+  CodeEditRecord,
   CodeFixResult,
   Decision,
   LearningEvent,
@@ -45,6 +46,10 @@ export interface Store {
   // Code-fix results (persisted by applyCodeFixes)
   saveCodeFixResult(result: CodeFixResult): void;
   listCodeFixResults(limit?: number): CodeFixResult[];
+
+  // Governed code edits (persisted by applyCodeEdit, dry-runs included)
+  saveCodeEdit(record: CodeEditRecord): void;
+  listCodeEdits(limit?: number): CodeEditRecord[];
 
   // Key/value metadata
   setMeta(key: string, value: string): void;

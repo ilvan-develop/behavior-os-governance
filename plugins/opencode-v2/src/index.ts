@@ -48,7 +48,14 @@ const STORAGE_KEY = 'behavioros:state';
 
 function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
-    behaviorOS = new BehaviorOS();
+    behaviorOS = new BehaviorOS({
+      // Opt-in governed code editing: off unless explicitly enabled, and even
+      // then a write requires `apply: true` on the individual call.
+      codeEdit: {
+        enabled: process.env.BEHAVIOR_OS_CODE_EDIT === 'true',
+        root: process.env.BEHAVIOR_OS_CODE_EDIT_ROOT,
+      },
+    });
   }
   return behaviorOS;
 }
@@ -1198,6 +1205,85 @@ export default Plugin.define({
           }
           const drift = bos.compareDNADrift(a, b);
           return { content: JSON.stringify(drift, null, 2) };
+        },
+      });
+
+      // Tool 28: bos_code_edit — governed preview/apply of a code edit
+      tools.add({
+        name: 'bos_code_edit',
+        description:
+          'Preview (dry-run) or apply a governed edit to a workspace file. Writes only when code editing is enabled and apply:true; optional votes gate the change.',
+        input: {
+          type: 'object',
+          properties: {
+            file: { type: 'string' },
+            find: { type: 'string' },
+            replace: { type: 'string' },
+            apply: { type: 'boolean' },
+            expectedBeforeHash: { type: 'string' },
+            missionId: { type: 'string' },
+            votes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  voterId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['voterId', 'choice'],
+              },
+            },
+            policy: { type: 'string', enum: ['majority', 'supermajority', 'unanimous'] },
+          },
+          required: ['file', 'find', 'replace'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            file: string;
+            find: string;
+            replace: string;
+            apply?: boolean;
+            expectedBeforeHash?: string;
+            missionId?: string;
+            votes?: Array<{ voterId: string; choice: string; weight?: number; reason?: string }>;
+            policy?: string;
+          };
+          const result = bos.applyCodeEdit({
+            file: params.file,
+            find: params.find,
+            replace: params.replace,
+            apply: params.apply,
+            expectedBeforeHash: params.expectedBeforeHash,
+            missionId: params.missionId,
+            votes: params.votes?.map((v) => ({
+              voterId: v.voterId,
+              choice: v.choice as 'approve' | 'reject' | 'abstain',
+              weight: v.weight,
+              reason: v.reason,
+            })),
+            policy: params.policy as 'majority' | 'supermajority' | 'unanimous',
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      // Tool 29: bos_list_code_edits — the versioned history of code edits
+      tools.add({
+        name: 'bos_list_code_edits',
+        description:
+          'List persisted code-edit records, dry-runs and refusals included (CodeEditResult records)',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          const records = bos.listCodeEdits(params.limit);
+          return { content: JSON.stringify(records, null, 2) };
         },
       });
     });

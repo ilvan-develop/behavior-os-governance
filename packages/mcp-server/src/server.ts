@@ -24,6 +24,13 @@ function getBehaviorOS(): BehaviorOS {
       persistence: process.env.BEHAVIOROS_DB_PATH
         ? { path: process.env.BEHAVIOROS_DB_PATH }
         : undefined,
+      // Governed code editing is opt-in and dry-run by default; set
+      // BEHAVIOROS_CODE_EDIT=true (plus an explicit apply=true per call) to let
+      // bos_code_edit rewrite files inside BEHAVIOROS_CODE_EDIT_ROOT.
+      codeEdit: {
+        enabled: process.env.BEHAVIOROS_CODE_EDIT === 'true',
+        root: process.env.BEHAVIOROS_CODE_EDIT_ROOT,
+      },
     });
   }
   return behaviorOS;
@@ -778,6 +785,122 @@ server.registerTool(
       const results = bos.listCodeFixResults(limit);
       return {
         content: [{ type: 'text', text: JSON.stringify(results, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// GOVERNED CODE EDITING
+// ============================================================
+
+server.registerTool(
+  'bos_code_edit',
+  {
+    description:
+      'Preview (dry-run) or apply a single-text replacement inside a workspace file. Writes only when code editing is enabled (BEHAVIOROS_CODE_EDIT=true) *and* apply=true; optional votes gate the change. Every evaluation is persisted with before/after SHA-256 hashes.',
+    inputSchema: z.object({
+      file: z.string().describe('File path, absolute or relative to the workspace root'),
+      find: z.string().describe('Exact text to replace; must occur exactly once'),
+      replace: z.string().describe('Replacement text'),
+      apply: z
+        .boolean()
+        .optional()
+        .describe(
+          'Write the change (requires code editing to be enabled). Default false = dry run',
+        ),
+      expectedBeforeHash: z
+        .string()
+        .optional()
+        .describe('Hash from a previous preview; refuses a file that changed since'),
+      missionId: z.string().optional().describe('Mission this edit belongs to'),
+      applyVotes: z.array(z.any()).optional().describe('Votes gating the change'),
+      policy: z
+        .enum(['majority', 'supermajority', 'unanimous'])
+        .optional()
+        .describe('Vote policy when votes are supplied'),
+    }),
+    annotations: {
+      destructiveHint: true,
+      readOnlyHint: false,
+      title: 'Governed code edit',
+    },
+  },
+  async ({
+    file,
+    find,
+    replace,
+    apply,
+    expectedBeforeHash,
+    votes,
+    policy,
+  }: {
+    file: string;
+    find: string;
+    replace: string;
+    apply?: boolean;
+    expectedBeforeHash?: string;
+    votes?: Vote[];
+    policy?: DecisionPolicy;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.applyCodeEdit({
+        file,
+        find,
+        replace,
+        apply,
+        expectedBeforeHash,
+        votes,
+        policy,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        ...(result.error ? { isError: true } : {}),
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_code_edits',
+  {
+    description:
+      'List persisted code-edit records — dry runs, refusals and applied edits alike (CodeEditResult records)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum results to return (default 50)'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      title: 'List code edits',
+    },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const records = bos.listCodeEdits(limit);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(records, null, 2) }],
       };
     } catch (error) {
       return {

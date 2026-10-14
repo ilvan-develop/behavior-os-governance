@@ -86,6 +86,65 @@ describe('DriftEngine', () => {
     expect(drift.significant).toBe(true);
   });
 
+  it('detects a change inside a rule/gate that keeps the same id', () => {
+    const oldDna = makeDNA();
+    const newDna = makeDNA({
+      governance: [
+        // r1 same id, tightened from warn to block.
+        {
+          id: 'r1',
+          level: 'high',
+          action: 'block',
+          conditions: [{ type: 'pattern', value: 'fail' }],
+        },
+        { id: 'r2', level: 'high', action: 'block', conditions: [{ type: 'risk', value: 'prod' }] },
+      ],
+      quality: [
+        // q1 same id, threshold raised.
+        { id: 'q1', type: 'test_coverage', threshold: 90 },
+        { id: 'q2', type: 'lint', threshold: 0 },
+      ],
+    });
+
+    const drift = engine.compare(oldDna, newDna);
+    expect(drift.rulesChanged).toEqual(['r1']);
+    expect(drift.gatesChanged).toEqual(['q1']);
+    expect(drift.rulesAdded).toBe(0);
+    expect(drift.rulesRemoved).toBe(0);
+    expect(drift.totalChanges).toBe(2);
+    expect(drift.significant).toBe(true);
+    expect(drift.summary).toContain('changed');
+  });
+
+  it('ignores key order when comparing bodies', () => {
+    const oldDna = makeDNA({
+      governance: [
+        {
+          id: 'r1',
+          level: 'medium',
+          action: 'warn',
+          conditions: [{ type: 'pattern', value: 'a' }],
+        },
+      ],
+      quality: [],
+    });
+    const newDna = makeDNA({
+      governance: [
+        {
+          conditions: [{ value: 'a', type: 'pattern' }],
+          action: 'warn',
+          level: 'medium',
+          id: 'r1',
+        },
+      ],
+      quality: [],
+    });
+
+    const drift = engine.compare(oldDna, newDna);
+    expect(drift.rulesChanged).toEqual([]);
+    expect(drift.totalChanges).toBe(0);
+  });
+
   it('classifies drift as significant only when totalChanges >= 2', () => {
     const oldDna = makeDNA({ governance: [] });
     const newDna = makeDNA({
@@ -137,8 +196,9 @@ describe('BehaviorOS.compareDNADrift (facade wiring)', () => {
     expect(drift.olderName).toBe('older-dna');
     expect(drift.newerName).toBe('newer-dna');
     expect(drift.rulesRemoved).toBe(1);
+    expect(drift.rulesChanged).toEqual(['r1']);
     expect(drift.gatesRemoved).toBe(2);
-    expect(drift.totalChanges).toBe(3);
+    expect(drift.totalChanges).toBe(4);
     expect(drift.significant).toBe(true);
   });
 });

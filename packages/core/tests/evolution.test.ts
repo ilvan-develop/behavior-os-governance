@@ -307,7 +307,12 @@ describe('BehaviorOS applyCodeFixes', () => {
     });
     expect(rejected.decision?.outcome).toBe('rejected');
     expect(rejected.applied).toEqual([]);
-    expect(bos.listCodeFixResults()).toHaveLength(0);
+    // The refusal itself is recorded: a rejected proposal is versioned history.
+    expect(rejected.rejected).toHaveLength(1);
+    const persisted = bos.listCodeFixResults();
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].applied).toBe(false);
+    expect(persisted[0].voteOutcome).toBe('rejected');
 
     const approved = bos.applyCodeFixes({
       apply: true,

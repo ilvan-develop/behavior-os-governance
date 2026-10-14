@@ -9,6 +9,7 @@ import { MissionEngine } from './mission-engine.js';
 import { QualityEngine } from './quality-engine.js';
 import { RecommendationEngine } from './recommendation-engine.js';
 
+export * from './code-edit-engine.js';
 export * from './pipeline-engine.js';
 export {
   AuditEngine,
