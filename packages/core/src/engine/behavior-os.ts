@@ -710,11 +710,9 @@ export class BehaviorOS {
    * {@link RecommendationEngine}.
    */
   recommend(limit = 5, ageLimitHours = 168): RankedRecommendation[] {
-    return (
-      this.registry
-        .get<RecommendationEngine>('recommendation')
-        ?.recommend(this.getLearningEngine().getEvents(), limit, ageLimitHours) ?? []
-    );
+    let engine = this.registry.get<RecommendationEngine>('recommendation');
+    if (!engine) engine = this.registry.createRecommendationEngine();
+    return engine.recommend(this.getLearningEngine().getEvents(), limit, ageLimitHours);
   }
 
   // Drift detection --------------------------------------------------------
@@ -723,21 +721,9 @@ export class BehaviorOS {
    * A drift is significant when `totalChanges >= 2`.
    */
   compareDNADrift(dnaA: DNA, dnaB: DNA): DriftInfo {
-    return (
-      this.registry.get<DriftEngine>('drift')?.compare(dnaA, dnaB) ?? {
-        id: `drift-${Date.now()}`,
-        newerName: dnaB.name,
-        olderName: dnaA.name,
-        rulesAdded: 0,
-        rulesRemoved: 0,
-        gatesAdded: 0,
-        gatesRemoved: 0,
-        totalChanges: 0,
-        significant: false,
-        summary: 'No drift engine available.',
-        timestamp: new Date().toISOString(),
-      }
-    );
+    let engine = this.registry.get<DriftEngine>('drift');
+    if (!engine) engine = this.registry.createDriftEngine();
+    return engine.compare(dnaA, dnaB);
   }
 
   // Agent Management

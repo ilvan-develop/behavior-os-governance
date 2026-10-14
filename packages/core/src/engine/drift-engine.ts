@@ -34,13 +34,16 @@ export interface DriftInfo {
  * - same for quality gates.
  *
  * A drift is **significant** when `totalChanges >= 2`.
+ *
+ * A DNA loaded without schema validation (e.g. raw YAML in a host adapter) may
+ * omit `governance`/`quality`; those are treated as empty arrays.
  */
 export class DriftEngine {
   compare(dnaA: DNA, dnaB: DNA): DriftInfo {
-    const rulesA = new Map(dnaA.governance.map((r) => [r.id, r]));
-    const rulesB = new Map(dnaB.governance.map((r) => [r.id, r]));
-    const gatesA = new Map(dnaA.quality.map((g) => [g.id, g]));
-    const gatesB = new Map(dnaB.quality.map((g) => [g.id, g]));
+    const rulesA = new Map((dnaA.governance ?? []).map((r) => [r.id, r]));
+    const rulesB = new Map((dnaB.governance ?? []).map((r) => [r.id, r]));
+    const gatesA = new Map((dnaA.quality ?? []).map((g) => [g.id, g]));
+    const gatesB = new Map((dnaB.quality ?? []).map((g) => [g.id, g]));
 
     const rulesAdded = [...rulesB.keys()].filter((id) => !rulesA.has(id)).length;
     const rulesRemoved = [...rulesA.keys()].filter((id) => !rulesB.has(id)).length;
