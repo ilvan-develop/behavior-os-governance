@@ -1,4 +1,4 @@
-import { BehaviorOS } from '@behavior-os/core';
+import { BehaviorOS, PROTOCOL_STEPS } from '@behavior-os/core';
 import type {
   DecisionPolicy,
   DNA,
@@ -1271,8 +1271,12 @@ server.registerResource(
     contents: [
       {
         uri: 'behavioros://protocol/steps',
-        // Must mirror PROTOCOL_TOOL_STEPS in packages/core/src/engine/behavior-os.ts.
-        text: '# Behavior-OS 7-Step Protocol\n\n1. Select DNA Pattern (bos_select_dna)\n2. Confirm DNA Rules (bos_list_dna)\n3. Resolve State (bos_get_state)\n4. Create Mission (bos_create_mission)\n5. Start Mission (bos_start_mission)\n6. Run Audit (bos_run_audit)\n7. Record Learning (bos_record_learning)',
+        // Rendered from PROTOCOL_STEPS in @behavior-os/core, so it cannot drift.
+        text: [
+          '# Behavior-OS 7-Step Protocol',
+          '',
+          ...PROTOCOL_STEPS.map((step) => `${step.number}. ${step.name} (${step.tool})`),
+        ].join('\n'),
       },
     ],
   }),

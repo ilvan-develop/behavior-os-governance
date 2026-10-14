@@ -38,4 +38,18 @@ describe('MCP server structure', () => {
   it('does not register duplicate tool names', () => {
     expect(new Set(toolNames).size).toBe(toolNames.length);
   });
+
+  it('renders the protocol resource from PROTOCOL_STEPS instead of a literal', () => {
+    // The resource must be generated from the core constant; a hand-written
+    // step list is how "Delegate" vs "Start Mission" drifted apart before.
+    expect(serverSource).toContain('...PROTOCOL_STEPS.map(');
+    expect(serverSource).not.toMatch(/# Behavior-OS 7-Step Protocol\\n\\n1\./);
+  });
+
+  it('states the real tool count in the package manifest', () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'),
+    ) as { description: string };
+    expect(manifest.description).toContain(`${toolNames.length} tools`);
+  });
 });
