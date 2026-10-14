@@ -282,10 +282,28 @@ server.registerTool(
       title: 'List Missions',
     },
   },
-  async ({ limit = 50 }: { limit?: number }) => {
+  async ({
+    status,
+    type,
+    priority,
+    limit = 50,
+  }: {
+    status?: string;
+    type?: string;
+    priority?: string;
+    limit?: number;
+  }) => {
     try {
       const bos = getBehaviorOS();
-      const missions = bos.listMissions?.(limit) ?? [];
+      // The advertised filters are applied here over the engine's mission list
+      // (the engine itself only supports a limit), then the limit is applied to
+      // the filtered result.
+      const all = bos.listMissions?.(1000) ?? [];
+      const missions = all
+        .filter((mission) => !status || mission.status === status)
+        .filter((mission) => !type || mission.type === type)
+        .filter((mission) => !priority || mission.priority === priority)
+        .slice(0, limit);
       return {
         content: [{ type: 'text', text: JSON.stringify(missions, null, 2) }],
       };
@@ -1253,7 +1271,8 @@ server.registerResource(
     contents: [
       {
         uri: 'behavioros://protocol/steps',
-        text: '# Behavior-OS 7-Step Protocol\n\n1. Select DNA Pattern\n2. Display DNA Block\n3. Resolve Truth\n4. Create Mission\n5. Delegate Task\n6. Run Audit\n7. Record Learning',
+        // Must mirror PROTOCOL_TOOL_STEPS in packages/core/src/engine/behavior-os.ts.
+        text: '# Behavior-OS 7-Step Protocol\n\n1. Select DNA Pattern (bos_select_dna)\n2. Confirm DNA Rules (bos_list_dna)\n3. Resolve State (bos_get_state)\n4. Create Mission (bos_create_mission)\n5. Start Mission (bos_start_mission)\n6. Run Audit (bos_run_audit)\n7. Record Learning (bos_record_learning)',
       },
     ],
   }),
