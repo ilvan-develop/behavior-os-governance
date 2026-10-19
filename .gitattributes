@@ -1,4 +1,4 @@
-* text=auto
+* text=auto eol=lf
 *.md lingua=en
 *.yaml linguist-language=YAML
 *.json linguist-language=JSON
