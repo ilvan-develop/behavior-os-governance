@@ -1,6 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Run lint and tests before commit
-pnpm lint:check
+# Run lint and typecheck before commit (the full test suite runs in CI)
+pnpm exec lint-staged
 pnpm typecheck

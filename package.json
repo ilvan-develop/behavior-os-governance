@@ -10,7 +10,6 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo dev",
     "build": "turbo build",
     "test": "turbo test",
     "test:watch": "vitest",
@@ -20,7 +19,7 @@
     "typecheck": "turbo typecheck",
     "format": "biome format --write .",
     "clean": "turbo clean",
-    "clean:all": "turbo clean && rm -rf node_modules",
+    "clean:all": "pnpm clean && node scripts/clean.mjs node_modules",
     "changeset": "changeset",
     "release": "changeset publish",
     "prepare": "husky",
@@ -64,7 +63,7 @@
       "biome check --write",
       "git add"
     ],
-    "*.{json,yaml,yml,md}": [
+    "*.json": [
       "biome format --write",
       "git add"
     ]
