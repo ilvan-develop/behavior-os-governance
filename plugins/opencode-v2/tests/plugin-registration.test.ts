@@ -350,6 +350,33 @@ describe('behavior-os plugin registration', () => {
     expect(event.message).toMatch(/surgical/i);
   });
 
+  it('escalates a real deployment but not a read-only search that mentions one (C24)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'devops-pipeline' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+
+    // Searching for the rule's own name is not a deployment: no ask is raised.
+    const search: FakePermissionEvent = {
+      action: 'grep',
+      resources: ['dnas/devops-pipeline.yaml'],
+      metadata: { pattern: 'deployment-approval' },
+      agent: 'test',
+    };
+    await permission(search);
+    expect(search.effect).toBeUndefined();
+
+    // A command that actually deploys still needs approval.
+    const deploy: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      agent: 'test',
+    };
+    await permission(deploy);
+    expect(deploy.effect).toBe('ask');
+  });
+
   it('does not deny a read-only action under data-encryption (C20)', async () => {
     const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);

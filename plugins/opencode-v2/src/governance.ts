@@ -11,6 +11,16 @@ import type { MissionPriority, MissionType } from '@behavior-os/schemas';
 const MUTATING_TOOL = /write|edit|patch|bash|shell|apply|create|delete|move/i;
 
 /**
+ * Actions able to *perform* an operation on an environment: they run a command or
+ * invoke an operational verb. Only these may turn their own arguments into a
+ * `deployment` signal — a read-only search or a file edit that merely mentions
+ * "deploy" is not a deployment, and treating it as one made every such call
+ * escalate (C24: permission log seq 2649/2650/2656).
+ */
+const ENVIRONMENT_ACTION =
+  /bash|shell|exec|execute|command|run|invoke|script|deploy|releas|publish|rollout|promote|push|apply|migrate|install/i;
+
+/**
  * Signals used to build the condition bag a DNA governance rule is matched
  * against. The engine (`GovernanceEngine.evaluateConditions`) matches rule
  * conditions by *key* against this bag, so the keys here must line up with the
@@ -95,14 +105,27 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
     context.change = true;
   }
 
-  // Deployment / release activities.
-  if (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship')) {
+  // `deployment` and `production` are read off the action's own arguments, so
+  // they are derived only for actions able to *perform* one. Reading a read-only
+  // `grep` for the word "deploy" as a deployment is what made the host ask for
+  // approval on every search (C24). Content-domain signals (phi, pii, secrets,
+  // ...) stay text-derived: there, *touching* the content is the risk.
+  const changesState = isMutating(signals.tool) || isMutating(signals.action);
+  const canOperate = ENVIRONMENT_ACTION.test(`${signals.action ?? ''} ${signals.tool ?? ''}`);
+
+  // A deployment is *performed*: only an action that can run one deploys. Writing
+  // a file that mentions "release" is not a release.
+  if (canOperate && (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship'))) {
     context.deployment = true;
   }
 
-  // Production / live environments. `prod` uses a word boundary so "product"
-  // and "produce" do not match.
-  if (hasWord('production', 'prod', 'live') || hasPhrase('--prod', '-prod')) {
+  // A production *change*, however, is touched by anything that is not read-only:
+  // writing `infra/prod/main.tf` counts, and surgical-team's `sterile-field` rule
+  // blocks on it. `prod` uses a word boundary so "product"/"produce" do not match.
+  if (
+    (canOperate || changesState) &&
+    (hasWord('production', 'prod', 'live') || hasPhrase('--prod', '-prod'))
+  ) {
     context.production = true;
     context['production-change'] = true;
   }

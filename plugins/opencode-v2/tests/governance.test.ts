@@ -107,6 +107,48 @@ describe('buildGovernanceContext', () => {
     ).not.toThrow();
   });
 
+  it('does not read a deployment out of a read-only action that mentions one (C24)', () => {
+    // Evidence: the permission log recorded `grep` as escalated by rule
+    // `deployment-approval` (seq 2649, 2650, 2656) only because the searched
+    // pattern carried the word. A search cannot deploy.
+    const search = buildGovernanceContext({
+      tool: 'grep',
+      metadata: { pattern: 'deployment-approval' },
+    });
+    expect(search.deployment).toBeUndefined();
+    expect(search.production).toBeUndefined();
+
+    const read = buildGovernanceContext({
+      tool: 'read',
+      resources: ['scripts/deploy.sh', 'infra/prod/main.tf'],
+    });
+    expect(read.deployment).toBeUndefined();
+    expect(read.production).toBeUndefined();
+  });
+
+  it('separates a deployment mention from a production change (C24)', () => {
+    const edit = buildGovernanceContext({
+      tool: 'edit',
+      action: 'edit',
+      text: 'publish the release notes and roll out to production',
+    });
+    // An edit is a change, and one that touches production is a production change
+    // (surgical-team's `sterile-field` rule blocks on it)...
+    expect(edit.change).toBe(true);
+    expect(edit.production).toBe(true);
+    // ...but it is not a deployment: only an action that can deploy performs one.
+    expect(edit.deployment).toBeUndefined();
+  });
+
+  it('still flags a real deployment performed by an executing action (C24)', () => {
+    const byVerb = buildGovernanceContext({ action: 'deploy', resources: ['the service'] });
+    expect(byVerb.deployment).toBe(true);
+
+    const byCommand = buildGovernanceContext({ tool: 'bash', resources: ['publish the package'] });
+    expect(byCommand.deployment).toBe(true);
+    expect(byCommand.production).toBeUndefined();
+  });
+
   it('does not flag a code identifier that merely contains a sensitive substring', () => {
     // The identifier is assembled from parts: this test file is itself scanned
     // by the same heuristics whenever it is edited, so neither the identifier
