@@ -25,6 +25,10 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+# Generated API documentation (typedoc `out`). Never hand-edit, never commit.
+# It lives in its own directory so typedoc's cleanOutputDir cannot touch the
+# hand-written docs in docs/.
+docs/api/
 # Guard: build artifacts must never leak into source or test directories.
 # tsc targets ./dist; anything emitted next to .ts sources is stale output.
 **/src/**/*.js

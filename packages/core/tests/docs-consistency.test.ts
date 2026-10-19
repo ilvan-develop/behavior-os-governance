@@ -87,13 +87,35 @@ const PNPM_BUILTINS = new Set([
 /** Environment variables that current docs deliberately record as non-existent. */
 const WITHDRAWN_ENV_VARS = ['BEHAVIOROS_LOG_LEVEL', 'BEHAVIOROS_PROJECT', 'BEHAVIOROS_STATE_DIR'];
 
-/** Recursively collects `*.md` files, skipping hidden and vendored directories. */
+/**
+ * The typedoc output directory, read from `typedoc.json` so this exclusion keeps
+ * working if the path changes. Generated API markdown must never be treated as a
+ * hand-written document (it names only symbols from source and is not authored).
+ */
+function typedocOutputDir(): string {
+  try {
+    const config = JSON.parse(readFileSync(join(repoRoot, 'typedoc.json'), 'utf-8')) as {
+      out?: unknown;
+    };
+    if (typeof config.out === 'string' && config.out.length > 0) {
+      return resolve(repoRoot, config.out);
+    }
+  } catch {
+    // Missing or malformed config: fall through to the documented default.
+  }
+  return join(repoRoot, 'docs', 'api');
+}
+
+const TYPEDOC_OUTPUT = typedocOutputDir();
+
+/** Recursively collects `*.md` files, skipping hidden, vendored and generated directories. */
 function collectMarkdown(dir: string, out: string[] = []): string[] {
   if (!existsSync(dir)) return out;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      if (resolve(full) === TYPEDOC_OUTPUT) continue;
       collectMarkdown(full, out);
     } else if (entry.name.endsWith('.md')) {
       out.push(full);

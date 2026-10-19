@@ -1,0 +1,21 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "Behavior-OS API",
+  "entryPoints": [
+    "packages/schemas/src/index.ts",
+    "packages/core/src/index.ts",
+    "packages/sdk/src/index.ts",
+    "packages/cli/src/index.ts",
+    "packages/mcp-server/src/index.ts",
+    "packages/orchestrator/src/index.ts",
+    "plugins/opencode-v2/src/index.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs/api",
+  "cleanOutputDir": true,
+  "plugin": ["typedoc-plugin-markdown"],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "readme": "none",
+  "tsconfig": "./tsconfig.json"
+}
