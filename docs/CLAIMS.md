@@ -2,8 +2,9 @@
 
 > Documento único de verdade. Cada afirmação pública é cruzada com o código.
 > Nada aqui é aspiracional: ou está **verificado**, ou está **retirado** com o
-> valor real medido ao lado. Ver `pnpm test` / `pnpm typecheck` / `pnpm lint`
-> para o resultado vivo e `git log` para a data da última medição.
+> valor real medido ao lado. Ver `pnpm test` / `pnpm test:coverage` /
+> `pnpm typecheck` / `pnpm lint:check` para o resultado vivo e `git log` para a
+> data da última medição.
 
 ## Como verificar (comandos)
 
@@ -33,8 +34,14 @@ grep -c "z.enum(" packages/schemas/src/index.ts
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 51 ficheiros / 521 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 53 ficheiros / 530 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
+
+# Guardas do próprio repositório (5 casos: tasks turbo, deleção portável, husky)
+pnpm --filter @behavior-os/core exec vitest run tests/repo-scripts.test.ts
+
+# O build dos docs não pode apagar os docs escritos à mão (4 casos)
+pnpm --filter @behavior-os/core exec vitest run tests/docs-build-safety.test.ts
 
 # Cada DNA tem de passar o DNASchema (22 casos: 1 lista + 21 padrões)
 pnpm --filter @behavior-os/core exec vitest run tests/dnas.test.ts
@@ -116,6 +123,13 @@ medido com `wc -l`.
 | Nomes dos 7 passos divergiam entre superfícies de código | O plugin servia "Delegate" para o passo 5 (`bos_start_mission`) enquanto o resource MCP `behavioros://protocol/steps` servia "Start Mission" — e o comentário do próprio plugin dizia que evitava "a copied literal" sendo ele a cópia. Agora existe **uma** definição, `PROTOCOL_STEPS` em `packages/core/src/engine/behavior-os.ts`; o resource MCP é **gerado** a partir dela e o plugin reexporta-a, pelo que a divergência deixou de ser possível por construção. `PROTOCOL_TOOL_STEPS` e `PROTOCOL_STEP_COUNT` passaram a ser derivados. |
 | `PROTOCOL_STEP_COUNT` documentado como "0-based index into this list" | A lista não existia: o valor era o literal `7`. Agora é `PROTOCOL_STEPS.length` e a lista existe (validada contra `ProtocolStepSchema` em `protocol-steps-catalog.test.ts`). |
 | `scripts/count-tests.mjs` | Removido: nada o corria (nem `package.json`, nem CI), contava testes por regex (o que contradiz o número medido pelo vitest), tinha ramos só do Jest (`xit`/`xtest`), deixava `fileDetails` com Promises por resolver e uma função morta. Uma segunda contagem divergente é uma fonte de afirmações falsas. |
+| `pnpm docs:build` (`typedoc` sem config) | **Apagava tudo em `docs/`.** Um `typedoc` sem config usa `out: ./docs` com `cleanOutputDir: true`. Existe `typedoc.json` a fixar `out: docs/api` (git-ignored) e duas guardas falham se o `out` voltar a apontar para a raiz ou para `docs/`. Medido: exit 0, **154** md gerados, **0 de 14** docs escritos à mão apagados ou alterados (comparação SHA-256). |
+| `pnpm test:coverage` na raiz | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que está fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` passam a delegar em cada pacote e dão **53 ficheiros / 530 casos**, exit 0. |
+| `pnpm clean` / `pnpm clean:all` | O `clean:all` usava `rm -rf node_modules`, que não corre no PowerShell, e **nenhum** pacote tinha script `clean`. Agora `scripts/clean.mjs` (`node:fs`, sem shell) serve os 7 pacotes e a raiz: `pnpm clean` = 7/7 tarefas, 0 `dist/` restantes. |
+| Tasks `lint` e `dev` no `turbo.json`, e o script raiz `dev` | **Configuração morta:** nenhum pacote implementa `lint` nem `dev`, pelo que `turbo lint`/`turbo dev` não tinham nada para correr — e o `dev` da raiz apontava para essa task inexistente. Removidos; entrou uma task `clean` real (`cache: false`). |
+| Hooks Husky | Os hooks ainda carregavam o bootstrap `husky.sh` (deprecado, removido no v10) e o `commit-msg` passava `$1` sem quoting. O bootstrap saiu; o `pre-commit` passou a correr `lint-staged` + `typecheck` em vez do `pnpm lint:check` sobre o repositório inteiro. |
+| `lint-staged` a formatar `*.{json,yaml,yml,md}` | O Biome não formata YAML nem Markdown: essas entradas eram inertes. Padrão reduzido a `*.json`. |
+| `.gitattributes` sem `eol` | Com `core.autocrlf=true` e um `text=auto` nu, qualquer checkout em Windows trazia CRLF, e `pnpm lint:check` (Biome, `lineEnding: lf`) falhava localmente enquanto a CI ficava verde. Fixado `eol=lf`, para que a árvore de trabalho iguale os blobs LF commitados em qualquer plataforma. |
 
 ## Gate pipeline
 
@@ -344,16 +358,22 @@ vez de corrigidas por texto.
 | C5 | `behavioros agent` não lista agentes | Mostra o agente resolvido, não o registo de agentes. |
 | C6 | `drift-check` é um subconjunto | Compara `currentStep`/`selectedDna` com `baseline.json`; o `DriftEngine` compara também regras e gates. |
 | C7 | Instalação a partir do npm não verificável aqui | `docs/SDK.md` e `QUICKSTART.md` dizem `npx @behavior-os/cli` / `pnpm add @behavior-os/core`, o que pressupõe publicação. Os manifestos não são `private` e existe `release: changeset publish`, mas nenhum artefacto no repositório prova que as versões estão publicadas — não foi possível confirmar sem rede. |
+| C8 | Sem transporte HTTP nem CORS no MCP | O servidor é **stdio** (`StdioServerTransport`): zero referências a `listen`, HTTP, SSE ou CORS em `packages/mcp-server/src`. Um transporte HTTP+CORS seria funcionalidade nova, não correção — e o `EXPOSE 3000` já tinha sido retirado do `Dockerfile` por anunciar algo que não existe. |
 
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **51 ficheiros / 521 casos**,
-`pnpm typecheck` 10/10 tarefas sem erros e `pnpm lint:check` (Biome) limpo. Os
+Medido com `pnpm test` (não aspiracional): **53 ficheiros / 530 casos**,
+`pnpm typecheck` 10/10 tarefas sem erros, `pnpm lint:check` (Biome) limpo e
+`pnpm clean` 7/7 tarefas. `pnpm test:coverage` na raiz corre a mesma suite
+(**53 ficheiros / 530 casos**, exit 0). Os
 números vivem nos próprios testes, que falham se a contagem derivar:
 `packages/mcp-server/tests/mcp.test.ts` ("27 tools" + descrição do manifesto),
 `plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools"),
 `packages/core/tests/protocol-steps-catalog.test.ts` (os 7 `PROTOCOL_STEPS`
 passam `ProtocolStepSchema`), `packages/core/tests/dnas.test.ts` (os 21 YAML
-passam `DNASchema`) e `packages/core/tests/docs-consistency.test.ts`
+passam `DNASchema`), `packages/core/tests/repo-scripts.test.ts` (tasks do turbo,
+deleção portável e hooks husky) e `packages/core/tests/docs-build-safety.test.ts`
+(o `out` do typedoc nunca aponta para `docs/` nem para a raiz).
+`packages/core/tests/docs-consistency.test.ts`
 (documentação atual não pode citar tools, comandos CLI, scripts `pnpm`, métodos
 de `BehaviorOS` ou variáveis de ambiente que não existam).

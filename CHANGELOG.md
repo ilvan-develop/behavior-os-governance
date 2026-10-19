@@ -4,7 +4,7 @@
 > afirmações e continham números aspiracionais (ex.: "22 engines", "45+ tools",
 > "9 resources", "5,200+ testes"). Os valores medidos são: **11 engines**,
 > **27** tools MCP + **2** resources, **29** tools no plugin OpenCode, **21**
-> padrões DNA e **51 ficheiros / 521 casos** de teste. Fonte de verdade:
+> padrões DNA e **53 ficheiros / 530 casos** de teste. Fonte de verdade:
 > [docs/CLAIMS.md](docs/CLAIMS.md).
 
 All notable changes to this project will be documented in this file.
@@ -50,6 +50,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without importing the plugin; it now checks the real export and `dnas/`.
 - `scripts/count-tests.mjs` removed: nothing ran it, and its regex count contradicted
   the measured vitest total.
+- `pnpm docs:build` (`typedoc` with no config) deleted every hand-written markdown in
+  `docs/`: bare typedoc defaults to `out: ./docs` with `cleanOutputDir: true`.
+  `typedoc.json` now pins `out` to the git-ignored `docs/api`, and two guards fail if
+  the output ever points back at `docs/` or the repository root.
+- Root `pnpm test:coverage` failed: running `vitest` from the root ignored each
+  package's `vitest.config.ts` (losing the plugin's 20s timeout) and picked up
+  `examples/` (outside the workspace). A root `vitest.config.ts` now uses
+  `test.projects`, so `test:coverage` and `test:watch` delegate to every package.
+- `clean:all` used `rm -rf node_modules` (fails on Windows/PowerShell) and no package
+  had a `clean` script. `scripts/clean.mjs` (`node:fs`, no shell) now backs `clean` in
+  all 7 workspace packages and in the root.
+- `turbo.json` declared `lint` and `dev` tasks that no workspace package implements,
+  and the root `dev` script pointed at that non-existent task. Removed; a real
+  `clean` task (`cache: false`) replaces them.
+- Husky hooks still sourced the deprecated `husky.sh` bootstrap and `commit-msg`
+  passed `$1` unquoted; `pre-commit` now runs `lint-staged` + `typecheck`.
+- `lint-staged` formatted `*.{json,yaml,yml,md}` although Biome supports neither YAML
+  nor Markdown; the pattern is now `*.json`.
+- `.gitattributes` had a bare `text=auto`, so every Windows checkout (with
+  `core.autocrlf=true`) produced CRLF and `pnpm lint:check` failed locally while CI
+  stayed green. Pinned `eol=lf` to match the committed LF blobs on every platform.
 
 ### Added
 - `packages/core/tests/dnas.test.ts` — every shipped DNA YAML must satisfy `DNASchema`.
@@ -59,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI commands, `pnpm` scripts, `BehaviorOS` methods or environment variables that do
   not exist in the code, and root `pnpm --filter <pkg> run <script>` delegations must
   resolve.
+- `packages/core/tests/docs-build-safety.test.ts` — `typedoc.json` must exist, list
+  existing entry points, keep `out` away from `docs/` and the repository root, and
+  keep that output directory git-ignored.
+- `packages/core/tests/repo-scripts.test.ts` — no `turbo.json` task without an
+  implementing package script, no root script delegating to an undeclared task, no
+  shell-specific deletion (`rm -rf`/`Remove-Item`), and no husky hook that is missing,
+  empty or re-sourcing `husky.sh`.
+- `scripts/clean.mjs` — cross-platform, shell-free directory removal used by every
+  package's `clean` script.
+- Root `vitest.config.ts` — makes the root `test:coverage`/`test:watch` scripts run
+  each workspace package with its own config and skip `examples/`.
 
 All notable changes to this project will be documented in this file.
 
