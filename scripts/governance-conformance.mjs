@@ -741,6 +741,41 @@ const claims = [
       return { status: 'PASS', evidence: 'deny logged for bash and reproduced' };
     },
   },
+  {
+    id: 'C24',
+    category: 'ENFORCEMENT',
+    promise:
+      'Environment signals come only from actions that can perform an operation: mentioning a deployment is not deploying',
+    async check(env) {
+      await env.runTool('bos_select_dna', { pattern: 'devops-pipeline' });
+      // A read-only search whose *arguments* name the rule must not be gated.
+      const search = {
+        action: 'grep',
+        resources: ['dnas/devops-pipeline.yaml'],
+        metadata: { pattern: 'deployment-approval' },
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(search);
+      expect(
+        search.effect !== 'ask' && search.effect !== 'deny',
+        `a read-only search was gated as a deployment: ${search.message}`,
+      );
+      // The same words in a command that *performs* the deployment still gate.
+      const deploy = {
+        action: 'bash',
+        resources: ['deploy to production'],
+        agent: 'conformance',
+        effect: 'allow',
+      };
+      await env.permissionHooks.get('evaluate')(deploy);
+      expect(deploy.effect === 'ask', `expected ask for a real deployment, got ${deploy.effect}`);
+      return {
+        status: 'PASS',
+        evidence: `grep stayed ${search.effect}; bash deploy -> ${deploy.effect}`,
+      };
+    },
+  },
 ];
 
 function pad(value, width) {

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-10-12T18:18:47.565Z",
+  "generatedAt": "2026-10-19T15:35:34.600Z",
   "plugin": "behavior-os",
-  "total": 23,
-  "proven": 23,
+  "total": 24,
+  "proven": 24,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1791829127249-euo73lhkivd status=pending"
+      "evidence": "activeMission=mission-1792424134250-d74kyrxbnyu status=pending"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1791829127402-39nh3jlkaq == activeMission"
+      "evidence": "autoMission=mission-1792424134325-1m1wy5sc98n == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p11400-6j6ij across 14 entries"
+      "evidence": "instance=p14024-deen8 across 14 entries"
     },
     {
       "id": "C15",
@@ -129,7 +129,7 @@
       "category": "OBSERVABILITY",
       "promise": "The governance log survives a restart (persisted tail, monotonic sequence)",
       "status": "PASS",
-      "evidence": "restored=19 seq 19->21"
+      "evidence": "restored=20 seq 19->21"
     },
     {
       "id": "C19",
@@ -165,6 +165,13 @@
       "promise": "Every denial is attributable: a matching log entry and a reproducible verdict",
       "status": "PASS",
       "evidence": "deny logged for bash and reproduced"
+    },
+    {
+      "id": "C24",
+      "category": "ENFORCEMENT",
+      "promise": "Environment signals come only from actions that can perform an operation: mentioning a deployment is not deploying",
+      "status": "PASS",
+      "evidence": "grep stayed allow; bash deploy -> ask"
     }
   ]
 }
