@@ -4,7 +4,7 @@
 > afirmações e continham números aspiracionais (ex.: "22 engines", "45+ tools",
 > "9 resources", "5,200+ testes"). Os valores medidos são: **11 engines**,
 > **27** tools MCP + **2** resources, **29** tools no plugin OpenCode, **21**
-> padrões DNA e **53 ficheiros / 530 casos** de teste. Fonte de verdade:
+> padrões DNA e **53 ficheiros / 534 casos** de teste. Fonte de verdade:
 > [docs/CLAIMS.md](docs/CLAIMS.md).
 
 All notable changes to this project will be documented in this file.
@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Governance environment signals were read off the *text* of any action's arguments,
+  so a read-only search for the word "deployment" was escalated as a deployment
+  (permission log seq 2649/2650/2656) and every such call asked the host for approval.
+  `deployment` now requires an action that can *perform* an operation
+  (`bash`/`shell`/`deploy`/`apply`/…) and `production`/`production-change` require a
+  non-read-only action, so `write`/`edit` still count for production changes.
+  Conformance claim C24 fails against the previously shipped build (23/24) and passes
+  after the rebuild (24/24).
+- The `lint-staged` config ran an explicit `git add` task after each Biome task. lint-staged
+  already applies and stages task fixes, so the entries were redundant and made every commit
+  print `Some of your tasks use 'git add' command…`. Removed; `pre-commit` now runs only Biome.
 - The 7-step protocol had two definitions: the OpenCode plugin's `PROTOCOL_STEPS`
   (step 5 "Delegate") and the MCP resource text (step 5 "Start Mission"). There is
   now a single `PROTOCOL_STEPS` in `@behavior-os/core`: the MCP resource is rendered

@@ -34,7 +34,7 @@ grep -c "z.enum(" packages/schemas/src/index.ts
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 53 ficheiros / 530 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 53 ficheiros / 534 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
 
 # Guardas do próprio repositório (5 casos: tasks turbo, deleção portável, husky)
@@ -124,12 +124,14 @@ medido com `wc -l`.
 | `PROTOCOL_STEP_COUNT` documentado como "0-based index into this list" | A lista não existia: o valor era o literal `7`. Agora é `PROTOCOL_STEPS.length` e a lista existe (validada contra `ProtocolStepSchema` em `protocol-steps-catalog.test.ts`). |
 | `scripts/count-tests.mjs` | Removido: nada o corria (nem `package.json`, nem CI), contava testes por regex (o que contradiz o número medido pelo vitest), tinha ramos só do Jest (`xit`/`xtest`), deixava `fileDetails` com Promises por resolver e uma função morta. Uma segunda contagem divergente é uma fonte de afirmações falsas. |
 | `pnpm docs:build` (`typedoc` sem config) | **Apagava tudo em `docs/`.** Um `typedoc` sem config usa `out: ./docs` com `cleanOutputDir: true`. Existe `typedoc.json` a fixar `out: docs/api` (git-ignored) e duas guardas falham se o `out` voltar a apontar para a raiz ou para `docs/`. Medido: exit 0, **154** md gerados, **0 de 14** docs escritos à mão apagados ou alterados (comparação SHA-256). |
-| `pnpm test:coverage` na raiz | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que está fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` passam a delegar em cada pacote e dão **53 ficheiros / 530 casos**, exit 0. |
+| `pnpm test:coverage` na raiz | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que está fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` passam a delegar em cada pacote e dão **53 ficheiros / 534 casos**, exit 0. |
 | `pnpm clean` / `pnpm clean:all` | O `clean:all` usava `rm -rf node_modules`, que não corre no PowerShell, e **nenhum** pacote tinha script `clean`. Agora `scripts/clean.mjs` (`node:fs`, sem shell) serve os 7 pacotes e a raiz: `pnpm clean` = 7/7 tarefas, 0 `dist/` restantes. |
 | Tasks `lint` e `dev` no `turbo.json`, e o script raiz `dev` | **Configuração morta:** nenhum pacote implementa `lint` nem `dev`, pelo que `turbo lint`/`turbo dev` não tinham nada para correr — e o `dev` da raiz apontava para essa task inexistente. Removidos; entrou uma task `clean` real (`cache: false`). |
 | Hooks Husky | Os hooks ainda carregavam o bootstrap `husky.sh` (deprecado, removido no v10) e o `commit-msg` passava `$1` sem quoting. O bootstrap saiu; o `pre-commit` passou a correr `lint-staged` + `typecheck` em vez do `pnpm lint:check` sobre o repositório inteiro. |
 | `lint-staged` a formatar `*.{json,yaml,yml,md}` | O Biome não formata YAML nem Markdown: essas entradas eram inertes. Padrão reduzido a `*.json`. |
 | `.gitattributes` sem `eol` | Com `core.autocrlf=true` e um `text=auto` nu, qualquer checkout em Windows trazia CRLF, e `pnpm lint:check` (Biome, `lineEnding: lf`) falhava localmente enquanto a CI ficava verde. Fixado `eol=lf`, para que a árvore de trabalho iguale os blobs LF commitados em qualquer plataforma. |
+| Heurística antiga: "mencionar deployment = implantar" | Os sinais de ambiente eram lidos do **texto dos argumentos** de qualquer ação. Medido no log de governação: três `grep` escalaram por `deployment-approval` (seq 2649, 2650, 2656) só porque o **padrão pesquisado** continha a palavra, e o harness falhava o C24 contra o `dist` publicado com `a read-only search was gated as a deployment: [Behavior-OS:DevOps Pipeline] Escalated by rule: deployment-approval`. Agora `deployment` exige uma ação capaz de **executar** uma operação (`bash`, `shell`, `deploy`, `apply`, …) e `production`/`production-change` exigem uma ação não-read-only — escrever `infra/prod/main.tf` continua a contar, como a regra `sterile-field` do `surgical-team` exige. Provado: 3 testes falhavam antes e passam depois; mutar `ENVIRONMENT_ACTION` mata 9 testes (7 pré-existentes); o harness passou de 23/24 a **24/24**. |
+| Tasks `git add` explícitas no `lint-staged` | Redundantes — o lint-staged já aplica as correções das tasks e adiciona-as ao índice — e o lint-staged avisa em cada commit (`Some of your tasks use 'git add' command…`, visível no commit b4e5ea2). Removidas: o `pre-commit` fica só com as tasks do Biome. Prova: o commit seguinte corre sem esse aviso. |
 
 ## Gate pipeline
 
@@ -359,13 +361,16 @@ vez de corrigidas por texto.
 | C6 | `drift-check` é um subconjunto | Compara `currentStep`/`selectedDna` com `baseline.json`; o `DriftEngine` compara também regras e gates. |
 | C7 | Instalação a partir do npm não verificável aqui | `docs/SDK.md` e `QUICKSTART.md` dizem `npx @behavior-os/cli` / `pnpm add @behavior-os/core`, o que pressupõe publicação. Os manifestos não são `private` e existe `release: changeset publish`, mas nenhum artefacto no repositório prova que as versões estão publicadas — não foi possível confirmar sem rede. |
 | C8 | Sem transporte HTTP nem CORS no MCP | O servidor é **stdio** (`StdioServerTransport`): zero referências a `listen`, HTTP, SSE ou CORS em `packages/mcp-server/src`. Um transporte HTTP+CORS seria funcionalidade nova, não correção — e o `EXPOSE 3000` já tinha sido retirado do `Dockerfile` por anunciar algo que não existe. |
+| C9 | Condições declaradas sem sinal derivado | Das **65** condições declaradas nas 21 DNAs, a derivação do plugin (`buildGovernanceContext`) produz **16** chaves (`change`, `deployment`, `production`, `production-change`, `critical-action`, `breaking-change`, `data-modification`, `privilege-escalation`, `new-dependency`, `patient-record`, `phi`, `pii-access`, `pii-data`, `financial-transaction`, `financial-operation`, `high-value`). As restantes só disparam se o chamador fornecer a chave explicitamente (`metadata` do evento ou `context` de `bos_evaluate_governance`): no DevOps Pipeline isso atinge `rollback-required` (`rollback`) e `pipeline-approval` (`pipeline-change`), que nenhuma ação do host acciona. Enumeração medida, não estimada. |
+| C10 | Origem de um escalonamento quando o host envia texto da sessão | O hook recebe `event.action/resources/metadata` e `buildGovernanceContext` junta **todos** os valores de `metadata` ao *haystack*. De dentro do plugin não é atribuível a um campo concreto. Correlação medida nesta sessão: chamadas cuja mensagem do agente continha as palavras-gatilho do C24 foram escaladas (`node -e` a imprimir `governance.ts`; `grep` por `lint-staged` — nenhuma com a palavra nos próprios argumentos), e chamadas equivalentes com a mensagem sem essas palavras passaram. Duas leituras possíveis: o host inclui texto da sessão em `metadata`, ou o pedido pendente é exibido tardiamente com o nome de outra tool. Registar o *haystack* usado tornaria isto medição em vez de inferência. |
 
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **53 ficheiros / 530 casos**,
+Medido com `pnpm test` (não aspiracional): **53 ficheiros / 534 casos**,
 `pnpm typecheck` 10/10 tarefas sem erros, `pnpm lint:check` (Biome) limpo e
 `pnpm clean` 7/7 tarefas. `pnpm test:coverage` na raiz corre a mesma suite
-(**53 ficheiros / 530 casos**, exit 0). Os
+(**53 ficheiros / 534 casos**, exit 0). O harness de governação
+(`pnpm verify:governance`) prova **24/24** claims (100%), com 0 falhas. Os
 números vivem nos próprios testes, que falham se a contagem derivar:
 `packages/mcp-server/tests/mcp.test.ts` ("27 tools" + descrição do manifesto),
 `plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools"),

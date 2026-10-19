@@ -148,7 +148,7 @@ pnpm verify:governance
 
 O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
-(pronto para CI). Cobertura atual: **23/23 claims**.
+(pronto para CI). Cobertura atual: **24/24 claims**.
 
 | Claim | Promessa | Prova |
 | --- | --- | --- |
@@ -175,6 +175,7 @@ O relatório imprime uma tabela `claims → evidência` e grava
 | C21 | O control plane (`bos_*`) nunca é negado | A troca de DNA é imune ao DNA ativo (sem deadlock de bootstrap); o override fica registado |
 | C22 | Todo o veredito não-`allow` é registado | Deny/escalate/erro são gravados no log antes de aplicar o efeito |
 | C23 | Toda a negação é atribuível | Tem entrada `permission`/`deny` no log com a `action` correspondente, e o veredito é reproduzível via `bos_evaluate_governance` |
+| C24 | Sinais de ambiente só vêm de ações capazes de operar | `deployment` exige uma ação que **executa** (`bash`, `shell`, `deploy`, `apply`, …): pesquisar ou escrever a palavra "deploy" não implanta. `production`/`production-change` exigem uma ação não-read-only. O harness falhava o C24 contra o `dist` publicado (23/24) e passa a **24/24** depois do rebuild |
 
 ### Limites honestos (o que *não* é 100%)
 
