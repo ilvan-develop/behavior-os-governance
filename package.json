@@ -60,12 +60,10 @@
   },
   "lint-staged": {
     "*.{ts,js}": [
-      "biome check --write",
-      "git add"
+      "biome check --write"
     ],
     "*.json": [
-      "biome format --write",
-      "git add"
+      "biome format --write"
     ]
   }
 }
