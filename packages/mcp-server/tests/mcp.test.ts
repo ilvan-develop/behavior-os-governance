@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // Structural checks over the MCP server source. These back the public claim in
-// docs/CLAIMS.md ("27 tools + 2 resources") and fail if the two drift apart.
+// docs/CLAIMS.md ("30 tools + 2 resources") and fail if the two drift apart.
 const serverSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'server.ts'),
   'utf-8',
@@ -15,8 +15,8 @@ const toolNames = [...serverSource.matchAll(/server\.registerTool\(\s*\n?\s*'([a
 );
 
 describe('MCP server structure', () => {
-  it('registers exactly 27 tools', () => {
-    expect(toolNames).toHaveLength(27);
+  it('registers exactly 30 tools', () => {
+    expect(toolNames).toHaveLength(30);
   });
 
   it('registers exactly 2 resources', () => {

@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import type { DNA } from '@behavior-os/schemas';
 import { DNASchema } from '@behavior-os/schemas';
+import { load as yamlLoad } from 'js-yaml';
 
 export class DNALoader {
   private cache: Map<string, DNA> = new Map();
@@ -11,6 +13,15 @@ export class DNALoader {
       throw new Error(`Invalid DNA pattern: ${result.error.message}`);
     }
     return result.data;
+  }
+
+  /**
+   * Load and validate a DNA YAML file. Core already owns the YAML parser, so
+   * hosts (CLI, orchestrator) reuse this instead of adding a second parser.
+   */
+  loadFile(filePath: string): DNA {
+    const raw: unknown = yamlLoad(readFileSync(filePath, 'utf-8'));
+    return this.load(raw);
   }
 
   loadFromObject(dna: unknown): DNA | null {

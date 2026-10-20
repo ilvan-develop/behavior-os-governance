@@ -76,9 +76,16 @@ Multi-stage audit pipeline. `AuditStageSchema` defines **6** stages
 (`lint`, `typecheck`, `security`, `coverage`, `performance`, `governance`); the
 default run uses the first four.
 
-> Audits are **simulated by default** and always pass. Real checks run only when
-> explicitly requested (`simulate: false`) and shell out to `pnpm lint:check`,
-> `pnpm typecheck`, `pnpm audit --audit-level=high`, and the coverage report.
+> Audits are **simulated by default** and never report a pass: `BehaviorOS.runAudit`
+> forces `simulated: true` and `overall: 'warning'` with a `SIMULATED — no
+> verification executed` summary. Real checks run only when explicitly requested
+> (`simulate: false`) and shell out to `pnpm lint:check`, `pnpm typecheck`,
+> `pnpm audit --audit-level=high`, and the coverage report. The real `lint` stage
+> resolves the project linter from its config file (`biome.json`/`biome.jsonc`,
+> `eslint.config.*`/`.eslintrc*`, `.oxlintrc.json`) by walking up to the workspace
+> root, so a Biome repository reports `{linter: 'biome'}` instead of `skipped`.
+> A raw `AuditEngine` used directly is not downgraded; consume reports through
+> `BehaviorOS`.
 
 ### 8. Quality Layer
 Quality gates enforcement:
@@ -97,6 +104,13 @@ Pattern detection over recorded events:
 - Derive **code-fix proposals** from repeated `fix` events via
   `LearningEngine.proposeCodeFixes()`. This is a read-only API — no files are
   touched. MCP tool `bos_code_fixes`.
+- Promote a governed **learning record** through
+  `observation → lesson → candidate → validated → policy → monitored`
+  (`LearningEngine.createRecord()` / `advanceRecord()`). Promotions move exactly
+  one stage, never skip or regress, and entering `validated` requires evidence.
+  Records carry their transition trail, are exposed through
+  `bos_record_learning` (`learningId` + `stage`), and persist in the engine
+  snapshot (`learningRecords`).
 
 `BehaviorOS.proposeEvolution()` is a pure read. `applyEvolution()` writes a
 proposal into the active DNA only when **all** of these hold:
@@ -108,25 +122,27 @@ source files; there is no code auto-fix.
 ### 10. Mission Layer
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
+- Evidence provenance (`executed` / `reported` / `simulated`) and an optional
+  `verificationMode: 'executed'` that refuses reported evidence
 
-## Core Engines (10 Total)
+## Core Engines (11 Total)
 
 These are the only engines that exist in `packages/core/src/engine/`. Earlier
 revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
-only the ten below are real, and no throughput numbers are claimed.
+only the eleven below are real, and no throughput numbers are claimed.
 
 | Engine | File | Purpose |
 |--------|------|---------|
 | GovernanceEngine | `governance-engine.ts` | Rule evaluation with TTL cache |
 | QualityEngine | `quality-engine.ts` | Quality gate enforcement (gte/lte/eq/neq) |
 | AuditEngine | `audit-engine.ts` | Multi-stage audit (simulated or real) |
-| LearningEngine | `learning-engine.ts` | Pattern detection + confidence-scored DNA evolution proposals |
+| LearningEngine | `learning-engine.ts` | Pattern detection + confidence-scored DNA evolution proposals + evidence-gated learning lifecycle |
 | MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
 | PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
 | DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
 | RecommendationEngine | `recommendation-engine.ts` | Scored recommendations from learning events |
 | DriftEngine | `drift-engine.ts` | Behavioral drift between DNA snapshots |
-| DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
+| CodeEditEngine | `code-edit-engine.ts` | Guarded single-file text edits (dry-run, confinement, hashes) |
 | DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
 
 ## Persistence (pluggable)
@@ -138,7 +154,7 @@ concrete database. Inject one with
 built-in SQLite store instead.
 
 **SQLite (default, zero dependency).** Uses the built-in `node:sqlite` module
-(Node ≥ 22.5). Eight tables keep state across restarts:
+(Node ≥ 22.5). Nine tables keep state across restarts:
 
 | Table | Contents |
 |---|---|
@@ -149,6 +165,7 @@ built-in SQLite store instead.
 | `pipeline_runs` | one row per gate-pipeline run / blocked pre-flight |
 | `decisions` | one row per voting/quorum outcome |
 | `code_fix_results` | one row per applied code-fix result (deduped by `pattern`) |
+| `code_edits` | one row per governed code-edit evaluation (dry-runs and refusals included) |
 | `meta` | key/value metadata |
 
 Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
@@ -171,15 +188,104 @@ and the mirror is updated *only* after the COMMIT succeeds, so a concurrent
 reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 `withTransaction` automatically.
 
+## Mission state machine (S1)
+
+Mission status is not free-form. `MissionEngine.transition()` is the only
+mutating entry point (`packages/core/src/engine/mission-engine.ts`); the legacy
+`start`/`complete`/`fail` helpers delegate to it.
+
+```text
+pending ──▶ active ──▶ completed   (terminal)
+   │           │  ▲
+   │           │  └── paused
+   │           ├──▶ failed         (terminal)
+   │           └──▶ cancelled      (terminal)
+   ├──▶ failed
+   └──▶ cancelled
+```
+
+- Legal edges are declared once in `ALLOWED_TRANSITIONS`. Terminal states have
+  no outgoing edges: reopening is a new mission, not a resurrection.
+- A repeated transition to the current state is an idempotent no-op
+  (`changed: false`): no version bump, no duplicated evidence, no duplicate
+  history entry.
+- `expectedVersion` rejects stale concurrent writes with `VERSION_CONFLICT`.
+  Every state change and every progress update increments `version`.
+- Completion requires each `requiredChecks` gate to have a latest evidence entry
+  with `status: 'passed'` and `simulated !== true`. Missing, failed and
+  simulated evidence produce `EVIDENCE_MISSING`, `EVIDENCE_FAILED` and
+  `EVIDENCE_SIMULATED` respectively, and the mission stays in its previous
+  state.
+- A mission created with `requiredChecks: []` completes with the explicit basis
+  `no-required-checks`. That is recorded on the mission and must never be read
+  as a verification.
+- `BehaviorOS.transitionMission()` persists the new state with a single
+  idempotent upsert. If a synchronous store throws, the in-memory mission is
+  restored (including keys added by the failed transition) and the call returns
+  `PERSISTENCE_FAILED`. `PostgresStore` is write-through and asynchronous: it
+  reports write errors at `flush()`, so the rollback guarantee applies to
+  synchronous stores such as SQLite or an injected store. No multi-write
+  transaction is claimed.
+- Evidence carries `provenance` (`executed` / `reported` / `simulated`) and,
+  for executed evidence, an `executionId`. Evidence without a provenance is
+  normalized to `reported`; `executed` without an `executionId` is rejected as
+  `EVIDENCE_UNVERIFIED`. A mission created with `verificationMode: 'executed'`
+  refuses any required gate whose latest evidence is not executed. Evidence
+  remains caller-supplied and is not cryptographically attested by the host.
+- The OpenCode plugin persists the whole engine snapshot. Every lifecycle
+  transition (mission create/start/complete/fail/cancel and learning promotion)
+  runs under a per-instance lifecycle lock that covers capture → mutate →
+  persist → rollback, so a failed write restores only its own transition and can
+  never erase a concurrent one. Storage writes additionally remain serialized
+  and cross-instance writes are merged by revision. The residual equal-revision
+  race across *separate* plugin instances requires a backend with compare-and-swap;
+  the core kernel and the SQLite path do not share that limitation.
+
+### Exposure
+
+- MCP and OpenCode expose `bos_complete_mission`, `bos_fail_mission` and
+  `bos_cancel_mission` with equivalent input contracts.
+- `pauseMission` / `resumeMission` are `BehaviorOS` methods; they are not tools
+  in S1.
+- Simulated audits are forced to `overall: 'warning'` with `simulated: true` and
+  a `SIMULATED — no verification executed` summary. They can never be completion
+  evidence. The downgrade lives at the `BehaviorOS.runAudit` boundary: a raw
+  `AuditEngine` instantiated directly still labels simulated stages `passed`, so
+  hosts must consume audit reports through `BehaviorOS` or check `simulated`.
+
+## Task orchestration (S3)
+
+`AutonomousOrchestrator` (`packages/orchestrator/src/orchestrator.ts`) executes a
+mission plan through real adapters. It is a library, not a new tool surface:
+MCP still exposes 30 tools and the plugin 32.
+
+- `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
+  exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
+- Adapter output is validated against `AdapterResultSchema` before it can affect
+  task or mission state.
+- Each task declares acceptance checks; bounded retries, per-task timeouts, loop
+  detection and a per-adapter circuit breaker stop runaway plans.
+- A governance `deny` blocks the run; `escalate` pauses it for human approval.
+- In-process idempotency keys replay a completed task instead of executing it
+  twice; resuming a mission skips gates already backed by executed evidence.
+- Events are per mission and exclude secrets; persistence failures are reported,
+  not swallowed.
+- 17 tests in `packages/orchestrator/tests/orchestrator.test.ts` cover the real
+  path and failure injection.
+
+Boundary: task records are not persisted separately, so resumption relies on
+mission evidence; the orchestrator is not yet wired into the MCP/plugin tool
+surface.
+
 ## Integration Points
 
 ### MCP Server (standalone)
-- 27 tools + 2 resources exposed via Model Context Protocol
+- 30 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
-- 29 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
+- 32 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`

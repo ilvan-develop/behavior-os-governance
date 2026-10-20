@@ -29,10 +29,10 @@ behavioros/
 │   ├── core/        # 11 engines + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools
-│   ├── mcp-server/  # MCP server implementation (27 tools + 2 resources)
-│   └── orchestrator/# AutonomousOrchestrator (no test suite yet)
+│   ├── mcp-server/  # MCP server implementation (30 tools + 2 resources)
+│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker; 17 tests)
 ├── plugins/
-│   └── opencode-v2/ # OpenCode v2 plugin (29 tools)
+│   └── opencode-v2/ # OpenCode v2 plugin (32 tools)
 ├── dnas/            # 21 DNA pattern YAML files
 ├── docs/            # Documentation (CLAIMS.md is the source of truth)
 ├── examples/        # Usage examples (outside the pnpm workspace — its tests are not run by `pnpm test`)

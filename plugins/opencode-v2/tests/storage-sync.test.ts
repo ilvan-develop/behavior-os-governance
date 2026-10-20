@@ -103,6 +103,73 @@ describe('storage-sync', () => {
       expect(merged.missions).toHaveLength(3);
     });
 
+    it('never downgrades a terminal mission with a stale non-terminal copy', () => {
+      const merged = mergeSnapshots(
+        {
+          missions: [
+            {
+              id: 'm1',
+              status: 'completed',
+              version: 2,
+              evidence: [{ gate: 'tests', status: 'passed', source: 'pnpm test' }],
+            },
+          ],
+        },
+        { missions: [{ id: 'm1', status: 'active', version: 1, evidence: [] }] },
+      );
+
+      expect(merged.missions[0]).toMatchObject({ status: 'completed', version: 2 });
+      expect(merged.missions[0].evidence).toHaveLength(1);
+    });
+
+    it('adopts a newer terminal mission from the foreign snapshot', () => {
+      const merged = mergeSnapshots(
+        { missions: [{ id: 'm1', status: 'active', version: 1 }] },
+        { missions: [{ id: 'm1', status: 'completed', version: 2, completionBasis: 'evidence' }] },
+      );
+
+      expect(merged.missions[0]).toMatchObject({
+        status: 'completed',
+        version: 2,
+        completionBasis: 'evidence',
+      });
+    });
+
+    it('converges divergent terminal outcomes at the same version', () => {
+      const completed = {
+        id: 'm1',
+        status: 'completed',
+        version: 2,
+        updatedAt: '2026-01-01T00:00:02.000Z',
+      };
+      const failed = {
+        id: 'm1',
+        status: 'failed',
+        version: 2,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+
+      const completedFirst = mergeSnapshots({ missions: [completed] }, { missions: [failed] });
+      const failedFirst = mergeSnapshots({ missions: [failed] }, { missions: [completed] });
+      expect(completedFirst.missions[0].status).toBe('completed');
+      expect(failedFirst.missions[0].status).toBe('completed');
+    });
+
+    it('clears activeMission when the merged mission is terminal', () => {
+      const merged = mergeSnapshots(
+        {
+          agentState: { activeMission: 'm1' },
+          missions: [{ id: 'm1', status: 'active', version: 1 }],
+        },
+        {
+          agentState: { activeMission: 'm1' },
+          missions: [{ id: 'm1', status: 'completed', version: 2 }],
+        },
+      );
+
+      expect(merged.agentState.activeMission).toBeNull();
+    });
+
     it('unions learnings by id', () => {
       const merged = mergeSnapshots(
         { learnings: [{ id: 'l1', content: 'local' }] },

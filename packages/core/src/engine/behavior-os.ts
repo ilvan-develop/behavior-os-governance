@@ -15,9 +15,12 @@ import type {
   GovernanceDecision,
   LearningEvent,
   LearningImpact,
+  LearningRecord,
+  LearningStage,
   LearningType,
   Mission,
   MissionPriority,
+  MissionStatus,
   MissionType,
   PipelineRun,
   ProtocolStep,
@@ -33,9 +36,19 @@ import {
   type DriftEngine,
   EngineRegistry,
   type LearningEngine,
-  type MissionEngine,
   type RecommendationEngine,
 } from './index.js';
+import type {
+  AdvanceLearningRecordOptions,
+  CreateLearningRecordOptions,
+  LearningAdvanceResult,
+} from './learning-engine.js';
+import type {
+  MissionEvidenceInput,
+  MissionTransitionOptions,
+  MissionTransitionResult,
+} from './mission-engine.js';
+import { MissionEngine } from './mission-engine.js';
 import {
   type GateContext,
   PipelineEngine,
@@ -216,6 +229,8 @@ export interface BehaviorOSSnapshot {
   dna: DNA | null;
   missions: Mission[];
   learnings: LearningEvent[];
+  /** Governed lifecycle records (G-014). Optional for pre-G-014 snapshots. */
+  learningRecords?: LearningRecord[];
 }
 
 /** Deep-clone via JSON so a snapshot only ever contains persistable values. */
@@ -638,17 +653,31 @@ export class BehaviorOS {
       ? options.stages
       : ['lint', 'typecheck', 'security', 'coverage'];
     const identity = this.resolveAgentIdentity();
+    // Simulated remains the default for direct engine callers, but the report
+    // is annotated and downgraded so it can never be mistaken for a real
+    // verification or authorize completion.
+    const simulate = options.simulate !== false;
 
     const report = auditEngine.run({
       ...options,
+      simulate,
       agentId: options.agentId ?? identity.agentId,
       dnaPattern: identity.dnaPattern,
       persona: identity.persona,
       stages: stages as import('@behavior-os/schemas').AuditStage[],
     });
+    const annotated: AuditReport = simulate
+      ? {
+          ...report,
+          simulated: true,
+          overall: 'warning',
+          summary: `SIMULATED — no verification executed. ${report.summary}`,
+        }
+      : { ...report, simulated: false };
+
     this.advanceProtocolStep('bos_run_audit');
-    this.store?.saveAuditReport(report);
-    return report;
+    this.store?.saveAuditReport(annotated);
+    return annotated;
   }
 
   // Missions
@@ -670,10 +699,16 @@ export class BehaviorOS {
 
   createMission(options: {
     title: string;
+    description?: string;
     type: string;
     priority: string;
     dnaPattern?: string;
     createdBy?: string;
+    tags?: string[];
+    /** Gates that must each have passing evidence before completion. */
+    requiredChecks?: string[];
+    /** `executed` requires real, provenance-stamped evidence for every gate. */
+    verificationMode?: 'any' | 'executed';
     /**
      * Whether creating this mission should advance the 7-step protocol. The
      * plugin's auto-mission passes `false` so protocol progress still reflects
@@ -681,52 +716,157 @@ export class BehaviorOS {
      */
     advanceProtocol?: boolean;
   }): Mission {
-    const mission = this.getMissionEngine().create({
-      ...options,
+    const { advanceProtocol, ...missionOptions } = options;
+    const engine = this.getMissionEngine();
+    const mission = engine.create({
+      ...missionOptions,
       type: options.type as MissionType,
       priority: options.priority as MissionPriority,
       dnaPattern: options.dnaPattern ?? this.currentDNA?.name ?? 'default',
       createdBy: options.createdBy ?? 'system',
     });
-    if (options.advanceProtocol !== false) {
+    if (this.store) {
+      try {
+        this.store.saveMission(mission);
+      } catch (error) {
+        // Creation must not leave a mission that durable state never saw.
+        engine.remove(mission.id);
+        throw error;
+      }
+    }
+    if (advanceProtocol !== false) {
       this.advanceProtocolStep('bos_create_mission');
     }
-    this.store?.saveMission(mission);
     return mission;
+  }
+
+  /**
+   * Apply a validated mission transition and persist it atomically.
+   *
+   * Memory is rolled back when the store write throws, so a failed persistence
+   * can never leave the engine ahead of durable state. The write is a single
+   * idempotent upsert; no multi-write transaction is claimed.
+   */
+  transitionMission(
+    missionId: string,
+    to: MissionStatus,
+    options: MissionTransitionOptions = {},
+  ): MissionTransitionResult {
+    const engine = this.getMissionEngine();
+    const before = engine.get(missionId);
+    const rollback = before ? structuredClone(before) : null;
+
+    const result = engine.transition(missionId, to, options);
+    if (!result.ok || !result.changed) return result;
+
+    if (this.store) {
+      try {
+        this.store.saveMission(result.mission);
+      } catch (error) {
+        if (rollback) engine.restoreOne(rollback);
+        return {
+          ok: false,
+          code: 'PERSISTENCE_FAILED',
+          message: `Failed to persist mission "${missionId}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          mission: rollback,
+          from: before?.status,
+          to,
+        };
+      }
+    }
+
+    const now = new Date().toISOString();
+    if (to === 'active') {
+      // Starting (or resuming) makes this the single active mission.
+      this.agentState.activeMission = missionId;
+      this.agentState.updatedAt = now;
+    } else if (MissionEngine.isTerminal(to) && this.agentState.activeMission === missionId) {
+      this.agentState.activeMission = null;
+      this.agentState.updatedAt = now;
+    }
+
+    return result;
+  }
+
+  /**
+   * Append evidence to an in-flight mission and persist it atomically, with the
+   * same rollback guarantee as {@link transitionMission}. Used by orchestrators
+   * that record each task's verified result as it completes.
+   */
+  addMissionEvidence(
+    missionId: string,
+    evidence: MissionEvidenceInput[],
+    options: MissionTransitionOptions = {},
+  ): MissionTransitionResult {
+    const engine = this.getMissionEngine();
+    const before = engine.get(missionId);
+    const rollback = before ? structuredClone(before) : null;
+
+    const result = engine.addEvidence(missionId, evidence, options);
+    if (!result.ok || !result.changed) return result;
+
+    if (this.store) {
+      try {
+        this.store.saveMission(result.mission);
+      } catch (error) {
+        if (rollback) engine.restoreOne(rollback);
+        return {
+          ok: false,
+          code: 'PERSISTENCE_FAILED',
+          message: `Failed to persist evidence for mission "${missionId}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          mission: rollback,
+          from: before?.status,
+          to: before?.status ?? 'active',
+        };
+      }
+    }
+
+    return result;
   }
 
   startMission(missionId: string, options: { advanceProtocol?: boolean } = {}): Mission | null {
-    const mission = this.getMissionEngine().start(missionId);
-    if (mission) {
-      // Starting a mission makes it the single active mission for the session.
-      this.agentState.activeMission = mission.id;
-      this.agentState.updatedAt = new Date().toISOString();
-      if (options.advanceProtocol !== false) {
-        this.advanceProtocolStep('bos_start_mission');
-      }
-      this.store?.saveMission(mission);
+    const result = this.transitionMission(missionId, 'active');
+    if (!result.ok) return null;
+    if (result.changed && options.advanceProtocol !== false) {
+      this.advanceProtocolStep('bos_start_mission');
     }
-    return mission;
+    return result.mission;
   }
 
-  completeMission(missionId: string): Mission | null {
-    const mission = this.getMissionEngine().complete(missionId);
-    if (mission && this.agentState.activeMission === missionId) {
-      this.agentState.activeMission = null;
-      this.agentState.updatedAt = new Date().toISOString();
-    }
-    if (mission) this.store?.saveMission(mission);
-    return mission;
+  completeMission(missionId: string, options: MissionTransitionOptions = {}): Mission | null {
+    const result = this.transitionMission(missionId, 'completed', options);
+    return result.ok ? result.mission : null;
   }
 
-  failMission(missionId: string, reason?: string): Mission | null {
-    const mission = this.getMissionEngine().fail(missionId, reason);
-    if (mission && this.agentState.activeMission === missionId) {
-      this.agentState.activeMission = null;
-      this.agentState.updatedAt = new Date().toISOString();
-    }
-    if (mission) this.store?.saveMission(mission);
-    return mission;
+  failMission(
+    missionId: string,
+    reason?: string,
+    options: Omit<MissionTransitionOptions, 'reason'> = {},
+  ): Mission | null {
+    const result = this.transitionMission(missionId, 'failed', { ...options, reason });
+    return result.ok ? result.mission : null;
+  }
+
+  pauseMission(missionId: string, options: MissionTransitionOptions = {}): MissionTransitionResult {
+    return this.transitionMission(missionId, 'paused', options);
+  }
+
+  resumeMission(
+    missionId: string,
+    options: MissionTransitionOptions = {},
+  ): MissionTransitionResult {
+    return this.transitionMission(missionId, 'active', options);
+  }
+
+  cancelMission(
+    missionId: string,
+    options: MissionTransitionOptions = {},
+  ): MissionTransitionResult {
+    return this.transitionMission(missionId, 'cancelled', options);
   }
 
   // Learning
@@ -758,6 +898,28 @@ export class BehaviorOS {
 
   getInsights(limit = 10): LearningEvent[] {
     return this.getLearningEngine().getInsights(limit);
+  }
+
+  // Governed learning lifecycle (G-014) --------------------------------------
+  /**
+   * Open a learning record at the `observation` stage. Promotion is explicit
+   * and evidence-backed; see {@link advanceLearningRecord}.
+   */
+  createLearningRecord(options: CreateLearningRecordOptions): LearningRecord {
+    return this.getLearningEngine().createRecord(options);
+  }
+
+  /** Promote a learning record exactly one lifecycle stage forward. */
+  advanceLearningRecord(
+    id: string,
+    to: LearningStage,
+    options: AdvanceLearningRecordOptions = {},
+  ): LearningAdvanceResult {
+    return this.getLearningEngine().advanceRecord(id, to, options);
+  }
+
+  getLearningRecords(): LearningRecord[] {
+    return this.getLearningEngine().getRecords();
   }
 
   // DNA evolution (learning-driven) -----------------------------------------
@@ -1228,6 +1390,7 @@ export class BehaviorOS {
       dna: this.currentDNA,
       missions: this.getMissionEngine().snapshot(),
       learnings: this.getLearningEngine().snapshot(),
+      learningRecords: this.getLearningEngine().snapshotRecords(),
     });
   }
 
@@ -1262,6 +1425,7 @@ export class BehaviorOS {
 
       this.getMissionEngine().restore(snapshot.missions ?? []);
       this.getLearningEngine().restore(snapshot.learnings ?? []);
+      this.getLearningEngine().restoreRecords(snapshot.learningRecords ?? []);
       return true;
     } catch {
       return false;

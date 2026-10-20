@@ -1,0 +1,138 @@
+{
+  "phase": "IDENTIFY",
+  "correlationId": "mission-1792460677070-dx0dvemi69d",
+  "gaps": [
+    {
+      "id": "G-001",
+      "severity": "critical",
+      "component": "packages/orchestrator/src/orchestrator.ts",
+      "consequence": "Callers receive status 'executed' even though no task is dispatched, validated, or completed.",
+      "evidence": "executeMission creates a mission, evaluates governance, and returns {status:'executed'}; no adapter, task, evidence, or completion call exists.",
+      "rootCause": "The orchestrator is a stub and does not use the mission lifecycle beyond creation.",
+      "remediation": "Replace the stub with a task engine that dispatches registered adapters, validates results, records evidence, and completes/fails the mission.",
+      "acceptanceTest": "Real shell task completes the mission; failure/timeout/cancel paths never report executed.",
+      "blocks": ["implementation", "acceptance", "release"]
+    },
+    {
+      "id": "G-002",
+      "severity": "high",
+      "component": "packages/schemas/src/index.ts",
+      "consequence": "No typed task contract, status, error taxonomy, acceptance criterion, or result schema exists.",
+      "evidence": "Search of schemas finds only Agent metrics; no Task schema.",
+      "rootCause": "Task orchestration was never modeled as a first-class domain.",
+      "remediation": "Add TaskDefinition, TaskAcceptance, TaskEvidence, TaskResult, TaskStatus and TaskErrorCode schemas.",
+      "acceptanceTest": "Malformed adapter results are rejected; task results conform to TaskResultSchema.",
+      "blocks": ["implementation", "acceptance"]
+    },
+    {
+      "id": "G-003",
+      "severity": "high",
+      "component": "packages/core/src/engine/mission-engine.ts",
+      "consequence": "A caller can assert passing evidence without executing anything; the kernel has no executed-vs-reported distinction.",
+      "evidence": "MissionEvidenceSchema has no provenance/executionId/exitCode; completion checks only status/simulated.",
+      "rootCause": "Sprint 1 deliberately accepted caller-supplied evidence; no executed-only mode.",
+      "remediation": "Add provenance fields and an executed verification mode; require provenance=executed plus executionId for completion.",
+      "acceptanceTest": "Executed-mode mission rejects reported and simulated evidence; accepts executed evidence with executionId.",
+      "blocks": ["acceptance"]
+    },
+    {
+      "id": "G-004",
+      "severity": "high",
+      "component": "packages/orchestrator",
+      "consequence": "No timeouts, retries, cancellation, retry budgets, loop detection, or circuit breaking.",
+      "evidence": "The orchestrator has no execution loop, AbortSignal, attempt counter, or failure classifier.",
+      "rootCause": "Stub implementation.",
+      "remediation": "Implement bounded retries, per-task deadlines, cancellation, loop detection and per-adapter circuit breakers.",
+      "acceptanceTest": "Timeout, cancellation, retry exhaustion, loop detection and open-circuit tests produce explicit terminal outcomes.",
+      "blocks": ["acceptance"]
+    },
+    {
+      "id": "G-005",
+      "severity": "high",
+      "component": "packages/orchestrator",
+      "consequence": "Agent/adapter output is untrusted and unvalidated; malformed output could be treated as success.",
+      "evidence": "No result schema or validation call exists.",
+      "rootCause": "No task contract.",
+      "remediation": "Validate adapter output with a schema; map malformed output to INVALID_OUTPUT/INVALID_INPUT.",
+      "acceptanceTest": "Malformed adapter output fails the task and mission without completion.",
+      "blocks": ["acceptance"]
+    },
+    {
+      "id": "G-006",
+      "severity": "medium",
+      "component": "orchestrator/plugin/CLI",
+      "consequence": "No correlated mission/task progress events are emitted by the orchestrator.",
+      "evidence": "Only transcript/tool output exists; no task event stream.",
+      "rootCause": "No task lifecycle.",
+      "remediation": "Add an in-process event emitter with typed events and correlation IDs; expose task results through the orchestrator API.",
+      "acceptanceTest": "Task lifecycle events are emitted in order for a real execution.",
+      "blocks": ["acceptance"]
+    },
+    {
+      "id": "G-007",
+      "severity": "medium",
+      "component": "plugins/opencode-v2/src/governance-log.ts",
+      "consequence": "Durable audit is opt-in and disabled in this environment; the hash chain is valid but not durable.",
+      "evidence": "bos_verify_audit_trail returned valid:true, complete:false, sink.enabled:false.",
+      "rootCause": "BEHAVIOR_OS_AUDIT_LOG is not configured.",
+      "remediation": "Keep the existing opt-in sink; document the requirement and test append/restart/tamper paths. Do not silently enable a path.",
+      "acceptanceTest": "Existing audit-sink tests pass; final report states durable status truthfully.",
+      "blocks": ["release"]
+    },
+    {
+      "id": "G-008",
+      "severity": "medium",
+      "component": "governance host integration",
+      "consequence": "Human approval is not proven to reach a UI; policy denials are enforced in preflight, but escalation approval is host-specific.",
+      "evidence": "Core has deny/escalate verdicts; no approval record is persisted by the orchestrator.",
+      "rootCause": "No approval transport in the core orchestrator.",
+      "remediation": "Treat escalated tasks as blocked pending an explicit host decision; do not infer approval. Record external dependency.",
+      "acceptanceTest": "Escalated governance verdict blocks execution with an explicit approval-required outcome.",
+      "blocks": ["release"]
+    },
+    {
+      "id": "G-009",
+      "severity": "medium",
+      "component": "packages/core/src/persistence/postgres-store.ts",
+      "consequence": "Async write-through means in-memory rollback cannot prove durable rollback; no nested savepoints.",
+      "evidence": "Documented Sprint 1 limitation.",
+      "rootCause": "Postgres adapter batches async writes and reports at flush.",
+      "remediation": "Keep the documented guarantee scoped to synchronous stores; do not claim atomic rollback for Postgres.",
+      "acceptanceTest": "Postgres tests document flush behavior; no false atomicity claim.",
+      "blocks": ["release"]
+    },
+    {
+      "id": "G-010",
+      "severity": "medium",
+      "component": "plugins/opencode-v2/src/index.ts",
+      "consequence": "Whole-snapshot rollback can erase a concurrent lifecycle transition in the same plugin instance.",
+      "evidence": "persistLifecycleChange imports the full pre-call snapshot on failure.",
+      "rootCause": "No per-mission mutex; storage writes are serialized but state mutation is not.",
+      "remediation": "Add per-mission lifecycle serialization or narrow the rollback; document if not fully solved.",
+      "acceptanceTest": "Concurrent lifecycle failure test does not erase an unrelated mission transition.",
+      "blocks": ["release"]
+    },
+    {
+      "id": "G-011",
+      "severity": "medium",
+      "component": "packages/orchestrator",
+      "consequence": "Task records are not separately persisted; resumption needs the caller to supply the plan and relies on mission evidence.",
+      "evidence": "Store has no task methods; Mission has no task ledger.",
+      "rootCause": "Task domain is new.",
+      "remediation": "Implement resumption from mission evidence and disclose that the task plan is caller-supplied.",
+      "acceptanceTest": "Resuming an active mission skips tasks whose required gates already have executed evidence.",
+      "blocks": ["release"]
+    },
+    {
+      "id": "G-012",
+      "severity": "high",
+      "component": "OpenCode host session",
+      "consequence": "The running plugin is stale; governance tools in this session call an older core API.",
+      "evidence": "bos_start_mission failed with bos.transitionMission is not a function.",
+      "rootCause": "Long-lived host loaded the plugin before the current build; no hot reload.",
+      "remediation": "Restart the OpenCode host/plugin for runtime equivalence. Local MCP smoke and tests start fresh processes.",
+      "acceptanceTest": "After restart, bos_start_mission succeeds against the same source.",
+      "blocks": ["release"]
+    }
+  ]
+}

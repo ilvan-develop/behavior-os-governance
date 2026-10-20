@@ -68,8 +68,14 @@ new BehaviorOS(config?: BehaviorOSConfig)
 | `evaluateGovernance(action, context)` | `GovernanceDecision` | Evaluate governance rules |
 | `checkQuality(metrics)` | `{passed, details}` | Check quality gates |
 | `runAudit(options)` | `AuditReport` | Run audit pipeline |
-| `createMission(options)` | `Mission` | Create new mission |
-| `startMission(id)` | `Mission \| null` | Start mission |
+| `createMission(options)` | `Mission` | Create new mission (`requiredChecks?` declares evidence gates) |
+| `startMission(id)` | `Mission \| null` | Legacy start wrapper |
+| `transitionMission(id, to, options?)` | `MissionTransitionResult` | Validated transition with optional `evidence`, `expectedVersion`, `actor`, `reason` |
+| `completeMission(id, options?)` | `Mission \| null` | Legacy completion wrapper (evidence-gated) |
+| `failMission(id, reason?, options?)` | `Mission \| null` | Legacy failure wrapper |
+| `pauseMission(id, options?)` | `MissionTransitionResult` | Pause an active mission |
+| `resumeMission(id, options?)` | `MissionTransitionResult` | Resume a paused mission |
+| `cancelMission(id, options?)` | `MissionTransitionResult` | Cancel a non-terminal mission |
 | `recordLearning(options)` | `LearningEvent` | Record learning event |
 | `getInsights(limit)` | `LearningEvent[]` | Get high-impact insights |
 | `getStatus()` | `Status` | Get system status |
@@ -121,6 +127,30 @@ interface Mission {
   updatedAt: string
   progress: number
   tags?: string[]
+  version?: number
+  requiredChecks?: string[]
+  evidence?: MissionEvidence[]
+  transitions?: MissionTransition[]
+  completionBasis?: 'evidence' | 'no-required-checks'
+  lastTransitionReason?: string
+}
+
+interface MissionEvidence {
+  gate: string
+  status: 'passed' | 'failed' | 'skipped'
+  source: string
+  detail?: string
+  simulated?: boolean
+  recordedAt: string
+}
+
+interface MissionTransition {
+  from: Mission['status']
+  to: Mission['status']
+  at: string
+  actor: string
+  reason?: string
+  version: number
 }
 ```
 
@@ -207,7 +237,7 @@ Add to `.mcp.json`:
 
 Inside this repository OpenCode discovers `.opencode/plugins/behavioros.ts`, which
 re-exports the built package. The MCP server is deliberately **not** registered in
-OpenCode, so a session sees one tool catalog (the plugin's 29 `bos_*` tools):
+OpenCode, so a session sees one tool catalog (the plugin's 32 `bos_*` tools):
 
 ```json
 // opencode.json

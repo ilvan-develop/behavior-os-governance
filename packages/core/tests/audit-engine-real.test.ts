@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DNA } from '@behavior-os/schemas';
 import { describe, expect, it } from 'vitest';
+import { AuditEngine, detectLinter, findProjectRoot } from '../src/engine/audit-engine';
 import { BehaviorOS } from '../src/engine/behavior-os';
 
 describe('AuditEngine - Real Mode', () => {
@@ -81,4 +85,50 @@ describe('AuditEngine - Integration with BehaviorOS', () => {
     expect(report.stages.length).toBeGreaterThan(0);
     expect(report.timestamp).toBeDefined();
   });
+});
+
+// G-017: the real lint stage only recognised eslint/oxlint, so it reported
+// `skipped` in a Biome repository.
+describe('AuditEngine - linter detection (G-017)', () => {
+  it('detects a linter from its config file and nothing from an empty dir', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bos-lint-'));
+    try {
+      expect(detectLinter(dir)).toBeNull();
+
+      writeFileSync(join(dir, 'biome.json'), '{}');
+      expect(detectLinter(dir)).toBe('biome');
+
+      rmSync(join(dir, 'biome.json'));
+      writeFileSync(join(dir, 'eslint.config.js'), 'export default [];');
+      expect(detectLinter(dir)).toBe('eslint');
+
+      rmSync(join(dir, 'eslint.config.js'));
+      writeFileSync(join(dir, '.oxlintrc.json'), '{}');
+      expect(detectLinter(dir)).toBe('oxlint');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the workspace root above a package directory', () => {
+    const root = findProjectRoot();
+    expect(root).not.toBeNull();
+    if (!root) return;
+    // The repository linter is Biome, configured at the workspace root.
+    expect(detectLinter(root)).toBe('biome');
+  });
+
+  it('reports the real lint stage as passed (not skipped) in this repository', () => {
+    const engine = new AuditEngine();
+    const report = engine.runReal({
+      missionId: 'mission-lint-probe',
+      agentId: 'persona:architect',
+      stages: ['lint'],
+    });
+
+    const lint = report.stages[0];
+    expect(lint?.stage).toBe('lint');
+    expect(lint?.status).toBe('passed');
+    expect(lint?.details).toMatchObject({ checked: true, linter: 'biome' });
+  }, 120_000);
 });

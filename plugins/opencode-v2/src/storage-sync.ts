@@ -123,6 +123,74 @@ function unionById<T extends { id?: string }>(a: T[] | undefined, b: T[] | undef
   return [...byId.values()];
 }
 
+const TERMINAL_MISSION_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+function missionStatus(mission: { [key: string]: unknown }): string | null {
+  return typeof mission.status === 'string' ? mission.status : null;
+}
+
+function isTerminalMission(mission: { [key: string]: unknown } | undefined): boolean {
+  const status = mission ? missionStatus(mission) : null;
+  return status !== null && TERMINAL_MISSION_STATUSES.has(status);
+}
+
+function missionVersion(mission: { [key: string]: unknown }): number {
+  return typeof mission.version === 'number' ? mission.version : -1;
+}
+
+/**
+ * Merge two copies of the same mission. A higher `version` wins; a terminal
+ * state can never be downgraded to a non-terminal one by a stale writer. This
+ * matters because terminal missions are immutable and their evidence is the
+ * only proof of completion.
+ */
+function pickMission(
+  local: { [key: string]: unknown },
+  foreign: { [key: string]: unknown },
+): { [key: string]: unknown } {
+  const localStatus = missionStatus(local);
+  const foreignStatus = missionStatus(foreign);
+  const localTerminal = localStatus !== null && TERMINAL_MISSION_STATUSES.has(localStatus);
+  const foreignTerminal = foreignStatus !== null && TERMINAL_MISSION_STATUSES.has(foreignStatus);
+
+  if (localTerminal && !foreignTerminal) return local;
+  if (foreignTerminal && !localTerminal) return foreign;
+
+  const localVersion = missionVersion(local);
+  const foreignVersion = missionVersion(foreign);
+  if (localVersion !== foreignVersion) {
+    return foreignVersion > localVersion ? foreign : local;
+  }
+  if (localTerminal && foreignTerminal) {
+    // Divergent terminal outcomes at the same version (e.g. completed vs
+    // failed from two writers). Pick the later update deterministically so
+    // both instances converge; equal timestamps fall back to a status rank.
+    const localAt = typeof local.updatedAt === 'string' ? local.updatedAt : '';
+    const foreignAt = typeof foreign.updatedAt === 'string' ? foreign.updatedAt : '';
+    if (localAt !== foreignAt) return foreignAt > localAt ? foreign : local;
+    const rank: Record<string, number> = { completed: 3, failed: 2, cancelled: 1 };
+    const localRank = localStatus ? (rank[localStatus] ?? 0) : 0;
+    const foreignRank = foreignStatus ? (rank[foreignStatus] ?? 0) : 0;
+    return foreignRank > localRank ? foreign : local;
+  }
+  // Same version, non-terminal: the foreign (newer snapshot) wins.
+  return foreign;
+}
+
+function mergeMissions(
+  a: Array<{ id?: string; [key: string]: unknown }> | undefined,
+  b: Array<{ id?: string; [key: string]: unknown }> | undefined,
+): Array<{ id?: string; [key: string]: unknown }> {
+  const byId = new Map<string, { id?: string; [key: string]: unknown }>();
+  for (const item of a ?? []) if (item.id) byId.set(item.id, item);
+  for (const item of b ?? []) {
+    if (!item.id) continue;
+    const existing = byId.get(item.id);
+    byId.set(item.id, existing ? pickMission(existing, item) : item);
+  }
+  return [...byId.values()];
+}
+
 /** Union protocol steps by their step number (history entries carry no id). */
 function unionStepHistory(
   a: Array<{ step?: number; tool?: string }> | undefined,
@@ -183,6 +251,15 @@ export function mergeSnapshots(
     typeof bState.currentStep === 'number' ? bState.currentStep : 0,
   );
 
+  const missions = mergeMissions(a.missions, b.missions);
+  const preferredActive = bState.activeMission ?? aState.activeMission ?? null;
+  const preferredMission = preferredActive
+    ? missions.find((mission) => mission.id === preferredActive)
+    : undefined;
+  // Never point activeMission at a terminal mission: it would suppress
+  // auto-missions and make bos_start_mission refuse a mission that is done.
+  const activeMission = isTerminalMission(preferredMission) ? null : preferredActive;
+
   return {
     ...a,
     ...b,
@@ -192,11 +269,11 @@ export function mergeSnapshots(
       ...aState,
       ...bState,
       selectedDna: bState.selectedDna ?? aState.selectedDna ?? null,
-      activeMission: bState.activeMission ?? aState.activeMission ?? null,
+      activeMission,
       currentStep,
       stepHistory: mergedStepHistory,
     },
-    missions: unionById(a.missions, b.missions),
+    missions,
     learnings: unionById(a.learnings, b.learnings),
   };
 }

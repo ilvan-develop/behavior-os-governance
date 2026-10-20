@@ -7,13 +7,32 @@ coverage/
 .env
 .env.local
 .mcp.json
+# The OpenCode project control plane is committed; only ad-hoc files stay local.
 .opencode/*
+!.opencode/agents/
+.opencode/agents/*
+!.opencode/agents/auditor.md
+!.opencode/agents/planner.md
+!.opencode/agents/researcher.md
+!.opencode/agents/reviewer.md
+!.opencode/commands/
+.opencode/commands/*
+!.opencode/commands/audit.md
+!.opencode/commands/govern.md
+!.opencode/commands/learn.md
+!.opencode/commands/mission.md
+!.opencode/commands/review.md
+!.opencode/commands/verify.md
 !.opencode/plugins/
 .opencode/plugins/*
 !.opencode/plugins/behavioros.ts
 !.opencode/skills/
 .opencode/skills/*
 !.opencode/skills/behavior-os/
+!.opencode/skills/docs-research/
+!.opencode/skills/engineering-cycle/
+!.opencode/skills/release/
+!.opencode/skills/verification-first/
 .claude/
 .cursor/
 .vscode/
@@ -21,6 +40,8 @@ coverage/
 .roo/
 .husky/_
 .behavioros/baseline.json
+# Session logs are local evidence, not source.
+.behavioros/*.log
 # Local SQLite persistence files must never be committed.
 *.db
 *.db-wal

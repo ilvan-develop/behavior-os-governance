@@ -1,0 +1,247 @@
+{
+  "phase": "GROUND_VERIFY_PLAN",
+  "correlationId": "mission-1792490880917-qrygt0p165b",
+  "requirements": [
+    {
+      "id": "R-001",
+      "requirement": "Task contract exists with identity, mission, objective, acceptance, agent, adapter, deadline, attempts and idempotency.",
+      "implementation": "packages/schemas/src/index.ts TaskDefinitionSchema and related task types",
+      "test": "packages/orchestrator/tests/orchestrator.test.ts contract validation",
+      "status": "PASS"
+    },
+    {
+      "id": "R-002",
+      "requirement": "The orchestrator dispatches real work through a registered adapter and never synthesizes success.",
+      "implementation": "packages/orchestrator/src/orchestrator.ts executeMission/executeTask; src/adapters.ts ShellAdapter",
+      "test": "real child-process execution test",
+      "status": "PASS"
+    },
+    {
+      "id": "R-003",
+      "requirement": "Adapter output is schema-validated; malformed output is rejected.",
+      "implementation": "AdapterResultSchema parsing in orchestrator",
+      "test": "malformed adapter output test",
+      "status": "PASS"
+    },
+    {
+      "id": "R-004",
+      "requirement": "Task success requires every required acceptance gate to pass.",
+      "implementation": "acceptance evaluation in executeTask",
+      "test": "command exits 0 but acceptance fails",
+      "status": "PASS"
+    },
+    {
+      "id": "R-005",
+      "requirement": "Executed-mode mission completion requires provenance=executed and executionId.",
+      "implementation": "mission-engine.ts; MissionEvidenceSchema; MissionSchema.verificationMode",
+      "test": "packages/core/tests/evidence-integrity.test.ts; mission-engine tests",
+      "status": "PASS"
+    },
+    {
+      "id": "R-006",
+      "requirement": "Timeouts, cancellation, bounded retries, loop detection and circuit breaking produce explicit outcomes.",
+      "implementation": "orchestrator.ts; circuit-breaker.ts",
+      "test": "timeout/cancel/retry/loop/circuit tests",
+      "status": "PASS"
+    },
+    {
+      "id": "R-007",
+      "requirement": "Unavailable agent/adapter and governance denial are explicit blocked/failed outcomes.",
+      "implementation": "orchestrator preflight, registry and governance checks",
+      "test": "unavailable adapter, deny and escalation tests",
+      "status": "PASS"
+    },
+    {
+      "id": "R-008",
+      "requirement": "Task lifecycle events are emitted with correlation and without secrets.",
+      "implementation": "per-mission event buffers in orchestrator",
+      "test": "event-order, secret-exclusion and concurrent-buffer tests",
+      "status": "PASS"
+    },
+    {
+      "id": "R-009",
+      "requirement": "Safe resumption skips tasks whose required gates already have executed evidence.",
+      "implementation": "orchestrator resume path over mission evidence",
+      "test": "resume test",
+      "status": "PASS"
+    },
+    {
+      "id": "R-010",
+      "requirement": "MCP/plugin/SDK contracts and the full local ladder remain green.",
+      "implementation": "existing surfaces; no new tools in this increment",
+      "test": "pnpm verify:governance, verify:plugin, smoke:mcp, verify:opencode; full test suite",
+      "status": "PASS"
+    },
+    {
+      "id": "R-011",
+      "requirement": "Durable audit status is reported truthfully; no silent enablement.",
+      "implementation": "existing governance-log sink (opt-in)",
+      "test": "audit-sink tests; bos_verify_audit_trail",
+      "status": "PASS_DOCUMENTED"
+    },
+    {
+      "id": "R-012",
+      "requirement": "Host runtime equivalence for the current session.",
+      "implementation": "rebuild of core and plugin packages",
+      "test": "bos_start_mission succeeded; a previously blocked docs edit succeeded after rebuild",
+      "status": "PASS_OBSERVED"
+    },
+    {
+      "id": "R-013",
+      "requirement": "Documentation and public claims match measured code.",
+      "implementation": "AGENTS.md, CONTRIBUTING.md, docs/ARCHITECTURE.md, docs/CLAIMS.md",
+      "test": "docs-consistency tests inside pnpm test; measured counts",
+      "status": "PASS"
+    },
+    {
+      "id": "R-014",
+      "requirement": "Expose orchestration through MCP and the OpenCode plugin.",
+      "implementation": "not implemented",
+      "test": "a tool-level orchestration test would be required",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "R-015",
+      "requirement": "The security stage of the real audit is clean.",
+      "implementation": "dependency upgrades required",
+      "test": "pnpm audit --audit-level=high",
+      "status": "FAIL"
+    }
+  ],
+  "verificationMatrix": [
+    {
+      "id": "V-001",
+      "check": "Repository identity and baseline",
+      "status": "PASS",
+      "evidence": "branch master; commit 45d9353; uncommitted Sprint 1/2 tree preserved"
+    },
+    {
+      "id": "V-002",
+      "check": "Typecheck",
+      "status": "PASS",
+      "evidence": "pnpm typecheck: 9 successful, 9 total, exit 0"
+    },
+    {
+      "id": "V-003",
+      "check": "Lint and format",
+      "status": "PASS",
+      "evidence": "pnpm lint:check: 150 files checked, no fixes applied, exit 0"
+    },
+    {
+      "id": "V-004",
+      "check": "Tests",
+      "status": "PASS",
+      "evidence": "pnpm test: 58 files / 659 cases, 7/7 tasks successful, exit 0"
+    },
+    {
+      "id": "V-005",
+      "check": "Orchestrator real execution and failure injection",
+      "status": "PASS",
+      "evidence": "packages/orchestrator: 1 file / 17 cases, including a real child process"
+    },
+    {
+      "id": "V-006",
+      "check": "Build",
+      "status": "PASS",
+      "evidence": "pnpm build: 7/7 tasks successful, exit 0"
+    },
+    {
+      "id": "V-007",
+      "check": "Governance conformance",
+      "status": "PASS",
+      "evidence": "pnpm verify:governance: 24/24 claims, 0 failures, exit 0"
+    },
+    {
+      "id": "V-008",
+      "check": "Plugin verification",
+      "status": "PASS",
+      "evidence": "pnpm verify:plugin: 32 tools, protocol flow, preamble and governance hook, exit 0"
+    },
+    {
+      "id": "V-009",
+      "check": "MCP smoke",
+      "status": "PASS",
+      "evidence": "pnpm smoke:mcp: 30 tools + 2 resources, fresh process, exit 0"
+    },
+    {
+      "id": "V-010",
+      "check": "OpenCode control plane",
+      "status": "PASS",
+      "evidence": "pnpm verify:opencode: 38/38 checks passed, exit 0"
+    },
+    {
+      "id": "V-011",
+      "check": "Documentation consistency",
+      "status": "PASS",
+      "evidence": "packages/core/tests/docs-consistency.test.ts is part of the 454 core cases that passed"
+    },
+    {
+      "id": "V-012",
+      "check": "Real audit (all stages)",
+      "status": "FAIL",
+      "evidence": "bos_run_audit simulate:false returned fail; security stage fails on 6 advisories (2 critical, 1 high, 3 moderate)"
+    },
+    {
+      "id": "V-013",
+      "check": "Pre-existing dev-dependency advisories",
+      "status": "FAIL",
+      "evidence": "pnpm audit --audit-level=high: tinypool 1.1.1 (critical), braces 3.0.3 (high), 3 moderate"
+    },
+    {
+      "id": "V-014",
+      "check": "Governance false-positive fix",
+      "status": "PASS",
+      "evidence": "3 new governance tests; the blocked C4 documentation edit succeeded after the rebuild"
+    },
+    {
+      "id": "V-015",
+      "check": "Host runtime for this session",
+      "status": "PASS_OBSERVED",
+      "evidence": "bos_start_mission succeeded; post-build edits use the new helper"
+    }
+  ],
+  "plan": [
+    {
+      "stage": "Stage 1",
+      "name": "Evidence provenance and executed verification mode",
+      "gate": "Kernel tests, typecheck",
+      "status": "DONE"
+    },
+    {
+      "stage": "Stage 2",
+      "name": "Task contracts, adapters, orchestrator",
+      "gate": "Orchestrator tests including real shell execution",
+      "status": "DONE"
+    },
+    {
+      "stage": "Stage 3",
+      "name": "Failure injection, events, resumption",
+      "gate": "Timeout, cancellation, retry, loop, circuit, malformed output, resume tests",
+      "status": "DONE"
+    },
+    {
+      "stage": "Stage 4",
+      "name": "Governance false-positive fix and regression tests",
+      "gate": "Plugin tests; blocked edit unblocked",
+      "status": "DONE"
+    },
+    {
+      "stage": "Stage 5",
+      "name": "Documentation and claims alignment",
+      "gate": "docs-consistency; measured counts",
+      "status": "DONE"
+    },
+    {
+      "stage": "Stage 6",
+      "name": "Full ladder, real audit and evidence",
+      "gate": "All eight ladder commands; real audit",
+      "status": "DONE_WITH_AUDIT_FAILURE"
+    }
+  ],
+  "authorization": {
+    "modifyFiles": true,
+    "commit": false,
+    "release": false,
+    "destructiveActions": false
+  }
+}

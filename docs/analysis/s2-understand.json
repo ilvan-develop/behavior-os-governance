@@ -1,0 +1,85 @@
+{
+  "phase": "UNDERSTAND",
+  "mission": "Make Behavior-OS autonomy real, bounded, observable, recoverable and evidence-driven end to end.",
+  "correlationId": "mission-1792460677070-dx0dvemi69d",
+  "repository": {
+    "root": "C:\\www\\behavior-os",
+    "identity": "Behavior-OS monorepo",
+    "branch": "master",
+    "baselineCommit": "45d9353",
+    "baselineCommitSubject": "chore: accept the turbo-managed agent-guidance block rewrite"
+  },
+  "governance": {
+    "initialDna": "Surgical Team",
+    "initialBlock": "sterile-field denied production writes (verdict: deny)",
+    "selectedDna": "Open Source",
+    "rationale": "The repository is MIT-licensed open source; Open Source DNA preserves license/DCO/changelog gates without the sterile-field production-write block.",
+    "note": "The blocked write was not retried under Surgical Team."
+  },
+  "baseline": {
+    "workingTree": {
+      "modified": 35,
+      "untracked": 19,
+      "totalEntries": 54,
+      "note": "Sprint 1 changes are uncommitted and must be preserved."
+    },
+    "verifiedSprint1State": {
+      "typecheck": "10/10 exit 0",
+      "lint": "137 files, exit 0",
+      "tests": "56 files / 629 cases, exit 0",
+      "build": "7/7 exit 0",
+      "governance": "24/24 claims, exit 0",
+      "plugin": "32 tools, exit 0",
+      "mcp": "30 tools, exit 0",
+      "opencode": "38/38, exit 0"
+    }
+  },
+  "runtimeFindings": [
+    {
+      "id": "RT-001",
+      "severity": "high",
+      "finding": "The long-lived OpenCode plugin instance serving this session is stale relative to the built source.",
+      "evidence": "bos_start_mission returned: bos.transitionMission is not a function, although packages/core/dist and packages/core/src define transitionMission.",
+      "impact": "Governance tool calls in the current host session cannot be trusted to exercise the latest source. A host restart is required before claiming runtime equivalence.",
+      "status": "OPEN_EXTERNAL"
+    }
+  ],
+  "scope": {
+    "authorized": [
+      "Inspect and harden the existing implementation without rewriting working components.",
+      "Add task contracts, real execution adapters, validated results, bounded retries, timeouts, cancellation, loop detection and escalation.",
+      "Bind orchestrated evidence to real execution and reject reported/simulated evidence where executed verification is required.",
+      "Add failure-injection and integration tests.",
+      "Preserve MCP/plugin/SDK contract consistency.",
+      "Record honest limitations and external blockers."
+    ],
+    "prohibited": [
+      "commit, merge, rebase, push, tag, publish or deploy",
+      "discarding or resetting unrelated user changes",
+      "claiming a pass from simulated, skipped or mocked execution",
+      "bypassing a failed gate"
+    ]
+  },
+  "acceptanceCriteria": [
+    "The orchestrator cannot return executed without dispatching a task through a registered adapter.",
+    "A task result is schema-validated before it can affect mission state.",
+    "A task succeeds only when every required acceptance gate has a passing, non-simulated, executed check.",
+    "Mission completion in executed mode requires evidence with provenance=executed and a non-empty executionId.",
+    "Timeouts, cancellation, retry exhaustion, loop detection and unavailable adapters produce explicit outcomes.",
+    "A real shell execution path is covered by a runtime test, not only mocks.",
+    "MCP, plugin and SDK remain contract-consistent; full local gates pass.",
+    "No commit or release occurs without separate authorization."
+  ],
+  "assumptions": [
+    "The uncommitted Sprint 1 tree is the intended baseline.",
+    "Node 22+ and pnpm are available.",
+    "A shell adapter executing the current Node binary is an acceptable real execution path for local verification.",
+    "The OpenCode host cannot be restarted from inside this session; stale-host verification is an external blocker."
+  ],
+  "unknowns": [
+    "Whether the configured OpenCode host will reload the plugin on the next session.",
+    "Whether a user-owned approval UI exists for escalated governance decisions.",
+    "Whether Postgres is available for live integration testing in this environment."
+  ],
+  "definitionOfFunctional": "A mission plan is created, governed, dispatched to a registered execution adapter, validated against acceptance criteria, recorded as executed evidence, and only then completed; every failure path terminates or escalates explicitly and is reproducible from tests."
+}

@@ -1,0 +1,56 @@
+{
+  "phase": "LOAD",
+  "correlationId": "mission-1792460677070-dx0dvemi69d",
+  "sourcesInspected": [
+    "AGENTS.md",
+    "package.json",
+    "turbo.json",
+    "vitest.config.ts",
+    "packages/schemas/src/index.ts",
+    "packages/core/src/engine/mission-engine.ts",
+    "packages/core/src/engine/behavior-os.ts",
+    "packages/core/src/engine/audit-engine.ts",
+    "packages/core/src/engine/pipeline-engine.ts",
+    "packages/core/src/persistence/store.ts",
+    "packages/core/src/persistence/sqlite-store.ts",
+    "packages/core/src/persistence/postgres-store.ts",
+    "packages/orchestrator/src/orchestrator.ts",
+    "packages/orchestrator/src/index.ts",
+    "packages/orchestrator/package.json",
+    "packages/orchestrator/tsconfig.json",
+    "packages/mcp-server/src/server.ts",
+    "plugins/opencode-v2/src/index.ts",
+    "plugins/opencode-v2/src/storage-sync.ts",
+    "plugins/opencode-v2/src/governance-log.ts",
+    "packages/core/tests/audit-sink.test.ts",
+    "dnas/surgical-team.yaml",
+    "dnas/open-source.yaml",
+    "dnas/enterprise-governance.yaml",
+    "dnas/devops-pipeline.yaml",
+    ".behavioros/README.md",
+    "docs/analysis/governance-conformance.json"
+  ],
+  "versions": {
+    "node": "24.21.0",
+    "pnpm": "10.4.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0",
+    "zod": "^4.4.3",
+    "turbo": "^2.4.0"
+  },
+  "contracts": {
+    "mission": "packages/schemas/src/index.ts MissionSchema; kernel in mission-engine.ts",
+    "persistence": "Store is synchronous and idempotent; Postgres is async write-through; no nested savepoints.",
+    "governance": "preflightAction runs blocking pre gates; deny is final; escalate is a warning in the generic pipeline.",
+    "audit": "BehaviorOS.runAudit downgrades simulated reports to warning; raw AuditEngine is not downgraded.",
+    "plugin": "32 bos_* tools; storage snapshot sync with terminal merge.",
+    "mcp": "30 tools, stdio only; fresh process smoke test."
+  },
+  "restrictions": [
+    "No commit, push, tag, publish, deploy.",
+    "No changes to unrelated user files.",
+    "No simulated evidence counted as verification.",
+    "No bypass of a governance deny.",
+    "The running OpenCode host is stale; host-level runtime equivalence requires restart."
+  ]
+}

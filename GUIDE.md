@@ -168,12 +168,12 @@ O OpenCode descobre plugins locais em `.opencode/plugins/`. Este repositório te
 }
 ```
 
-O servidor MCP não é registado dentro do OpenCode: o plugin expõe as 29 tools
+O servidor MCP não é registado dentro do OpenCode: o plugin expõe as 32 tools
 `bos_*` diretamente, para que a sessão veja um único catálogo.
 
 ### Ferramentas Disponíveis
 
-O plugin regista 29 tools `bos_*` (as 27 do servidor MCP **mais** `bos_get_log`
+O plugin regista 32 tools `bos_*` (as 30 do servidor MCP **mais** `bos_get_log`
 e `bos_verify_audit_trail`). Lista completa:
 
 | Tool | Descrição |

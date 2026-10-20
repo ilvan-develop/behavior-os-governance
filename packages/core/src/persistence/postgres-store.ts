@@ -177,16 +177,24 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Run a callback as a single transaction. All writes inside are applied
-   * atomically: the mirror is updated only after the COMMIT, so a concurrent
-   * reader sees either all writes or none.
+   * Run a callback as a single transaction. Every write inside the callback is
+   * issued as real SQL on the *same* client that ran `BEGIN`, so the database
+   * transaction actually holds the rows: the mirror is updated only after the
+   * COMMIT, so a concurrent reader sees either all writes or none.
    */
   async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
     const client = await this.ensureConnected().connect();
     this.inflight = [];
     await client.query('BEGIN');
     try {
+      // Run the callback so it can buffer writes into `this.inflight`. The
+      // database must not see any of them until the whole batch is flushed, so
+      // we wait until after `fn()` completes (or fails).
       const result = await fn();
+      // Issue every buffered write onto the transaction's client. If any
+      // write fails, we roll back immediately — the database never sees a
+      // partial batch.
+      await this.flushInflightWrites(client);
       await client.query('COMMIT');
       // Replay the captured writes into the mirror now that the transaction
       // is committed. Reads from other clients that have also flushed will
@@ -194,6 +202,8 @@ export class PostgresStore implements Store {
       this.replayInflightWrites();
       return result;
     } catch (error) {
+      // If the callback succeeded but a flush failed (e.g. disk full), the DB
+      // may have seen some writes; roll back to keep things consistent.
       await client.query('ROLLBACK').catch(() => undefined);
       this.inflight = null;
       throw error;
@@ -251,19 +261,36 @@ export class PostgresStore implements Store {
     });
   }
 
+  /**
+   * Issue every write buffered by the running transaction on the client that
+   * owns it. Writes run in call order and are awaited before `COMMIT`; the
+   * first failure rejects, which aborts the whole transaction.
+   */
+  private async flushInflightWrites(client: PgClientLike): Promise<void> {
+    if (!this.inflight) return;
+    for (const write of this.inflight) {
+      await client.query(write.text, write.values);
+    }
+  }
+
+  /** `INSERT … ON CONFLICT` shared by the immediate and transactional paths. */
+  private upsertSql(): string {
+    return `INSERT INTO ${this.table} (kind, id, created_at, doc) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (kind, id) DO UPDATE SET created_at = excluded.created_at, doc = excluded.doc`;
+  }
+
   private upsert(kind: Kind, id: string, doc: unknown): void {
     const sortKey = this.sortKeyFor(kind, doc);
+    const text = this.upsertSql();
+    const values = [kind, id, sortKey, JSON.stringify(doc)];
     if (this.inflight) {
-      // Inside a transaction: capture the write so the mirror can be replayed
-      // atomically after COMMIT.
-      this.inflight.push({ text: '', values: [], kind, id, sortKey, doc });
+      // Inside a transaction: buffer the real write so `withTransaction` can
+      // issue it on the transaction's client before COMMIT. The mirror is only
+      // updated once that COMMIT succeeds.
+      this.inflight.push({ text, values, kind, id, sortKey, doc });
     } else {
       this.mirror(kind).set(id, { sortKey, doc });
-      this.enqueue(
-        `INSERT INTO ${this.table} (kind, id, created_at, doc) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (kind, id) DO UPDATE SET created_at = excluded.created_at, doc = excluded.doc`,
-        [kind, id, sortKey, JSON.stringify(doc)],
-      );
+      this.enqueue(text, values);
     }
   }
 

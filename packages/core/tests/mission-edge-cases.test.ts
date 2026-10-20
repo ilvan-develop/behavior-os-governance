@@ -165,10 +165,9 @@ describe('MissionEngine Edge Cases', () => {
     expect(mission.priority).toBe('critical');
   });
 
-  it('should handle sequential operations with no gaps', () => {
+  it('refuses to complete a mission that never started', () => {
     const engine = new MissionEngine();
 
-    // Create and immediately complete without starting
     const mission = engine.create({
       title: 'Direct Complete',
       type: 'feature',
@@ -177,10 +176,61 @@ describe('MissionEngine Edge Cases', () => {
       createdBy: 'agent-1',
     });
 
-    // This might fail or succeed depending on implementation
+    // S1: pending -> completed is not a legal transition. The legacy helper
+    // returns null instead of silently marking the mission done.
     const completed = engine.complete(mission.id);
-    // Should not crash
-    expect(completed).toBeDefined();
+    expect(completed).toBeNull();
+    expect(engine.get(mission.id)?.status).toBe('pending');
+  });
+
+  it('rejects a stale version after a concurrent progress update', () => {
+    const engine = new MissionEngine();
+    const mission = engine.create({
+      title: 'Concurrent Test',
+      type: 'feature',
+      priority: 'medium',
+      dnaPattern: 'test',
+      createdBy: 'agent-1',
+    });
+
+    engine.start(mission.id);
+    const observed = engine.get(mission.id)?.version ?? 0;
+    engine.updateProgress(mission.id, 50);
+
+    const stale = engine.transition(mission.id, 'paused', { expectedVersion: observed });
+    expect(stale.ok).toBe(false);
+    if (stale.ok) return;
+    expect(stale.code).toBe('VERSION_CONFLICT');
+
+    const fresh = engine.transition(mission.id, 'paused', {
+      expectedVersion: engine.get(mission.id)?.version,
+    });
+    expect(fresh.ok).toBe(true);
+  });
+
+  it('does not duplicate evidence when completion is retried', () => {
+    const engine = new MissionEngine();
+    const mission = engine.create({
+      title: 'Retry Complete',
+      type: 'feature',
+      priority: 'medium',
+      dnaPattern: 'test',
+      createdBy: 'agent-1',
+      requiredChecks: ['tests'],
+    });
+
+    engine.start(mission.id);
+    const evidence = [{ gate: 'tests', status: 'passed' as const, source: 'pnpm test' }];
+    const first = engine.transition(mission.id, 'completed', { evidence });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = engine.transition(mission.id, 'completed', { evidence });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.changed).toBe(false);
+    expect(second.mission.evidence).toHaveLength(1);
+    expect(second.mission.version).toBe(first.mission.version);
   });
 
   it('should handle concurrent updates to same mission', () => {

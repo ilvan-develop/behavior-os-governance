@@ -3,6 +3,9 @@ import type {
   EvolutionProposal,
   LearningEvent,
   LearningImpact,
+  LearningRecord,
+  LearningStage,
+  LearningTransition,
   LearningType,
 } from '@behavior-os/schemas';
 
@@ -37,9 +40,54 @@ const SATURATION_OCCURRENCES = 5;
 /** Learning types that describe a problem worth preventing via governance. */
 const ACTIONABLE_TYPES: readonly LearningType[] = ['failure', 'fix'];
 
+/**
+ * Ordered governance lifecycle of a learning record. A record moves exactly one
+ * stage forward per promotion; there is no skip and no regression.
+ */
+export const LEARNING_STAGES: readonly LearningStage[] = [
+  'observation',
+  'lesson',
+  'candidate',
+  'validated',
+  'policy',
+  'monitored',
+];
+
+/** Stages that may only be entered with at least one piece of evidence. */
+const EVIDENCE_REQUIRED_STAGES: readonly LearningStage[] = ['validated', 'policy', 'monitored'];
+
+export interface CreateLearningRecordOptions {
+  title: string;
+  content: string;
+  source: string;
+  impact: LearningImpact;
+  relatedMission?: string;
+  evidence?: string[];
+  actor?: string;
+}
+
+export interface AdvanceLearningRecordOptions {
+  actor?: string;
+  reason?: string;
+  /** Evidence appended while promoting; required to reach `validated`. */
+  evidence?: string[];
+}
+
+export type LearningAdvanceResult =
+  | { ok: true; record: LearningRecord }
+  | { ok: false; code: 'NOT_FOUND' | 'INVALID_TRANSITION' | 'EVIDENCE_REQUIRED'; message: string };
+
+/** Drop empty/duplicate evidence strings so promotion checks stay meaningful. */
+function normalizeEvidence(evidence: readonly string[] | undefined): string[] {
+  if (!Array.isArray(evidence)) return [];
+  return [...new Set(evidence.map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
+}
+
 export class LearningEngine {
   private events: LearningEvent[] = [];
   private patterns: Map<string, DetectedPattern> = new Map();
+  /** Governed lifecycle records, independent of the raw event stream. */
+  private records: LearningRecord[] = [];
 
   record(options: RecordOptions): LearningEvent {
     const event: LearningEvent = {
@@ -195,6 +243,121 @@ export class LearningEngine {
     this.events = Array.isArray(events) ? [...events] : [];
     this.patterns.clear();
     this.detectPatterns();
+  }
+
+  // Governed lifecycle ------------------------------------------------------
+  /**
+   * Open a learning record at the `observation` stage. Recording an event and
+   * opening a lifecycle record are separate concerns: the event stream feeds
+   * pattern detection, while a record is promoted with evidence.
+   */
+  createRecord(options: CreateLearningRecordOptions): LearningRecord {
+    const now = new Date().toISOString();
+    const record: LearningRecord = {
+      id: `learn-rec-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      stage: 'observation',
+      title: options.title,
+      content: options.content,
+      source: options.source,
+      impact: options.impact,
+      evidence: normalizeEvidence(options.evidence),
+      transitions: [],
+      createdAt: now,
+      updatedAt: now,
+      ...(options.relatedMission ? { relatedMission: options.relatedMission } : {}),
+    };
+    this.records.push(record);
+    return { ...record, evidence: [...record.evidence], transitions: [] };
+  }
+
+  /**
+   * Promote a record exactly one stage forward.
+   *
+   * Refusals are explicit: an unknown id (`NOT_FOUND`), a skip/regression/other
+   * out-of-order target (`INVALID_TRANSITION`), or a promotion into `validated`
+   * or later without any evidence (`EVIDENCE_REQUIRED`). A refused promotion
+   * leaves the record untouched.
+   */
+  advanceRecord(
+    id: string,
+    to: LearningStage,
+    options: AdvanceLearningRecordOptions = {},
+  ): LearningAdvanceResult {
+    const record = this.records.find((candidate) => candidate.id === id);
+    if (!record) {
+      return { ok: false, code: 'NOT_FOUND', message: `No learning record with id "${id}"` };
+    }
+
+    const fromIndex = LEARNING_STAGES.indexOf(record.stage);
+    const toIndex = LEARNING_STAGES.indexOf(to);
+    if (toIndex !== fromIndex + 1) {
+      const next = LEARNING_STAGES[fromIndex + 1] ?? 'none';
+      return {
+        ok: false,
+        code: 'INVALID_TRANSITION',
+        message: `Cannot move learning ${id} from "${record.stage}" to "${to}"; the next stage is "${next}"`,
+      };
+    }
+
+    const evidence = [...record.evidence, ...normalizeEvidence(options.evidence)];
+    if (EVIDENCE_REQUIRED_STAGES.includes(to) && evidence.length === 0) {
+      return {
+        ok: false,
+        code: 'EVIDENCE_REQUIRED',
+        message: `Promotion to "${to}" requires at least one evidence entry`,
+      };
+    }
+
+    const at = new Date().toISOString();
+    const transition: LearningTransition = {
+      from: record.stage,
+      to,
+      at,
+      actor: options.actor ?? 'system',
+      ...(options.reason ? { reason: options.reason } : {}),
+    };
+
+    record.stage = to;
+    record.evidence = evidence;
+    record.transitions.push(transition);
+    record.updatedAt = at;
+
+    return {
+      ok: true,
+      record: {
+        ...record,
+        evidence: [...record.evidence],
+        transitions: [...record.transitions],
+      },
+    };
+  }
+
+  getRecords(): LearningRecord[] {
+    return this.records.map((record) => ({
+      ...record,
+      evidence: [...record.evidence],
+      transitions: [...record.transitions],
+    }));
+  }
+
+  getRecord(id: string): LearningRecord | undefined {
+    return this.getRecords().find((record) => record.id === id);
+  }
+
+  /** Snapshot every lifecycle record for persistence. */
+  snapshotRecords(): LearningRecord[] {
+    return this.getRecords();
+  }
+
+  /** Replace all lifecycle records; tolerates snapshots written before G-014. */
+  restoreRecords(records: readonly LearningRecord[] | undefined): void {
+    this.records = Array.isArray(records)
+      ? records.map((record) => ({
+          ...record,
+          evidence: [...(record.evidence ?? [])],
+          transitions: [...(record.transitions ?? [])],
+        }))
+      : [];
   }
 
   private generateRecommendation(type: string, count: number): string {

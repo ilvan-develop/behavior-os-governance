@@ -1,0 +1,174 @@
+{
+  "phase": "GROUND_VERIFY_PLAN",
+  "correlationId": "mission-1792460677070-dx0dvemi69d",
+  "requirements": [
+    {
+      "id": "R-001",
+      "requirement": "Task contract exists with identity, mission, objective, acceptance, agent, adapter, deadline, attempts and idempotency.",
+      "implementation": "packages/schemas/src/index.ts TaskDefinitionSchema",
+      "test": "packages/orchestrator/tests/orchestrator.test.ts contract validation",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-002",
+      "requirement": "Orchestrator dispatches real work through a registered adapter and never synthesizes executed status.",
+      "implementation": "packages/orchestrator/src/orchestrator.ts executeMission/executeTask; src/adapters.ts",
+      "test": "real shell execution test",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-003",
+      "requirement": "Adapter output is schema-validated; malformed output is rejected.",
+      "implementation": "AdapterResultSchema validation in orchestrator",
+      "test": "malformed adapter output test",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-004",
+      "requirement": "Task success requires every required acceptance gate to pass.",
+      "implementation": "acceptance evaluation in executeTask",
+      "test": "command succeeds but acceptance fails",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-005",
+      "requirement": "Executed-mode mission completion requires provenance=executed and executionId.",
+      "implementation": "packages/core/src/engine/mission-engine.ts; MissionEvidenceSchema; MissionSchema.verificationMode",
+      "test": "packages/core/tests/mission-engine.test.ts executed-mode cases",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-006",
+      "requirement": "Timeouts, cancellation, bounded retries, loop detection and circuit breaking produce explicit outcomes.",
+      "implementation": "packages/orchestrator/src/orchestrator.ts; src/circuit-breaker.ts",
+      "test": "timeout/cancel/retry/loop/circuit tests",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-007",
+      "requirement": "Unavailable agent/adapter and governance denial are explicit blocked/failed outcomes.",
+      "implementation": "orchestrator preflight and registry checks",
+      "test": "unavailable adapter and deny tests",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-008",
+      "requirement": "Task lifecycle events are emitted with correlation and without secrets.",
+      "implementation": "orchestrator event emitter",
+      "test": "event-order test",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-009",
+      "requirement": "Safe resumption skips tasks whose required gates already have executed evidence.",
+      "implementation": "orchestrator resumeMission/evidence check",
+      "test": "resume test",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-010",
+      "requirement": "MCP/plugin/SDK contracts and full local gates remain green.",
+      "implementation": "existing surfaces; no new tools in this increment",
+      "test": "pnpm verify:all",
+      "status": "PLANNED"
+    },
+    {
+      "id": "R-011",
+      "requirement": "Durable audit status is reported truthfully; no silent enablement.",
+      "implementation": "existing governance-log sink",
+      "test": "audit-sink tests + bos_verify_audit_trail",
+      "status": "PASS_DOCUMENTED"
+    },
+    {
+      "id": "R-012",
+      "requirement": "Host runtime equivalence.",
+      "implementation": "external OpenCode host restart",
+      "test": "post-restart bos_start_mission",
+      "status": "BLOCKED_EXTERNAL"
+    }
+  ],
+  "verificationMatrix": [
+    {
+      "id": "V-001",
+      "check": "Repository identity and baseline",
+      "status": "PASS",
+      "evidence": "git rev-parse; branch master; 45d9353; 35 modified + 19 untracked"
+    },
+    {
+      "id": "V-002",
+      "check": "Orchestrator is a stub",
+      "status": "PASS",
+      "evidence": "orchestrator.ts:50-71 returns status executed without task dispatch"
+    },
+    {
+      "id": "V-003",
+      "check": "Kernel transitions/evidence from Sprint 1",
+      "status": "PASS",
+      "evidence": "prior 56/629 suite; revalidated by full run after changes"
+    },
+    {
+      "id": "V-004",
+      "check": "Local real execution path",
+      "status": "PLANNED",
+      "evidence": "shell adapter test using process.execPath"
+    },
+    {
+      "id": "V-005",
+      "check": "OpenCode host latest source",
+      "status": "BLOCKED",
+      "evidence": "bos_start_mission: bos.transitionMission is not a function"
+    }
+  ],
+  "plan": [
+    {
+      "stage": "Stage 1",
+      "name": "Evidence provenance and executed verification mode",
+      "files": [
+        "packages/schemas/src/index.ts",
+        "packages/core/src/engine/mission-engine.ts",
+        "packages/core/src/engine/behavior-os.ts",
+        "packages/core/tests/mission-engine.test.ts"
+      ],
+      "gate": "Kernel tests, typecheck"
+    },
+    {
+      "stage": "Stage 2",
+      "name": "Task contracts, adapters, orchestrator",
+      "files": [
+        "packages/schemas/src/index.ts",
+        "packages/orchestrator/src/*.ts",
+        "packages/orchestrator/package.json"
+      ],
+      "gate": "Orchestrator tests including real shell execution"
+    },
+    {
+      "stage": "Stage 3",
+      "name": "Failure injection and events",
+      "files": ["packages/orchestrator/tests/orchestrator.test.ts"],
+      "gate": "Timeout, cancellation, retry, loop, circuit, malformed output tests"
+    },
+    {
+      "stage": "Stage 4",
+      "name": "Integration and documentation",
+      "files": [
+        "docs/CLAIMS.md",
+        "docs/ARCHITECTURE.md",
+        "packages/orchestrator/README.md",
+        "docs/analysis/s2-evidence.json"
+      ],
+      "gate": "Full pnpm verify:all"
+    },
+    {
+      "stage": "Stage 5",
+      "name": "Independent review and corrections",
+      "files": ["review findings"],
+      "gate": "Reviewer report; rerun affected gates"
+    }
+  ],
+  "authorization": {
+    "modifyFiles": true,
+    "commit": false,
+    "release": false,
+    "destructiveActions": false
+  }
+}

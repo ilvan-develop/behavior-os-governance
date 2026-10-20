@@ -1,0 +1,73 @@
+{
+  "phase": "S4_CLOSEOUT",
+  "missionId": "mission-1792495339540-v54oymy574j",
+  "dnaPattern": "Open Source",
+  "agentId": "persona:architect",
+  "supersedes": {
+    "artifact": "docs/analysis/s3-gap-register.json",
+    "gaps": ["G-010", "G-014", "G-017"]
+  },
+  "resolved": [
+    {
+      "id": "G-017",
+      "severity": "low",
+      "component": "packages/core/src/engine/audit-engine.ts",
+      "remediation": "The real lint stage resolves the project linter from its config file (biome.json/biome.jsonc, eslint.config.*/.eslintrc*, .oxlintrc.json) by walking up to the workspace root, and runs pnpm lint:check there. Binary probing is retained as a fallback.",
+      "acceptanceTest": "packages/core/tests/audit-engine-real.test.ts - 'reports the real lint stage as passed (not skipped) in this repository'",
+      "evidence": "3 new cases pass; the real stage reports status 'passed' with details.linter 'biome'.",
+      "status": "CLOSED"
+    },
+    {
+      "id": "G-014",
+      "severity": "medium",
+      "component": "learning engine",
+      "remediation": "Added LearningStage/Transition/Record schemas and a state machine in LearningEngine (createRecord/advanceRecord) with one-step-forward promotion, no skip/regression, evidence required to enter validated, and an auditable transition trail. Exposed through BehaviorOS.createLearningRecord/advanceLearningRecord, the bos_record_learning tool (learningId + stage), and persisted in BehaviorOSSnapshot.learningRecords.",
+      "acceptanceTest": "packages/core/tests/learning-lifecycle.test.ts (8 cases) + plugin-registration.test.ts learning promotion case",
+      "evidence": "Skip and regression refused with INVALID_TRANSITION; validated without evidence refused with EVIDENCE_REQUIRED; records survive a JSON snapshot round trip and continue advancing.",
+      "status": "CLOSED"
+    },
+    {
+      "id": "G-010",
+      "severity": "medium",
+      "component": "plugins/opencode-v2/src/index.ts",
+      "remediation": "Added withLifecycleLock() around the whole capture -> mutate -> persist -> rollback window of every lifecycle tool (mission create/start/complete/fail/cancel and learning promotion), so a failing write can no longer restore a snapshot taken before a concurrent transition.",
+      "acceptanceTest": "plugins/opencode-v2/tests/plugin-registration.test.ts - 'does not let a failed lifecycle write roll back a concurrent transition (G-010)'",
+      "evidence": "Test fails with the lock disabled (victim status 'pending' after reporting started) and passes with it enabled; the committed transition is active both in memory and in the persisted snapshot.",
+      "status": "CLOSED"
+    }
+  ],
+  "remaining": [
+    {
+      "id": "G-013",
+      "status": "OPEN_BLOCKED",
+      "reason": "Exposing the orchestrator through MCP/plugin requires a new workspace dependency edge and therefore a dependency install, which the Open Source DNA license-check rule governs as new-dependency. No install was run; no tool count changed (MCP 30 + 2, plugin 32). Operator action: authorize the dependency change under a DNA that permits it.",
+      "evidence": "Mission S3 recorded the pnpm install denial; S4 kept the dependency graph unchanged and added no tool."
+    },
+    {
+      "id": "G-016",
+      "status": "OPEN_RELEASE_BLOCKER",
+      "reason": "Not closable by upgrade in this environment: the advisory database reports braces <=3.0.3 and sprintf-js <=1.1.3 with patched_versions '<0.0.0>' and recommendation 'None'. tinypool requires >=2.1.2 and vitest >=4.1.11 (a major upgrade); both require a network install. Even a full vitest/tinypool upgrade would leave the high-severity braces advisory, so pnpm audit --audit-level=high cannot exit 0 today without ignoring advisories, which would weaken the gate.",
+      "evidence": "pnpm audit --audit-level=high --json: 2 critical (tinypool 1.1.1), 1 high (braces 3.0.3, no patch), 3 moderate (vitest/@vitest/mocker, sprintf-js no patch)."
+    },
+    {
+      "id": "G-007",
+      "status": "OPEN_DOCUMENTED",
+      "reason": "Durable audit sink stays opt-in (BEHAVIOR_OS_AUDIT_LOG); disabled in this environment."
+    },
+    {
+      "id": "G-008",
+      "status": "OPEN_EXTERNAL",
+      "reason": "Human approval transport is host-specific; no approval UI is verifiable here."
+    },
+    {
+      "id": "G-009",
+      "status": "OPEN_DOCUMENTED",
+      "reason": "Postgres write-through reports errors at flush; rollback guarantees stay scoped to synchronous stores."
+    },
+    {
+      "id": "G-011",
+      "status": "CLOSED_WITH_LIMITATION",
+      "reason": "Resumption is caller-supplied and skips gates already backed by executed evidence."
+    }
+  ]
+}

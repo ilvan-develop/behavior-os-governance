@@ -1,0 +1,141 @@
+{
+  "phase": "VALIDATE_AUDIT",
+  "correlationId": "mission-1792490880917-qrygt0p165b",
+  "measuredAt": "2026-10-20",
+  "environment": {
+    "platform": "win32",
+    "shell": "PowerShell (pnpm invoked through cmd /c)",
+    "node": "22+ (repository requirement)",
+    "packageManager": "pnpm 10.4.0"
+  },
+  "commands": [
+    {
+      "id": "E-001",
+      "command": "pnpm typecheck",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "9 successful, 9 total; 7 cached, 2 executed",
+      "log": null
+    },
+    {
+      "id": "E-002",
+      "command": "pnpm lint:check",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "Checked 150 files in 1246ms. No fixes applied.",
+      "log": null
+    },
+    {
+      "id": "E-003",
+      "command": "pnpm test",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "58 files / 659 cases. Per package: schemas 4/34, sdk 2/11, cli 1/1, mcp-server 3/25, core 40/454, orchestrator 1/17, plugin 7/117.",
+      "log": ".behavioros/s3-test-3.log"
+    },
+    {
+      "id": "E-004",
+      "command": "pnpm build",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "7 successful, 7 total; 2 cached, 5 executed",
+      "log": null
+    },
+    {
+      "id": "E-005",
+      "command": "pnpm verify:governance",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "Proven: 24/24 claims (100%), Failures: 0. Report written to docs/analysis/governance-conformance.json.",
+      "log": null
+    },
+    {
+      "id": "E-006",
+      "command": "pnpm verify:plugin",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "Plugin id behavior-os; 32 unique bos_* tools; protocol flow step 1 complete, currentStep 3; governance deny under surgical-team; skill present.",
+      "log": null
+    },
+    {
+      "id": "E-007",
+      "command": "pnpm smoke:mcp",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "MCP server behavioros 2.0.0; 30 tools; tool calls for status, missions, DNA selection, learning, list DNA and governance succeeded.",
+      "log": null
+    },
+    {
+      "id": "E-008",
+      "command": "pnpm verify:opencode",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "Summary: 38/38 checks passed.",
+      "log": null
+    },
+    {
+      "id": "E-009",
+      "command": "pnpm --filter @behavior-os/opencode-plugin test -- --run tests/governance.test.ts",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": "7 files / 117 cases passed; governance.test.ts specifically 33 cases (30 before + 3 new).",
+      "log": null
+    },
+    {
+      "id": "E-010",
+      "command": "pnpm audit --audit-level=high",
+      "status": "FAIL",
+      "exitCode": 1,
+      "summary": "6 vulnerabilities: 2 critical (tinypool <=2.1.0 and <2.1.2, via vitest 3.2.7 / tinypool 1.1.1), 1 high (braces 3.0.3 via changesets), 3 moderate. Pre-existing dev-dependency tree.",
+      "log": null
+    },
+    {
+      "id": "E-011",
+      "command": "bos_verify_audit_trail",
+      "status": "PASS_WITH_LIMITATION",
+      "exitCode": 0,
+      "summary": "Hash chain valid: true, 107 entries checked. Complete: false (in-memory ring buffer). Durable sink: disabled (BEHAVIOR_OS_AUDIT_LOG unset).",
+      "log": null
+    }
+  ],
+  "runtimeAudit": {
+    "tool": "bos_run_audit",
+    "missionId": "mission-1792490880917-qrygt0p165b",
+    "agentId": "persona:architect",
+    "simulate": false,
+    "result": "fail",
+    "stages": {
+      "lint": "skipped (audit engine only detects eslint/oxlint; the project uses Biome, verified separately by pnpm lint:check)",
+      "typecheck": "passed",
+      "security": "failed (pnpm audit --audit-level=high found 2 critical, 1 high and 3 moderate advisories)",
+      "coverage": "warning (no coverage/lcov-report/index.html present)"
+    },
+    "note": "The audit failure is real and is reported as such. It does not invalidate the orchestration tests; it blocks a release until the dependency advisories are resolved."
+  },
+  "whatChanged": [
+    "packages/schemas/src/index.ts: task contracts and evidence provenance fields",
+    "packages/core/src/engine/mission-engine.ts: evidence normalization, addEvidence, executed verification mode",
+    "packages/core/src/engine/behavior-os.ts: addMissionEvidence and mission creation options",
+    "packages/core/src/engine/dna-loader.ts: loadFile(path)",
+    "packages/orchestrator/src/orchestrator.ts: real orchestration engine",
+    "packages/orchestrator/src/adapters.ts: TaskAdapter and ShellAdapter",
+    "packages/orchestrator/src/circuit-breaker.ts: per-adapter circuit breaker",
+    "packages/orchestrator/tests/orchestrator.test.ts: 17 real/failure-injection tests",
+    "packages/core/tests/evidence-integrity.test.ts: 10 kernel evidence tests",
+    "plugins/opencode-v2/src/governance.ts: command signals require an executing action",
+    "plugins/opencode-v2/tests/governance.test.ts: 3 regression tests",
+    "AGENTS.md, CONTRIBUTING.md, docs/ARCHITECTURE.md, docs/CLAIMS.md: measured counts and new claims",
+    "docs/analysis/s3-*.json: this evidence trail"
+  ],
+  "limitations": [
+    "Orchestration is not exposed as MCP/plugin tools; adding the workspace dependency required an install that governance denied.",
+    "Task records are not persisted separately; resumption uses mission evidence and a caller-supplied plan.",
+    "The learning lifecycle is still record/propose only (no OBSERVATION→...→MONITORED state machine).",
+    "The plugin snapshot rollback can still erase a concurrent lifecycle transition (G-010).",
+    "The real audit security stage fails on pre-existing dev-dependency advisories.",
+    "The audit engine's lint stage does not recognise Biome.",
+    "No commit, push, tag, publish or deploy was performed."
+  ],
+  "verdict": "PASS WITH LIMITATIONS",
+  "releaseGate": "BLOCKED by G-016 (dependency advisories); no release action was attempted."
+}

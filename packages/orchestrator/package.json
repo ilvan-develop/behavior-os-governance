@@ -21,12 +21,12 @@
   "packageManager": "pnpm@10.4.0",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "test": "node ../../node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "node ../../scripts/clean.mjs"
   },
   "dependencies": {
     "@behavior-os/core": "workspace:*",
-    "@behavior-os/sdk": "workspace:*",
     "@behavior-os/schemas": "workspace:*"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { BehaviorOS, PROTOCOL_STEPS } from '@behavior-os/core';
 import type {
   DecisionPolicy,
@@ -37,9 +38,31 @@ function getBehaviorOS(): BehaviorOS {
 }
 
 // Create MCP server
-const server = new McpServer({
+export const server = new McpServer({
   name: 'behavioros',
   version: '2.0.0',
+});
+
+/**
+ * Exported for tests that need a fresh server instance (e.g. InMemoryTransport
+ * contracts). Each call creates a new McpServer so the singleton does not get
+ * re-connected across tests.
+ */
+export function createServer(): McpServer {
+  return new McpServer({ name: 'behavioros', version: '2.0.0' });
+}
+
+/**
+ * Canonical structural shape of a vote, shared by every tool that accepts one
+ * (`bos_decide`, `bos_evolution`, `bos_apply_code_fixes`, `bos_code_edit`).
+ * Kept in one place so a malformed vote is rejected at the tool boundary
+ * instead of reaching the decision engine.
+ */
+export const voteSchema = z.object({
+  voterId: z.string(),
+  choice: z.enum(['approve', 'reject', 'abstain']),
+  weight: z.number().optional().describe('Voting weight (default 1)'),
+  reason: z.string().optional(),
 });
 
 // ============================================================
@@ -192,20 +215,23 @@ server.registerTool(
         .enum(['feature', 'bugfix', 'deployment', 'research', 'refactor', 'audit', 'incident'])
         .describe('Mission type'),
       priority: z.enum(['critical', 'high', 'medium', 'low']).describe('Priority level'),
-      description: z.string().optional().describe('Mission description'),
-      tags: z.array(z.string()).optional().describe('Tags for categorization'),
+      requiredChecks: z
+        .array(z.string().trim().min(1))
+        .optional()
+        .describe('Gates that must each have passing evidence before completion'),
     }),
     annotations: {
       title: 'Create Mission',
     },
   },
-  async ({ title, type, priority }) => {
+  async ({ title, type, priority, requiredChecks }) => {
     try {
       const bos = getBehaviorOS();
       const mission = bos.createMission({
         title,
         type: type as MissionType,
         priority: priority as MissionPriority,
+        requiredChecks,
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(mission, null, 2) }],
@@ -230,24 +256,304 @@ server.registerTool(
     description: 'Start a mission by ID',
     inputSchema: z.object({
       missionId: z.string().describe('Mission ID'),
+      expectedVersion: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe('Reject the transition if the mission version differs'),
+      actor: z.string().optional().describe('Actor recorded in the transition history'),
     }),
     annotations: {
       title: 'Start Mission',
     },
   },
-  async ({ missionId }) => {
+  async ({ missionId, expectedVersion, actor }) => {
     try {
       const bos = getBehaviorOS();
-      const mission = bos.startMission(missionId);
-      if (!mission) {
+      const result = bos.transitionMission(missionId, 'active', { expectedVersion, actor });
+      if (!result.ok) {
         return {
-          content: [{ type: 'text', text: `Mission "${missionId}" not found` }],
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+      if (result.changed) {
+        bos.advanceProtocolStep('bos_start_mission');
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Mission "${missionId}" started. Status: ${result.mission.status}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_complete_mission',
+  {
+    description:
+      'Complete a mission only when every required check has passing, non-simulated evidence. Refuses invalid transitions, stale versions and missing/failed evidence.',
+    inputSchema: z.object({
+      missionId: z.string().describe('Mission ID'),
+      evidence: z
+        .array(
+          z.object({
+            gate: z.string().describe('Gate id; must match a requiredChecks entry'),
+            status: z.enum(['passed', 'failed', 'skipped']),
+            source: z.string().describe('Command, tool or report that produced the evidence'),
+            detail: z.string().optional(),
+            simulated: z
+              .boolean()
+              .optional()
+              .describe('true marks a simulated check; it never satisfies a required gate'),
+            provenance: z
+              .enum(['executed', 'reported', 'simulated'])
+              .optional()
+              .describe('How the evidence was produced; executed requires executionId'),
+            executionId: z
+              .string()
+              .optional()
+              .describe('Unique id of the execution that produced executed evidence'),
+          }),
+        )
+        .optional()
+        .describe('Evidence to record with the transition'),
+      expectedVersion: z.number().int().nonnegative().optional(),
+      actor: z.string().optional().describe('Who authorized the transition'),
+    }),
+    annotations: {
+      title: 'Complete Mission',
+    },
+  },
+  async ({ missionId, evidence, expectedVersion, actor }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.transitionMission(missionId, 'completed', {
+        evidence,
+        expectedVersion,
+        actor,
+      });
+      if (!result.ok) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
           isError: true,
         };
       }
       return {
         content: [
-          { type: 'text', text: `Mission "${missionId}" started. Status: ${mission.status}` },
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                completionBasis: result.mission.completionBasis ?? null,
+                evidenceVerified: result.mission.completionBasis === 'evidence',
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_fail_mission',
+  {
+    description: 'Mark a mission as failed with an explicit reason and audit trail.',
+    inputSchema: z.object({
+      missionId: z.string().describe('Mission ID'),
+      reason: z.string().optional().describe('Why the mission failed'),
+      expectedVersion: z.number().int().nonnegative().optional(),
+      actor: z.string().optional(),
+    }),
+    annotations: {
+      title: 'Fail Mission',
+    },
+  },
+  async ({ missionId, reason, expectedVersion, actor }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.transitionMission(missionId, 'failed', {
+        reason,
+        expectedVersion,
+        actor,
+      });
+      if (!result.ok) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                reason: result.mission.lastTransitionReason ?? null,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_cancel_mission',
+  {
+    description: 'Cancel a mission that will not be completed, recording the reason.',
+    inputSchema: z.object({
+      missionId: z.string().describe('Mission ID'),
+      reason: z.string().optional().describe('Why the mission was cancelled'),
+      expectedVersion: z.number().int().nonnegative().optional(),
+      actor: z.string().optional(),
+    }),
+    annotations: {
+      title: 'Cancel Mission',
+    },
+  },
+  async ({ missionId, reason, expectedVersion, actor }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.transitionMission(missionId, 'cancelled', {
+        reason,
+        expectedVersion,
+        actor,
+      });
+      if (!result.ok) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                reason: result.mission.lastTransitionReason ?? null,
+              },
+              null,
+              2,
+            ),
+          },
         ],
       };
     } catch (error) {
@@ -435,6 +741,12 @@ server.registerTool(
         .optional()
         .describe('Explicit agent ID (defaults to the DNA-derived identity)'),
       stages: z.array(z.string()).optional().describe('Stages to audit'),
+      simulate: z
+        .boolean()
+        .optional()
+        .describe(
+          'true (default) runs a simulated audit and never reports a pass; false executes the real checks',
+        ),
     }),
     annotations: {
       title: 'Run Audit',
@@ -444,14 +756,16 @@ server.registerTool(
     missionId,
     agentId,
     stages,
+    simulate,
   }: {
     missionId: string;
     agentId?: string;
     stages?: string[];
+    simulate?: boolean;
   }) => {
     try {
       const bos = getBehaviorOS();
-      const report = bos.runAudit({ missionId, agentId, stages });
+      const report = bos.runAudit({ missionId, agentId, stages, simulate });
       return {
         content: [{ type: 'text', text: JSON.stringify(report, null, 2) }],
       };
@@ -565,16 +879,7 @@ server.registerTool(
     description: 'Resolve a subject by weighted vote (majority/supermajority/unanimous + quorum)',
     inputSchema: z.object({
       subject: z.string().describe('What is being decided'),
-      votes: z
-        .array(
-          z.object({
-            voterId: z.string(),
-            choice: z.enum(['approve', 'reject', 'abstain']),
-            weight: z.number().optional().describe('Voting weight (default 1)'),
-            reason: z.string().optional(),
-          }),
-        )
-        .describe('The votes to tally'),
+      votes: z.array(voteSchema).describe('The votes to tally'),
       policy: z
         .enum(['majority', 'supermajority', 'unanimous'])
         .optional()
@@ -637,14 +942,7 @@ server.registerTool(
         .optional()
         .describe('Write proposals into the active DNA (requires evolution.enabled)'),
       votes: z
-        .array(
-          z.object({
-            voterId: z.string(),
-            choice: z.enum(['approve', 'reject', 'abstain']),
-            weight: z.number().optional(),
-            reason: z.string().optional(),
-          }),
-        )
+        .array(voteSchema)
         .optional()
         .describe('If supplied, the change must be approved by this vote'),
       policy: z.enum(['majority', 'supermajority', 'unanimous']).optional(),
@@ -735,14 +1033,7 @@ server.registerTool(
         .optional()
         .describe('Write proposals to the store (requires evolution.enabled)'),
       votes: z
-        .array(
-          z.object({
-            voterId: z.string(),
-            choice: z.enum(['approve', 'reject', 'abstain']),
-            weight: z.number().optional(),
-            reason: z.string().optional(),
-          }),
-        )
+        .array(voteSchema)
         .optional()
         .describe('If supplied, the change must be approved by this vote'),
       policy: z.enum(['majority', 'supermajority', 'unanimous']).optional(),
@@ -842,7 +1133,11 @@ server.registerTool(
         .optional()
         .describe('Hash from a previous preview; refuses a file that changed since'),
       missionId: z.string().optional().describe('Mission this edit belongs to'),
-      applyVotes: z.array(z.any()).optional().describe('Votes gating the change'),
+      votes: z.array(voteSchema).optional().describe('Votes gating the change'),
+      applyVotes: z
+        .array(voteSchema)
+        .optional()
+        .describe('Deprecated alias of `votes`; prefer `votes`'),
       policy: z
         .enum(['majority', 'supermajority', 'unanimous'])
         .optional()
@@ -860,7 +1155,9 @@ server.registerTool(
     replace,
     apply,
     expectedBeforeHash,
+    missionId,
     votes,
+    applyVotes,
     policy,
   }: {
     file: string;
@@ -868,10 +1165,17 @@ server.registerTool(
     replace: string;
     apply?: boolean;
     expectedBeforeHash?: string;
+    missionId?: string;
     votes?: Vote[];
+    applyVotes?: Vote[];
     policy?: DecisionPolicy;
   }) => {
     try {
+      if (votes && applyVotes) {
+        throw new Error(
+          'bos_code_edit received both `votes` and the deprecated `applyVotes`; send only one.',
+        );
+      }
       const bos = getBehaviorOS();
       const result = bos.applyCodeEdit({
         file,
@@ -879,7 +1183,8 @@ server.registerTool(
         replace,
         apply,
         expectedBeforeHash,
-        votes,
+        missionId,
+        votes: votes ?? applyVotes,
         policy,
       });
       return {
@@ -1375,7 +1680,18 @@ async function main() {
   console.error('Behavior-OS MCP Server running on stdio');
 }
 
-main().catch((error) => {
-  console.error('Failed to start server:', error);
-  process.exit(1);
-});
+// Only bootstrap the stdio server when this module is executed directly, not
+// when it is imported by tests (which use InMemoryTransport instead).
+// pathToFileURL keeps this check synchronous: the previous `createRequire`
+// implementation required this ESM module from itself, which throws
+// ERR_REQUIRE_ASYNC_MODULE on Node 24 and left the server unstarted.
+const isEntry =
+  typeof process !== 'undefined' &&
+  typeof process.argv[1] === 'string' &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isEntry) {
+  main().catch((error) => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  });
+}

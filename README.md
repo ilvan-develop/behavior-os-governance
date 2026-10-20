@@ -189,7 +189,7 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (29 tools in total), which are host-specific.
+`bos_verify_audit_trail` (32 tools in total), which are host-specific.
 
 ### Persistence (opt-in)
 
@@ -373,8 +373,8 @@ mcpServers:
 | `@behavior-os/core` | 11 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI (12 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check) | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 27 tools + 2 resources | 2.0.0 |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 29 tools + hooks | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 30 tools + 2 resources | 2.0.0 |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 32 tools + hooks | 2.0.0 |
 
 ## License
 

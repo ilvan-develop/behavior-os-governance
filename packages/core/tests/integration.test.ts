@@ -59,7 +59,8 @@ describe('BehaviorOS Integration', () => {
       missionId: mission.id,
       agentId: 'devops-agent',
     });
-    expect(report.overall).toBe('pass');
+    expect(report.overall).toBe('warning');
+    expect(report.simulated).toBe(true);
 
     // Step 6: Record learning
     const event = bos.recordLearning({

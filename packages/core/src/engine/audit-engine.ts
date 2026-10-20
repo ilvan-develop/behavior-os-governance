@@ -1,6 +1,79 @@
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import type { AuditReport, AuditResult, AuditStage } from '@behavior-os/schemas';
+
+/**
+ * Linter markers, in preference order. The real `lint` stage must recognise the
+ * project's actual linter; probing only for an `eslint`/`oxlint` binary reported
+ * `skipped` in this repository, whose linter is Biome (G-017).
+ */
+const LINTER_MARKERS = [
+  { name: 'biome', configs: ['biome.json', 'biome.jsonc'] },
+  {
+    name: 'eslint',
+    configs: [
+      'eslint.config.js',
+      'eslint.config.mjs',
+      'eslint.config.cjs',
+      'eslint.config.ts',
+      '.eslintrc',
+      '.eslintrc.js',
+      '.eslintrc.cjs',
+      '.eslintrc.json',
+      '.eslintrc.yml',
+      '.eslintrc.yaml',
+    ],
+  },
+  { name: 'oxlint', configs: ['.oxlintrc.json'] },
+] as const;
+
+/** True when `dir` declares a lint script in its `package.json`. */
+function hasLintScript(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const scripts = pkg.scripts ?? {};
+    return Boolean(scripts['lint:check'] ?? scripts.lint);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Nearest ancestor of `start` that can run the project lint command: it must
+ * declare a lint script and, preferably, a linter config. Walking up matters
+ * because the engine runs from a package directory (`packages/core`) while the
+ * linter is configured at the workspace root.
+ */
+export function findProjectRoot(start: string = process.cwd()): string | null {
+  let current = resolve(start);
+  let scriptRoot: string | null = null;
+  for (let depth = 0; depth < 12; depth += 1) {
+    if (hasLintScript(current)) {
+      if (detectLinter(current) !== null) return current;
+      scriptRoot ??= current;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return scriptRoot;
+}
+
+/**
+ * Detect the linter configured in `root` by its config file. Returns null when
+ * no known linter is configured; the stage then falls back to a binary probe.
+ */
+export function detectLinter(root: string): string | null {
+  for (const marker of LINTER_MARKERS) {
+    if (marker.configs.some((file) => existsSync(join(root, file)))) {
+      return marker.name;
+    }
+  }
+  return null;
+}
 
 export interface AuditOptions {
   missionId: string;
@@ -70,18 +143,35 @@ export class AuditEngine {
 
     switch (stage) {
       case 'lint': {
-        const hasLinter = this.isToolAvailable('eslint') || this.isToolAvailable('oxlint');
+        // Resolve the linter from the project root, not from the process cwd:
+        // the engine runs from a package directory (and, in the plugin, from a
+        // host process) where `node_modules/.bin` is not necessarily on PATH.
+        const projectRoot = findProjectRoot();
+        const linter = projectRoot ? detectLinter(projectRoot) : null;
+        const hasLinter =
+          linter !== null ||
+          this.isToolAvailable('eslint') ||
+          this.isToolAvailable('oxlint') ||
+          this.isToolAvailable('biome');
         if (!hasLinter) {
           return { ...base, status: 'skipped', details: { reason: 'No linter tool found' } };
         }
         try {
-          execSync('pnpm lint:check', { stdio: 'pipe', timeout: 60_000 });
-          return { ...base, status: 'passed', details: { checked: true, ...options.metadata } };
+          execSync('pnpm lint:check', {
+            stdio: 'pipe',
+            timeout: 60_000,
+            cwd: projectRoot ?? undefined,
+          });
+          return {
+            ...base,
+            status: 'passed',
+            details: { checked: true, linter: linter ?? 'binary', ...options.metadata },
+          };
         } catch {
           return {
             ...base,
             status: 'failed',
-            details: { checked: true, error: 'Lint checks failed' },
+            details: { checked: true, linter: linter ?? 'binary', error: 'Lint checks failed' },
           };
         }
       }

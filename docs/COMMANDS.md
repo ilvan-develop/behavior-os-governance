@@ -1,8 +1,8 @@
 # Behavior-OS Command Reference
 
-Two surfaces expose the engine: the **MCP server** (`packages/mcp-server`, 27
+Two surfaces expose the engine: the **MCP server** (`packages/mcp-server`, 30
 tools + 2 resources) and the **OpenCode plugin** (`plugins/opencode-v2`, the same
-27 tools plus `bos_get_log` and `bos_verify_audit_trail`). Names and arguments
+30 tools plus `bos_get_log` and `bos_verify_audit_trail`). Names and arguments
 below are the ones actually registered in `packages/mcp-server/src/server.ts`.
 
 For the CLI (`behavioros init|compile|validate|status|diff|simulate|deploy|ecosystem|agent|autonomous|protocol|drift-check`)
@@ -23,8 +23,11 @@ see [`CLI.md`](./CLI.md).
 
 | Tool | Arguments |
 |------|-----------|
-| `bos_create_mission` | `title`, `type`, `priority`; `description?`, `tags?` |
-| `bos_start_mission` | `missionId` |
+| `bos_create_mission` | `title`, `type`, `priority`; `requiredChecks?` |
+| `bos_start_mission` | `missionId`; `expectedVersion?`, `actor?` |
+| `bos_complete_mission` | `missionId`; `evidence?`, `expectedVersion?`, `actor?` |
+| `bos_fail_mission` | `missionId`; `reason?`, `expectedVersion?`, `actor?` |
+| `bos_cancel_mission` | `missionId`; `reason?`, `expectedVersion?`, `actor?` |
 | `bos_list_missions` | `status?`, `type?`, `priority?`, `limit?` |
 | `bos_set_agent` | `type`, `persona`; `id?`, `name?`, `capabilities?` |
 | `bos_whoami` | — |
@@ -33,7 +36,7 @@ see [`CLI.md`](./CLI.md).
 
 | Tool | Arguments |
 |------|-----------|
-| `bos_run_audit` | `missionId`, `agentId`; `stages?` |
+| `bos_run_audit` | `missionId`, `agentId`; `stages?`, `simulate?` |
 | `bos_get_state` | — |
 | `bos_get_status` | — |
 | `bos_list_audit_reports` | `limit?` (requires persistence) |

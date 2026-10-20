@@ -127,7 +127,7 @@ All data is validated through Zod v4.4.3 schemas:
 - JSON-RPC over stdio
 
 ### OpenCode v2 Plugin (single native channel)
-- 29 `bos_*` tools registered via `ctx.tool.transform()` as **direct** tools (`options.codemode: false`)
+- 32 `bos_*` tools registered via `ctx.tool.transform()` as **direct** tools (`options.codemode: false`)
 - `permission:evaluate` hook is the only typed denial path (mutating actions are refused here)
 - `tool:execute.before` / `tool:execute.after` hooks are advisory telemetry (they never throw)
 - Session context hook injecting protocol state

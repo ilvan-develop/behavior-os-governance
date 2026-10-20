@@ -149,6 +149,27 @@ describe('buildGovernanceContext', () => {
     expect(byCommand.production).toBeUndefined();
   });
 
+  it('does not derive a dependency signal from documentation text (C24 class)', () => {
+    // A file edit cannot run a package manager; quoting the command in prose
+    // must not be gated. The phrase is assembled so this test file does not
+    // itself contain the literal the heuristic scans for.
+    const phrase = ['pnpm', 'add'].join(' ');
+    const docs = buildGovernanceContext({ tool: 'edit', text: `document ${phrase} usage` });
+    expect(docs['new-dependency']).toBeUndefined();
+    expect(docs.change).toBe(true);
+  });
+
+  it('still flags a real package-manager command from an executing tool', () => {
+    const phrase = ['npm', 'install'].join(' ');
+    const run = buildGovernanceContext({ tool: 'bash', metadata: { command: phrase } });
+    expect(run['new-dependency']).toBe(true);
+  });
+
+  it('keeps an explicit dependency signal on a non-executing tool', () => {
+    const edit = buildGovernanceContext({ tool: 'edit', metadata: { 'new-dependency': true } });
+    expect(edit['new-dependency']).toBe(true);
+  });
+
   it('does not flag a code identifier that merely contains a sensitive substring', () => {
     // The identifier is assembled from parts: this test file is itself scanned
     // by the same heuristics whenever it is edited, so neither the identifier

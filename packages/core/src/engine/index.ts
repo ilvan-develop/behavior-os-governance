@@ -10,6 +10,19 @@ import { QualityEngine } from './quality-engine.js';
 import { RecommendationEngine } from './recommendation-engine.js';
 
 export * from './code-edit-engine.js';
+export type {
+  AdvanceLearningRecordOptions,
+  CreateLearningRecordOptions,
+  LearningAdvanceResult,
+} from './learning-engine.js';
+export { LEARNING_STAGES } from './learning-engine.js';
+export type {
+  CreateMissionOptions,
+  MissionEvidenceInput,
+  MissionTransitionErrorCode,
+  MissionTransitionOptions,
+  MissionTransitionResult,
+} from './mission-engine.js';
 export * from './pipeline-engine.js';
 export {
   AuditEngine,

@@ -89,7 +89,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | OpenCode v2 | ✅ Plugin nativo |
 | Windsurf | ✅ Pronto |
 
-**27 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, evolução de DNA, propostas e aplicação de correções de código, edição governada de ficheiros (dry-run por omissão), listagem de resultados, recomendações, drift entre DNAs, execução de auditorias, registro de aprendizados e mais) + **29 tools nativas `bos_*`** no OpenCode v2 via plugin.
+**30 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, evolução de DNA, propostas e aplicação de correções de código, edição governada de ficheiros (dry-run por omissão), listagem de resultados, recomendações, drift entre DNAs, execução de auditorias, registro de aprendizados e mais) + **32 tools nativas `bos_*`** no OpenCode v2 via plugin.
 
 ---
 

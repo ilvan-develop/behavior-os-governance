@@ -63,6 +63,25 @@ function collectStrings(value: unknown, into: string[]): void {
   }
 }
 
+/**
+ * A dependency signal derived from text is only meaningful when the action can
+ * actually run a package manager. Without this guard, any edit whose surrounding
+ * context quotes an install command is blocked by `license-check` — the same
+ * class of false positive as C24 for deployments. A signal explicitly supplied
+ * in metadata is kept: the caller declared it.
+ */
+function withoutDerivedDependencySignal(
+  context: Record<string, unknown>,
+  canOperate: boolean,
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (canOperate || !('new-dependency' in context)) return context;
+  if (metadata && 'new-dependency' in metadata) return context;
+  const filtered = { ...context };
+  delete filtered['new-dependency'];
+  return filtered;
+}
+
 export function isMutating(value: string | undefined): boolean {
   return typeof value === 'string' && MUTATING_TOOL.test(value);
 }
@@ -182,7 +201,7 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
     context['high-value'] = true;
   }
 
-  return context;
+  return withoutDerivedDependencySignal(context, canOperate, signals.metadata);
 }
 
 /**

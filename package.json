@@ -27,6 +27,8 @@
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "verify:plugin": "node scripts/verify-plugin.mjs",
     "verify:governance": "node scripts/governance-conformance.mjs",
+    "verify:opencode": "node scripts/verify-opencode.mjs",
+    "verify:all": "pnpm typecheck && pnpm lint:check && pnpm test && pnpm build && pnpm verify:governance && pnpm verify:plugin && pnpm smoke:mcp && pnpm verify:opencode",
     "analyze:flow": "node scripts/analyze-governance-flow.mjs",
     "cli:init": "node packages/cli/dist/cli.js init",
     "docs:build": "typedoc"

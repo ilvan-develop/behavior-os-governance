@@ -155,14 +155,17 @@ const emptyDir = path.join(repoRoot, 'plugins', 'opencode-v2', 'tests');
 
 const EXPECTED_TOOLS = [
   'bos_apply_code_fixes',
+  'bos_cancel_mission',
   'bos_check_quality',
   'bos_code_edit',
   'bos_code_fixes',
+  'bos_complete_mission',
   'bos_create_mission',
   'bos_decide',
   'bos_drift',
   'bos_evaluate_governance',
   'bos_evolution',
+  'bos_fail_mission',
   'bos_get_insights',
   'bos_get_log',
   'bos_get_state',
@@ -195,7 +198,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 29 bos_* tools', async () => {
+  it('registers exactly the 32 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -207,7 +210,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(29);
+    expect(addedTools).toHaveLength(32);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -234,7 +237,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(29);
+    expect(addedTools).toHaveLength(32);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -707,8 +710,264 @@ describe('behavior-os governance log', () => {
     await runTool(addedTools, 'bos_select_dna', { pattern: 'lean-factory' });
     const report = await runTool(addedTools, 'bos_run_audit', { missionId: 'mission-1' });
 
+    // S1: the default audit is simulated, so it must never look like a real
+    // verification or report a passing verdict.
+    expect(report.content).toContain('SIMULATED');
+    expect(report.content).toContain('warning');
+    expect(report.content).not.toContain(': pass');
     expect(report.content).toContain('agent: persona:operator');
     expect(report.content).toContain('dna: Lean Factory');
+  });
+
+  it('bos_complete_mission refuses missing evidence and accepts a complete set', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'S1 evidence contract',
+      type: 'feature',
+      priority: 'high',
+      requiredChecks: ['tests'],
+    });
+    const missionId = created.content.match(/mission-[a-z0-9-]+/)?.[0];
+    expect(missionId).toBeDefined();
+    if (!missionId) return;
+
+    await runTool(addedTools, 'bos_start_mission', { missionId });
+
+    const refused = await runTool(addedTools, 'bos_complete_mission', {
+      missionId,
+      evidence: [],
+    });
+    expect(refused.content).toContain('EVIDENCE_MISSING');
+
+    const completed = await runTool(addedTools, 'bos_complete_mission', {
+      missionId,
+      evidence: [{ gate: 'tests', status: 'passed', source: 'pnpm test' }],
+    });
+    const parsed = JSON.parse(completed.content) as {
+      ok: boolean;
+      status: string;
+      completionBasis: string;
+      changed: boolean;
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.changed).toBe(true);
+    expect(parsed.status).toBe('completed');
+    expect(parsed.completionBasis).toBe('evidence');
+  });
+
+  it('bos_fail_mission and bos_cancel_mission expose explicit terminal semantics', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const failedMission = await runTool(addedTools, 'bos_create_mission', {
+      title: 'S1 fail contract',
+      type: 'bugfix',
+      priority: 'medium',
+    });
+    const failedId = failedMission.content.match(/mission-[a-z0-9-]+/)?.[0];
+    expect(failedId).toBeDefined();
+    if (!failedId) return;
+    await runTool(addedTools, 'bos_start_mission', { missionId: failedId });
+
+    const failed = await runTool(addedTools, 'bos_fail_mission', {
+      missionId: failedId,
+      reason: 'verification failed',
+      expectedVersion: 1,
+    });
+    const failedParsed = JSON.parse(failed.content) as { ok: boolean; status: string };
+    expect(failedParsed.ok).toBe(true);
+    expect(failedParsed.status).toBe('failed');
+
+    const cancelledMission = await runTool(addedTools, 'bos_create_mission', {
+      title: 'S1 cancel contract',
+      type: 'research',
+      priority: 'low',
+    });
+    const cancelledId = cancelledMission.content.match(/mission-[a-z0-9-]+/)?.[0];
+    expect(cancelledId).toBeDefined();
+    if (!cancelledId) return;
+
+    const cancelled = await runTool(addedTools, 'bos_cancel_mission', {
+      missionId: cancelledId,
+      reason: 'superseded',
+    });
+    const cancelledParsed = JSON.parse(cancelled.content) as { ok: boolean; status: string };
+    expect(cancelledParsed.ok).toBe(true);
+    expect(cancelledParsed.status).toBe('cancelled');
+
+    const refused = await runTool(addedTools, 'bos_complete_mission', { missionId: cancelledId });
+    expect(refused.content).toContain('INVALID_TRANSITION');
+  });
+
+  it('reports PERSISTENCE_FAILED and rolls back when a lifecycle write fails', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'S1 persistence contract',
+      type: 'feature',
+      priority: 'high',
+      requiredChecks: ['tests'],
+    });
+    const missionId = created.content.match(/mission-[a-z0-9-]+/)?.[0];
+    expect(missionId).toBeDefined();
+    if (!missionId) return;
+    await runTool(addedTools, 'bos_start_mission', { missionId });
+
+    ctx.storage.set = async () => {
+      throw new Error('quota exceeded');
+    };
+
+    const completed = await runTool(addedTools, 'bos_complete_mission', {
+      missionId,
+      evidence: [{ gate: 'tests', status: 'passed', source: 'pnpm test' }],
+    });
+    expect(completed.content).toContain('PERSISTENCE_FAILED');
+
+    const listed = JSON.parse(
+      (await runTool(addedTools, 'bos_list_missions', {})).content,
+    ) as Array<{
+      id: string;
+      status: string;
+      version: number;
+      evidence?: unknown[];
+      completionBasis?: string;
+    }>;
+    const mission = listed.find((entry) => entry.id === missionId);
+    expect(mission?.status).toBe('active');
+    expect(mission?.version).toBe(1);
+    expect(mission?.evidence ?? []).toHaveLength(0);
+    expect(mission?.completionBasis).toBeUndefined();
+  });
+
+  it('does not keep a mission when creation cannot be persisted', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const before = JSON.parse(
+      (await runTool(addedTools, 'bos_list_missions', {})).content,
+    ) as unknown[];
+    ctx.storage.set = async () => {
+      throw new Error('quota exceeded');
+    };
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'S1 unpersisted mission',
+      type: 'feature',
+      priority: 'high',
+    });
+    expect(created.content).toContain('PERSISTENCE_FAILED');
+
+    const after = JSON.parse(
+      (await runTool(addedTools, 'bos_list_missions', {})).content,
+    ) as unknown[];
+    expect(after).toHaveLength(before.length);
+  });
+
+  it('does not let a failed lifecycle write roll back a concurrent transition (G-010)', async () => {
+    const { ctx, addedTools, storageData } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const victim = await runTool(addedTools, 'bos_create_mission', {
+      title: 'g010-victim',
+      type: 'feature',
+      priority: 'high',
+    });
+    const victimId = victim.content.match(/mission-[a-z0-9-]+/)?.[0];
+    expect(victimId).toBeDefined();
+    if (!victimId) return;
+
+    // Fail exactly the next storage write, then let storage recover.
+    const originalSet = ctx.storage.set;
+    let writes = 0;
+    ctx.storage.set = async (key, value) => {
+      writes += 1;
+      if (writes === 1) throw new Error('quota exceeded');
+      return originalSet(key, value);
+    };
+
+    // Both tools mutate in-memory state and then await persistence. Without a
+    // lifecycle lock, the failing create restores a snapshot taken before the
+    // start transition and erases it while the start still reports success.
+    const [failedCreate, startedVictim] = await Promise.all([
+      runTool(addedTools, 'bos_create_mission', {
+        title: 'g010-doomed',
+        type: 'bugfix',
+        priority: 'low',
+      }),
+      runTool(addedTools, 'bos_start_mission', { missionId: victimId }),
+    ]);
+
+    expect(failedCreate.content).toContain('PERSISTENCE_FAILED');
+    expect(startedVictim.content).toContain('started');
+
+    const listed = JSON.parse(
+      (await runTool(addedTools, 'bos_list_missions', {})).content,
+    ) as Array<{ id: string; title: string; status: string }>;
+    expect(listed.find((mission) => mission.id === victimId)?.status).toBe('active');
+    expect(listed.some((mission) => mission.title === 'g010-doomed')).toBe(false);
+
+    // The committed transition must also be durable, not only in memory.
+    const persisted = storageData.get('behavioros:state') as {
+      missions: Array<{ id: string; title: string; status: string }>;
+    };
+    expect(persisted.missions.find((mission) => mission.id === victimId)?.status).toBe('active');
+    expect(persisted.missions.some((mission) => mission.title === 'g010-doomed')).toBe(false);
+  });
+
+  it('promotes a learning record through the lifecycle and refuses a skip', async () => {
+    const { ctx, addedTools, storageData } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const recorded = await runTool(addedTools, 'bos_record_learning', {
+      type: 'insight',
+      source: 'g014-tool-test',
+      content: 'The lifecycle is reachable through the tool surface',
+      impact: 'high',
+    });
+    const recordId = recorded.content.match(/learn-rec-[a-z0-9-]+/)?.[0];
+    expect(recordId).toBeDefined();
+    if (!recordId) return;
+
+    const skipped = await runTool(addedTools, 'bos_record_learning', {
+      learningId: recordId,
+      stage: 'candidate',
+    });
+    expect(skipped.content).toContain('INVALID_TRANSITION');
+
+    const lesson = await runTool(addedTools, 'bos_record_learning', {
+      learningId: recordId,
+      stage: 'lesson',
+    });
+    expect(lesson.content).toContain('-> lesson');
+
+    const candidate = await runTool(addedTools, 'bos_record_learning', {
+      learningId: recordId,
+      stage: 'candidate',
+    });
+    expect(candidate.content).toContain('-> candidate');
+
+    const unverified = await runTool(addedTools, 'bos_record_learning', {
+      learningId: recordId,
+      stage: 'validated',
+    });
+    expect(unverified.content).toContain('EVIDENCE_REQUIRED');
+
+    const verified = await runTool(addedTools, 'bos_record_learning', {
+      learningId: recordId,
+      stage: 'validated',
+      evidence: ['pnpm test: 659 cases passed'],
+    });
+    expect(verified.content).toContain('-> validated');
+
+    const persisted = storageData.get('behavioros:state') as {
+      learningRecords: Array<{ id: string; stage: string; evidence: string[] }>;
+    };
+    const stored = persisted.learningRecords.find((record) => record.id === recordId);
+    expect(stored?.stage).toBe('validated');
+    expect(stored?.evidence).toContain('pnpm test: 659 cases passed');
   });
 
   it('bos_set_agent switches the acting persona from the active DNA', async () => {

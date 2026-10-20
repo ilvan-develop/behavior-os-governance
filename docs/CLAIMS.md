@@ -17,25 +17,31 @@ ls packages/core/src/engine/*.ts
 # Linhas por motor (números reais, não marketing)
 wc -l packages/core/src/engine/*.ts
 
-# Tools MCP (esperado: 27) e resources (esperado: 2)
+# Tools MCP (esperado: 30) e resources (esperado: 2)
 grep -c "registerTool(" packages/mcp-server/src/server.ts
 grep -c "registerResource(" packages/mcp-server/src/server.ts
 
-# Tools do plugin OpenCode (esperado: 29)
+# Tools do plugin OpenCode (esperado: 32)
 grep -c "name: 'bos_" plugins/opencode-v2/src/index.ts
 
 # Ficheiros DNA (esperado: 21)
 ls dnas/*.yaml | wc -l
 
-# Schemas Zod (esperado: 31 objetos, 25 enums)
+# Schemas Zod (esperado: 42 objetos, 34 enums)
 grep -c "z.object(" packages/schemas/src/index.ts
 grep -c "z.enum(" packages/schemas/src/index.ts
 
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 53 ficheiros / 534 casos) — `pnpm test` para o resultado vivo
+# Testes (esperado: 59 ficheiros / 672 casos) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts
+
+# Control plane OpenCode V2 (esperado: 38 checks)
+pnpm verify:opencode
+
+# Guarda do control plane (esperado: 21 casos)
+pnpm --filter @behavior-os/core exec vitest run tests/opencode-config.test.ts
 
 # Guardas do próprio repositório (5 casos: tasks turbo, deleção portável, husky)
 pnpm --filter @behavior-os/core exec vitest run tests/repo-scripts.test.ts
@@ -67,8 +73,8 @@ grep -n "codeEdit" packages/core/src/engine/behavior-os.ts
 
 | Afirmação | Realidade verificada |
 |---|---|
-| **11 motores operacionais** | 13 ficheiros em `engine/` = 11 motores + fachada `BehaviorOS` + `EngineRegistry`: audit (192 linhas), code-edit (267), decision (107), dna-loader (40), drift (117), governance (147), learning (209), mission (111), pipeline (161), quality (96), recommendation (107). |
-| 29 schemas Zod | **31** `z.object` + **25** `z.enum` (medido, não estimado). |
+| **11 motores operacionais** | 13 ficheiros em `engine/` = 11 motores + fachada `BehaviorOS` + `EngineRegistry`: audit (282 linhas), code-edit (267), decision (107), dna-loader (51), drift (117), governance (147), learning (372), mission (557), pipeline (161), quality (96), recommendation (107). |
+| Schemas Zod | **42** `z.object` + **34** `z.enum` (medido, não estimado). |
 | Camada de decisão (votação/quorum) | `decision-engine.ts`: políticas `majority`/`supermajority`/`unanimous`, quorum, votos com peso; persistida na tabela `decisions`. Tool `bos_decide`. |
 | 21 padrões DNA | 21 ficheiros YAML em `dnas/`, validados por Zod (`DNALoader`). |
 | Recomendações scoreadas | `recommendation-engine.ts` + `bos_recommendations` (MCP e plugin). Ver secção abaixo. |
@@ -80,7 +86,16 @@ grep -n "codeEdit" packages/core/src/engine/behavior-os.ts
 | Trilho de auditoria tamper-evident | Hash-chain SHA-256 (`bos_verify_audit_trail`) **mais** sink append-only durável opt-in que deteta truncatura, lacuna de `seq` e adulteração. Não é WORM (ver "Afirmações retiradas"). |
 | Gate pipeline pré-execução | `preflightAction()` corre gates `pre` bloqueantes de forma síncrona. Ver secção abaixo. |
 | Protocolo de 7 passos | `PROTOCOL_STEP_COUNT = 7`; a progressão vive em `AgentState.stepHistory` e é injetada na sessão de cada host. |
-| MCP real (não vaporware) | **27 tools + 2 resources** em `packages/mcp-server/src/server.ts`, com o teste `registers exactly 27 tools` a falhar se a contagem derivar. |
+| Control plane OpenCode V2 | `opencode.json` com permissões ordenadas (último match ganha), 4 agentes (`researcher`, `planner`, `reviewer`, `auditor`), 6 comandos (`/govern`, `/verify`, `/audit`, `/mission`, `/learn`, `/review`), 5 skills e o plugin nativo com 32 tools. `pnpm verify:opencode` verifica 38 invariantes (incluindo que nenhum ficheiro do control plane está git-ignored) e `opencode-config.test.ts` cobre 21 casos. O servidor MCP **não** é registado no `opencode.json` para não duplicar as tools; `.mcp.json` é local/genericado e ignorado pelo git. |
+| MCP real (não vaporware) | **30 tools + 2 resources** em `packages/mcp-server/src/server.ts`, com o teste `registers exactly 30 tools` a falhar se a contagem derivar. |
+| Kernel de missões determinístico (S1) | Transições validadas (`pending → active → {paused, completed, failed, cancelled}`; `paused → {active, completed, failed, cancelled}`; terminais imutáveis), versão monotónica com rejeição de escritas obsoletas, e conclusão bloqueada sem evidência `passed` para cada `requiredCheck`. Cada transição fica registada em `mission.transitions` e é persistida atomicamente (upsert único); se o store falhar, a memória é revertida (para stores síncronos, como SQLite ou um store injetado; o adaptador Postgres é write-through assíncrono e só reporta erros no `flush()`). A criação também é revertida se o save falhar, e `updateProgress` recusa missões terminais. |
+| Orquestração real de tarefas (S3) | `AutonomousOrchestrator` (`packages/orchestrator/src/orchestrator.ts`, 1412 linhas) executa `TaskAdapter`s reais — incluindo `ShellAdapter` com `child_process.spawn`, captura de `stdout`/`stderr`, `exitCode` e cancelamento — e valida a saída contra `AdapterResultSchema` antes de a usar. Avalia critérios de aceitação, faz retries limitados com timeout e cancelamento, deteta loops, aplica um circuit breaker por adaptador, converte `deny` de governança em bloqueio, replica idempotentemente por chave e retoma missões saltando gates já executados. 17 testes reais em `packages/orchestrator/tests/orchestrator.test.ts`. |
+| Proveniência de evidência (S3) | `EvidenceProvenanceSchema` distingue `executed` / `reported` / `simulated`; uma evidência sem proveniência é normalizada para `reported`. `verificationMode: 'executed'` exige, para cada gate obrigatório, evidência `executed` com `executionId` não vazio; `executed` sem `executionId` e evidência `simulated` são rejeitadas (`EVIDENCE_UNVERIFIED` / `EVIDENCE_SIMULATED`). `MissionEngine.addEvidence()` recusa missões terminais e ignora repetições idempotentes do mesmo `executionId`. |
+| Auditoria simulada nunca é um PASS (S1) | `BehaviorOS.runAudit()` marca o relatório com `simulated: true`, força `overall: 'warning'` e prefixa o sumário com `SIMULATED — no verification executed`. `bos_run_audit` aceita `simulate` (default `true`) e nenhuma evidência `simulated` satisfaz um gate obrigatório. |
+| Pausa/retoma no kernel, não na superfície de tools (S1) | `BehaviorOS.pauseMission()`/`resumeMission()` existem e são testados; `bos_complete_mission`, `bos_fail_mission` e `bos_cancel_mission` são as três tools expostas. Pausa/retoma como tools fica para S1b. |
+| Ciclo de vida de aprendizagem (S4) | `LearningRecord` percorre `observation → lesson → candidate → validated → policy → monitored`, um passo por promoção, sem saltos nem regressões; entrar em `validated` exige evidência. `BehaviorOS.createLearningRecord()`/`advanceLearningRecord()` e `bos_record_learning` (com `learningId` + `stage`) expõem-no, e os registos persistem no snapshot (`learningRecords`). 8 casos em `packages/core/tests/learning-lifecycle.test.ts`. |
+| Mutação de ciclo de vida serializada (S4) | O plugin executa cada transição sob `withLifecycleLock()`, cobrindo captura → mutação → persistência → rollback. Um teste concorrente com falha de escrita injetada prova que a transição falhada já não reverte a transição concorrente; com o lock desativado o mesmo teste falha (`pending` em vez de `active`). |
+| Deteção real de linter (S4) | O estágio `lint` da auditoria real resolve o linter pelo projeto (`biome.json`/`eslint.config.*`/`.oxlintrc.json`), subindo até à raiz do workspace, em vez de sondar apenas `eslint`/`oxlint` no PATH. Num repositório Biome o estágio passa com `{linter: 'biome'}` em vez de `skipped`. |
 
 ## Afirmações retiradas ou corrigidas
 
@@ -95,18 +110,18 @@ medido com `wc -l`.
 | AuditEngine com 1347 linhas | **192** linhas (`audit-engine.ts`). |
 | PipelineEngine com 657 linhas | **161** linhas (`pipeline-engine.ts`). O número original não tinha qualquer relação com o ficheiro. |
 | 9 camadas de validação (runtime) | **Retirada.** O pipeline é configurável e o default é 1 gate `pre` (`governance`) + N gates `post` (N = gates de qualidade do DNA ativo). Não existe um conjunto fixo de "9 camadas". |
-| 30 tools & 7 resources MCP | **27 tools + 2 resources** no servidor MCP; **29 tools** no plugin OpenCode (as restantes duas são específicas do host). |
+| 30 tools & 7 resources MCP | **30 tools + 2 resources** no servidor MCP; **32 tools** no plugin OpenCode (as restantes duas são específicas do host). |
 | "8 tabelas" (métrica antiga de persistência) | **9** tabelas: `missions`, `learnings`, `agents`, `audit_log`, `pipeline_runs`, `decisions`, `code_fix_results`, `code_edits`, `meta`. |
 | "Trilho de auditoria imutável" | Imutabilidade é um requisito de **armazenamento físico** (WORM), não de software. O que existe é deteção: hash-chain SHA-256 + sink append-only opt-in por ficheiro. Ver a secção "Cadeia de auditoria". |
 | "Learning engine não aplica correções automaticamente" | Já aplica, mas só com `config.codeEdit.enabled` **e** `apply: true` na chamada, `find` único, ficheiro dentro do workspace e (se houver votos) quórum aprovado. Sem isso, é sempre dry-run. |
 | Regras de protocolo "Display DNA Block" / "Resolve Truth" / "Delegate" | Retirado. Os passos são `PROTOCOL_STEPS` (`bos_select_dna`, `bos_list_dna`, `bos_get_state`, `bos_create_mission`, `bos_start_mission`, `bos_run_audit`, `bos_record_learning`). O texto do resource MCP `behavioros://protocol/steps` dizia outra coisa e foi corrigido; e uma vez que o texto é agora gerado a partir dessa constante (e o plugin reexporta-a), MCP, plugin e docs já não conseguem divergir no nome dos passos. |
-| Tools `bos_resolve_truth`, `bos_display_dna`, `bos_validate_dna`, `bos_get_patterns`, `bos_get_dna_pattern`, `bos_complete_mission`, `bos_fail_mission`, `bos_get_mission`, `bos_get_audit_report`, `bos_list_dna_patterns` | **Não existem.** Estavam citadas em `docs/API_REFERENCE.md`, `.cursor/rules/*.mdc`, `.windsurfrules` e `.github/copilot-instructions.md`; foram retiradas. Um teste (`docs-consistency.test.ts`) falha se voltarem a aparecer em documentação atual. |
+| Tools `bos_resolve_truth`, `bos_display_dna`, `bos_validate_dna`, `bos_get_patterns`, `bos_get_dna_pattern`, `bos_get_mission`, `bos_get_audit_report`, `bos_list_dna_patterns` | **Não existem.** Estavam citadas em `docs/API_REFERENCE.md`, `.cursor/rules/*.mdc`, `.windsurfrules` e `.github/copilot-instructions.md`; foram retiradas. Um teste (`docs-consistency.test.ts`) falha se voltarem a aparecer em documentação atual. `bos_complete_mission` e `bos_fail_mission` deixaram de estar nesta lista em S1: passaram a existir, com `bos_cancel_mission`, e a lista `WITHDRAWN_TOOLS` foi atualizada. |
 | `bos_list_missions` com filtros `status` / `type` / `priority` | Os filtros eram anunciados no schema e **ignorados** no handler; passaram a ser aplicados de facto (sobre a lista do motor, antes do `limit`). |
 | CLI "corre a governança" em `compile`/`validate`/`simulate`/`status`/`deploy`/`agent` | Cinco comandos imprimiam resultados fabricados. Agora: `compile`/`validate` carregam os YAML com `DNALoader`/`DNASchema` (exit 1 se falharem); `status`/`simulate`/`deploy`/`autonomous` resolvem o DNA ativo (`BEHAVIOROS_DNA_PATH` → `dnas/<padrão>.yaml`); `simulate` chama `evaluateGovernance()` real; `deploy` imprime o plano de gates do DNA e o resultado real de `preflightAction()`; `protocol` conta os passos presentes em `AgentState.stepHistory`. |
 | "`behavioros deploy` faz o deployment" | **Não faz.** Imprime o plano de gates e o resultado do pre-flight bloqueante (exit 1 se bloqueado) e não corre gates `post` nem publica artefactos. Ver "Limitações abertas". |
 | "`pnpm benchmark` mede a performance" | Script removido do `package.json`: o alvo (`scripts/benchmark.*`) não existe. Os números de performance são **alvos de desenho**, não medições. |
 | Workspace com `apps/*` | Removido de `pnpm-workspace.yaml` — a pasta não existe e o glob não apanhava nada. |
-| Script `test` do `@behavior-os/orchestrator` | Removido: era um `echo` (nenhum teste corria). O pacote não tem suite; está declarado abaixo. |
+| Script `test` do `@behavior-os/orchestrator` | Era um `echo` (nenhum teste corria). Agora é `node ../../node_modules/vitest/vitest.mjs run` e o pacote tem **17 casos reais** em `packages/orchestrator/tests/orchestrator.test.ts`; a limitação C4 está fechada. |
 | `behavioros init` gera `.mcp.json` a apontar para `mcp-server/dist/server.js` | O caminho não era válido a partir da raiz do projeto. Passa a `join(__dirname, '..', '..', 'mcp-server', 'dist', 'server.js')`. |
 | Códigos de saída `2`/`3` da CLI | **Não existem.** A CLI usa apenas `0` e `1` (documentado em `docs/CLI.md`). |
 | Variáveis `BEHAVIOROS_PROJECT`, `BEHAVIOROS_LOG_LEVEL`, `BEHAVIOROS_STATE_DIR` | **Nenhum código as lê.** `BEHAVIOROS_LOG_LEVEL` ainda era *definida* no `Dockerfile`, no `docker-compose.yml` e em `scripts/smoke-mcp.mjs` — ninguém a consumia; foi removida desses três sítios. A CLI lê `BEHAVIOROS_DNA_PATH`, o plugin `BEHAVIOR_*` e o MCP `BEHAVIOROS_*`. |
@@ -116,21 +131,22 @@ medido com `wc -l`.
 | `CONTRIBUTING.md` dizia `Register in packages/dnas/src/index.ts`, `src/tools/<category>/`, `schemas/src/mcp.ts`, `tests/dna/` | Nenhum desses caminhos existe. Substituídos pelos reais (`server.ts`, `schemas/src/index.ts`, `tests/*.test.ts`). |
 | Script de raiz `cli:init` = `pnpm --filter @behavior-os/cli run init` | O pacote CLI não tem script `init` (o comando falhava). Agora `node packages/cli/dist/cli.js init`; um teste novo (`docs-consistency.test.ts`) valida delegações `pnpm --filter <pkg> run <script>`. |
 | `GUIDE.md`/`docs/SDK.md`: `evaluateQuality()`, `getAgentState(): AgentMetrics`, `.mcp.json` com `dist/mcp-server.js`, Cursor com `serverUrl` HTTP, `opencode.json` com bloco `plugins` | Tudo falso. Nomes/tipos reais: `checkQuality()`, `getAgentState(): AgentState`; MCP é stdio (sem HTTP); o plugin é descoberto em `.opencode/plugins/`. Corrigido. |
-| "45+ tools MCP", "5.200+ testes", "12 padrões DNA", "22 engines" nas regras de editor | Retirado: 27 tools + 2 resources, 21 padrões, 11 motores. As contagens vivem em `docs/CLAIMS.md`. |
+| "45+ tools MCP", "5.200+ testes", "12 padrões DNA", "22 engines" nas regras de editor | Retirado: 30 tools + 2 resources, 21 padrões, 11 motores. As contagens vivem em `docs/CLAIMS.md`. |
 | `plugins/opencode-v2/tests/plugin-basic.test.ts` ("OpenCode Plugin Structure") | O ficheiro assertava literais escritos à mão e **não importava o plugin**: passava mesmo que o plugin divergisse. Reescrito para importar o export real (`PROTOCOL_STEPS`) e ler `dnas/`. |
 | `.behavioros/README.md` "regenerado automaticamente" com `${STEP_2_STATUS}` | Nada o regenera e os placeholders nunca eram substituídos. Passou a documento estático com o mapa real dos passos e dos ficheiros de estado. |
-| `@behavior-os/mcp-server` `package.json`: `"description": "... 11 tools ..."` | O manifesto publicável anunciava **11** tools; o servidor regista **27**. Corrigido para "27 tools and 2 resources", com um teste (`mcp.test.ts`) que falha se o número deixar de bater com os `registerTool(` reais. |
+| `@behavior-os/mcp-server` `package.json`: `"description": "... 11 tools ..."` | O manifesto publicável anunciava **11** tools; o servidor regista **30**. Corrigido para "30 tools and 2 resources", com um teste (`mcp.test.ts`) que falha se o número deixar de bater com os `registerTool(` reais. |
 | Nomes dos 7 passos divergiam entre superfícies de código | O plugin servia "Delegate" para o passo 5 (`bos_start_mission`) enquanto o resource MCP `behavioros://protocol/steps` servia "Start Mission" — e o comentário do próprio plugin dizia que evitava "a copied literal" sendo ele a cópia. Agora existe **uma** definição, `PROTOCOL_STEPS` em `packages/core/src/engine/behavior-os.ts`; o resource MCP é **gerado** a partir dela e o plugin reexporta-a, pelo que a divergência deixou de ser possível por construção. `PROTOCOL_TOOL_STEPS` e `PROTOCOL_STEP_COUNT` passaram a ser derivados. |
 | `PROTOCOL_STEP_COUNT` documentado como "0-based index into this list" | A lista não existia: o valor era o literal `7`. Agora é `PROTOCOL_STEPS.length` e a lista existe (validada contra `ProtocolStepSchema` em `protocol-steps-catalog.test.ts`). |
 | `scripts/count-tests.mjs` | Removido: nada o corria (nem `package.json`, nem CI), contava testes por regex (o que contradiz o número medido pelo vitest), tinha ramos só do Jest (`xit`/`xtest`), deixava `fileDetails` com Promises por resolver e uma função morta. Uma segunda contagem divergente é uma fonte de afirmações falsas. |
 | `pnpm docs:build` (`typedoc` sem config) | **Apagava tudo em `docs/`.** Um `typedoc` sem config usa `out: ./docs` com `cleanOutputDir: true`. Existe `typedoc.json` a fixar `out: docs/api` (git-ignored) e duas guardas falham se o `out` voltar a apontar para a raiz ou para `docs/`. Medido: exit 0, **154** md gerados, **0 de 14** docs escritos à mão apagados ou alterados (comparação SHA-256). |
-| `pnpm test:coverage` na raiz | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que está fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` passam a delegar em cada pacote e dão **53 ficheiros / 534 casos**, exit 0. |
+| `pnpm test:coverage` na raiz | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que está fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` passam a delegar em cada pacote e dão hoje **58 ficheiros / 659 casos**, exit 0. |
 | `pnpm clean` / `pnpm clean:all` | O `clean:all` usava `rm -rf node_modules`, que não corre no PowerShell, e **nenhum** pacote tinha script `clean`. Agora `scripts/clean.mjs` (`node:fs`, sem shell) serve os 7 pacotes e a raiz: `pnpm clean` = 7/7 tarefas, 0 `dist/` restantes. |
 | Tasks `lint` e `dev` no `turbo.json`, e o script raiz `dev` | **Configuração morta:** nenhum pacote implementa `lint` nem `dev`, pelo que `turbo lint`/`turbo dev` não tinham nada para correr — e o `dev` da raiz apontava para essa task inexistente. Removidos; entrou uma task `clean` real (`cache: false`). |
 | Hooks Husky | Os hooks ainda carregavam o bootstrap `husky.sh` (deprecado, removido no v10) e o `commit-msg` passava `$1` sem quoting. O bootstrap saiu; o `pre-commit` passou a correr `lint-staged` + `typecheck` em vez do `pnpm lint:check` sobre o repositório inteiro. |
 | `lint-staged` a formatar `*.{json,yaml,yml,md}` | O Biome não formata YAML nem Markdown: essas entradas eram inertes. Padrão reduzido a `*.json`. |
 | `.gitattributes` sem `eol` | Com `core.autocrlf=true` e um `text=auto` nu, qualquer checkout em Windows trazia CRLF, e `pnpm lint:check` (Biome, `lineEnding: lf`) falhava localmente enquanto a CI ficava verde. Fixado `eol=lf`, para que a árvore de trabalho iguale os blobs LF commitados em qualquer plataforma. |
 | Heurística antiga: "mencionar deployment = implantar" | Os sinais de ambiente eram lidos do **texto dos argumentos** de qualquer ação. Medido no log de governação: três `grep` escalaram por `deployment-approval` (seq 2649, 2650, 2656) só porque o **padrão pesquisado** continha a palavra, e o harness falhava o C24 contra o `dist` publicado com `a read-only search was gated as a deployment: [Behavior-OS:DevOps Pipeline] Escalated by rule: deployment-approval`. Agora `deployment` exige uma ação capaz de **executar** uma operação (`bash`, `shell`, `deploy`, `apply`, …) e `production`/`production-change` exigem uma ação não-read-only — escrever `infra/prod/main.tf` continua a contar, como a regra `sterile-field` do `surgical-team` exige. Provado: 3 testes falhavam antes e passam depois; mutar `ENVIRONMENT_ACTION` mata 9 testes (7 pré-existentes); o harness passou de 23/24 a **24/24**. |
+| `new-dependency` derivado de qualquer texto | A regra `license-check` disparava em edições de documentação e pesquisas read-only que apenas **citavam** um comando de instalação: o snippet de instalação documentado em C7 bloqueava edições a quatro linhas de distância na mesma tabela. O sinal derivado passa a exigir uma ação capaz de executar (`canOperate`); um `new-dependency` explícito em `metadata` continua a ser respeitado. Provado por 3 testes novos em `plugins/opencode-v2/tests/governance.test.ts` (33 casos no ficheiro); a edição de C4 que estava bloqueada passou a ser aplicada. |
 | Tasks `git add` explícitas no `lint-staged` | Redundantes — o lint-staged já aplica as correções das tasks e adiciona-as ao índice — e o lint-staged avisa em cada commit (`Some of your tasks use 'git add' command…`, visível no commit b4e5ea2). Removidas: o `pre-commit` fica só com as tasks do Biome. Prova: o commit seguinte corre sem esse aviso. |
 
 ## Gate pipeline
@@ -347,37 +363,39 @@ confundida com marketing nem com defeito escondido.
 
 ### Limitações abertas (medidas, ainda **não** fechadas)
 
-Lacunas reais que continuam abertas — ausências e afirmações que **não podem ser
-verificadas a partir do repositório**. Não são afirmações falsas: são listadas em
-vez de corrigidas por texto.
+Lacunas reais — abertas ou fechadas numa sessão recente, para que o estado medido não se perca. As fechadas mantêm o número para não quebrar referências.
 
 | # | Limitação | Estado medido |
 |---|---|---|
 | C1 | `deploy` sem deployment | Imprime o plano de gates do DNA e corre o pre-flight bloqueante, mas não executa gates `post` nem publica artefactos. |
-| C2 | Sem rate limiting no servidor MCP | Nenhuma tool tem limite de frequência. |
+| C02 | Sem rate limiting no servidor MCP | Nenhuma tool tem limite de frequência. |
 | C3 | `examples/` fora do workspace | Os exemplos não são cobertos por `pnpm test` (a pasta está fora dos globs). |
-| C4 | `@behavior-os/orchestrator` sem testes | Não tem suite nenhuma (o script `test` falso foi removido em vez de mantido). |
+| C4 | `@behavior-os/orchestrator` sem testes | **Fechado em S3**: 17 casos reais em `packages/orchestrator/tests/orchestrator.test.ts`. |
 | C5 | `behavioros agent` não lista agentes | Mostra o agente resolvido, não o registo de agentes. |
 | C6 | `drift-check` é um subconjunto | Compara `currentStep`/`selectedDna` com `baseline.json`; o `DriftEngine` compara também regras e gates. |
 | C7 | Instalação a partir do npm não verificável aqui | `docs/SDK.md` e `QUICKSTART.md` dizem `npx @behavior-os/cli` / `pnpm add @behavior-os/core`, o que pressupõe publicação. Os manifestos não são `private` e existe `release: changeset publish`, mas nenhum artefacto no repositório prova que as versões estão publicadas — não foi possível confirmar sem rede. |
 | C8 | Sem transporte HTTP nem CORS no MCP | O servidor é **stdio** (`StdioServerTransport`): zero referências a `listen`, HTTP, SSE ou CORS em `packages/mcp-server/src`. Um transporte HTTP+CORS seria funcionalidade nova, não correção — e o `EXPOSE 3000` já tinha sido retirado do `Dockerfile` por anunciar algo que não existe. |
-| C9 | Condições declaradas sem sinal derivado | Das **65** condições declaradas nas 21 DNAs, a derivação do plugin (`buildGovernanceContext`) produz **16** chaves (`change`, `deployment`, `production`, `production-change`, `critical-action`, `breaking-change`, `data-modification`, `privilege-escalation`, `new-dependency`, `patient-record`, `phi`, `pii-access`, `pii-data`, `financial-transaction`, `financial-operation`, `high-value`). As restantes só disparam se o chamador fornecer a chave explicitamente (`metadata` do evento ou `context` de `bos_evaluate_governance`): no DevOps Pipeline isso atinge `rollback-required` (`rollback`) e `pipeline-approval` (`pipeline-change`), que nenhuma ação do host acciona. Enumeração medida, não estimada. |
+| C9 | Condições declaradas sem sinal derivado | Das **65** condições declaradas nas 21 DNAs, a derivação do plugin (`buildGovernanceContext`) produz **16** chaves (`change`, `deployment`, `production`, `production-change`, `critical-action`, `breaking-change`, `data-modification`, `privilege-escalation`, `new-dependency`, `patient-record`, `phi`, `pii-access`, `pii-data`, `financial-transaction`, `financial-operation`, `high-value`). As restantes só disparam se o chamador fornecer a chave explicitamente (`metadata` do evento ou `context` de `bos_evaluate_governance`): no DevOps Pipeline isso atinge `rollback-required` (`rollback`) e `pipeline-approval` (`pipeline-change`), que nenhuma ação do host acciona. Enumeração medida, não estimada. Sinais derivados de comando (`new-dependency`) só são produzidos quando a ação é capaz de executar; uma edição de documentação que cite o comando não os produz. |
 | C10 | Origem de um escalonamento quando o host envia texto da sessão | O hook recebe `event.action/resources/metadata` e `buildGovernanceContext` junta **todos** os valores de `metadata` ao *haystack*. De dentro do plugin não é atribuível a um campo concreto. Correlação medida nesta sessão: chamadas cuja mensagem do agente continha as palavras-gatilho do C24 foram escaladas (`node -e` a imprimir `governance.ts`; `grep` por `lint-staged` — nenhuma com a palavra nos próprios argumentos), e chamadas equivalentes com a mensagem sem essas palavras passaram. Duas leituras possíveis: o host inclui texto da sessão em `metadata`, ou o pedido pendente é exibido tardiamente com o nome de outra tool. Registar o *haystack* usado tornaria isto medição em vez de inferência. |
 
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **53 ficheiros / 534 casos**,
-`pnpm typecheck` 10/10 tarefas sem erros, `pnpm lint:check` (Biome) limpo e
-`pnpm clean` 7/7 tarefas. `pnpm test:coverage` na raiz corre a mesma suite
-(**53 ficheiros / 534 casos**, exit 0). O harness de governação
-(`pnpm verify:governance`) prova **24/24** claims (100%), com 0 falhas. Os
-números vivem nos próprios testes, que falham se a contagem derivar:
-`packages/mcp-server/tests/mcp.test.ts` ("27 tools" + descrição do manifesto),
-`plugins/opencode-v2/tests/plugin-registration.test.ts` ("29 bos_* tools"),
+Medido com `pnpm test` (não aspiracional): **59 ficheiros / 672 casos**, exit 0,
+`pnpm typecheck` 9/9 tarefas sem erros, `pnpm lint:check` (Biome, 151 ficheiros) limpo e
+`pnpm build` 7/7 tarefas. `pnpm test:coverage` na raiz corre a mesma suite
+(**59 ficheiros / 672 casos**). O harness de governação
+(`pnpm verify:governance`) prova **24/24** claims (100%), com 0 falhas, e o
+control plane OpenCode V2 (`pnpm verify:opencode`) prova **38/38** invariantes.
+Os números vivem nos próprios testes, que falham se a contagem derivar:
+`packages/mcp-server/tests/mcp.test.ts` ("30 tools" + descrição do manifesto),
+`plugins/opencode-v2/tests/plugin-registration.test.ts` ("32 bos_* tools"),
+`packages/core/tests/opencode-config.test.ts` (32 tools no plugin),
 `packages/core/tests/protocol-steps-catalog.test.ts` (os 7 `PROTOCOL_STEPS`
 passam `ProtocolStepSchema`), `packages/core/tests/dnas.test.ts` (os 21 YAML
 passam `DNASchema`), `packages/core/tests/repo-scripts.test.ts` (tasks do turbo,
-deleção portável e hooks husky) e `packages/core/tests/docs-build-safety.test.ts`
+deleção portável e hooks husky), `packages/core/tests/opencode-config.test.ts`
+(config, agentes, comandos, skills, plugin e ficheiros não ignorados pelo git) e
+`packages/core/tests/docs-build-safety.test.ts`
 (o `out` do typedoc nunca aponta para `docs/` nem para a raiz).
 `packages/core/tests/docs-consistency.test.ts`
 (documentação atual não pode citar tools, comandos CLI, scripts `pnpm`, métodos

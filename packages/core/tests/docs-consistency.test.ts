@@ -13,17 +13,20 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 27 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 30 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_apply_code_fixes',
+  'bos_cancel_mission',
   'bos_check_quality',
   'bos_code_edit',
   'bos_code_fixes',
+  'bos_complete_mission',
   'bos_create_mission',
   'bos_decide',
   'bos_drift',
   'bos_evaluate_governance',
   'bos_evolution',
+  'bos_fail_mission',
   'bos_get_insights',
   'bos_get_state',
   'bos_get_status',
@@ -54,9 +57,7 @@ const KNOWN_TOOLS = new Set([...MCP_TOOLS, ...PLUGIN_ONLY_TOOLS]);
  * withdraw them). The test below fails if one of these is ever registered.
  */
 const WITHDRAWN_TOOLS = [
-  'bos_complete_mission',
   'bos_display_dna',
-  'bos_fail_mission',
   'bos_get_audit_report',
   'bos_get_dna_pattern',
   'bos_get_mission',

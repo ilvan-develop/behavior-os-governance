@@ -97,6 +97,51 @@ export const MissionStatusSchema = z.enum([
   'cancelled',
 ]);
 
+/**
+ * Where evidence came from.
+ *
+ * - `executed` — a real command/adapter ran and produced this record.
+ * - `reported` — a caller or agent asserted the result without execution.
+ * - `simulated` — the check was simulated (never a verification).
+ */
+export const EvidenceProvenanceSchema = z.enum(['executed', 'reported', 'simulated']);
+
+/**
+ * Evidence attached to a mission transition. `simulated: true` marks a value
+ * produced without executing the check (for example a simulated audit); such
+ * evidence can be recorded but never authorizes completion of a required gate.
+ *
+ * `provenance` and `executionId` are what let a mission in
+ * `verificationMode: 'executed'` distinguish a real run from an assertion.
+ */
+export const MissionEvidenceSchema = z.object({
+  gate: z.string().min(1),
+  status: z.enum(['passed', 'failed', 'skipped']),
+  source: z.string().min(1),
+  detail: z.string().optional(),
+  simulated: z.boolean().optional(),
+  provenance: EvidenceProvenanceSchema.optional(),
+  /** Identity of the concrete execution that produced this evidence. */
+  executionId: z.string().min(1).optional(),
+  /** Adapter/tool that executed the check (e.g. `shell`). */
+  tool: z.string().min(1).optional(),
+  /** Command or operation, when the source executed one. */
+  command: z.string().optional(),
+  /** Process exit status, when applicable. */
+  exitCode: z.number().int().optional(),
+  recordedAt: z.string(),
+});
+
+/** One auditable entry in a mission's transition history. */
+export const MissionTransitionSchema = z.object({
+  from: MissionStatusSchema,
+  to: MissionStatusSchema,
+  at: z.string(),
+  actor: z.string(),
+  reason: z.string().optional(),
+  version: z.number().int().nonnegative(),
+});
+
 export const MissionSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -111,6 +156,164 @@ export const MissionSchema = z.object({
   updatedAt: z.string(),
   progress: z.number().min(0).max(100).default(0),
   tags: z.array(z.string()).optional(),
+  /** Monotonic revision used to reject stale concurrent writes. */
+  version: z.number().int().nonnegative().optional(),
+  /** Gates that must each have passing evidence before the mission completes. */
+  requiredChecks: z.array(z.string()).optional(),
+  /**
+   * `any` accepts caller-supplied evidence (historical behaviour).
+   * `executed` requires every required gate to have passing evidence with
+   * `provenance: 'executed'` and a non-empty `executionId`.
+   */
+  verificationMode: z.enum(['any', 'executed']).optional(),
+  /** Evidence recorded by transitions (append-only). */
+  evidence: z.array(MissionEvidenceSchema).optional(),
+  /** Auditable transition history (append-only). */
+  transitions: z.array(MissionTransitionSchema).optional(),
+  /** Why the mission was allowed to complete. */
+  completionBasis: z.enum(['evidence', 'no-required-checks']).optional(),
+  /** Reason supplied with the most recent fail/cancel/pause transition. */
+  lastTransitionReason: z.string().optional(),
+});
+
+// ============================================================
+// Task Orchestration Schemas
+// ============================================================
+
+export const TaskStatusSchema = z.enum([
+  'pending',
+  'dispatched',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'blocked',
+]);
+
+export const TaskErrorCodeSchema = z.enum([
+  'INVALID_INPUT',
+  'INVALID_OUTPUT',
+  'AGENT_NOT_FOUND',
+  'ADAPTER_NOT_FOUND',
+  'DNA_NOT_FOUND',
+  'GOVERNANCE_DENIED',
+  'APPROVAL_REQUIRED',
+  'TIMEOUT',
+  'CANCELLED',
+  'RETRY_EXHAUSTED',
+  'LOOP_DETECTED',
+  'CIRCUIT_OPEN',
+  'ACCEPTANCE_FAILED',
+  'EXECUTION_FAILED',
+  'PERSISTENCE_FAILED',
+]);
+
+/** One machine-checkable acceptance criterion for a task. */
+export const TaskAcceptanceSchema = z.object({
+  gate: z.string().min(1),
+  description: z.string().min(1),
+  type: z.enum(['exit-code', 'stdout-contains', 'stdout-matches', 'stderr-not-contains']),
+  /** Expected value: exit code (default `0`), stdout text/pattern, or stderr text. */
+  expected: z.string().optional(),
+  /** Only required criteria gate task success. Defaults to `true`. */
+  required: z.boolean().default(true),
+});
+
+export const TaskCheckResultSchema = z.object({
+  gate: z.string(),
+  type: TaskAcceptanceSchema.shape.type,
+  required: z.boolean(),
+  passed: z.boolean(),
+  detail: z.string(),
+});
+
+/** A dispatched, fully identified task. */
+export const TaskDefinitionSchema = z.object({
+  id: z.string().min(1),
+  missionId: z.string().min(1),
+  parentTaskId: z.string().min(1).optional(),
+  correlationId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  type: z.string().min(1),
+  objective: z.string().min(1),
+  input: z.record(z.string(), z.unknown()),
+  acceptance: z.array(TaskAcceptanceSchema).min(1),
+  agentId: z.string().min(1),
+  adapter: z.string().min(1),
+  status: TaskStatusSchema,
+  attempts: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  timeoutMs: z.number().int().positive().optional(),
+  deadline: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+/** Structured, classified task failure. */
+export const TaskErrorSchema = z.object({
+  code: TaskErrorCodeSchema,
+  message: z.string(),
+  retryable: z.boolean(),
+  /** Deterministic signature used for repeated-failure/loop detection. */
+  fingerprint: z.string().optional(),
+});
+
+/**
+ * The raw result an execution adapter returns. It is **untrusted** until the
+ * orchestrator validates it with this schema.
+ */
+export const AdapterResultSchema = z.object({
+  exitCode: z.number().int().nullable(),
+  stdout: z.string(),
+  stderr: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const TaskResultSchema = z.object({
+  id: z.string(),
+  missionId: z.string(),
+  status: TaskStatusSchema,
+  agentId: z.string(),
+  adapter: z.string(),
+  attempts: z.number().int().nonnegative(),
+  correlationId: z.string(),
+  idempotencyKey: z.string(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  exitCode: z.number().int().nullable().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+  acceptance: z.array(TaskCheckResultSchema),
+  evidence: z.array(MissionEvidenceSchema),
+  error: TaskErrorSchema.optional(),
+});
+
+export const TaskEventTypeSchema = z.enum([
+  'mission.created',
+  'mission.completed',
+  'mission.failed',
+  'mission.cancelled',
+  'mission.blocked',
+  'task.created',
+  'task.dispatched',
+  'task.started',
+  'task.retried',
+  'task.completed',
+  'task.failed',
+  'task.cancelled',
+  'task.blocked',
+]);
+
+/** Correlated lifecycle event. Payloads never contain stdout/stderr or env. */
+export const TaskEventSchema = z.object({
+  seq: z.number().int().nonnegative(),
+  type: TaskEventTypeSchema,
+  missionId: z.string(),
+  taskId: z.string().optional(),
+  correlationId: z.string(),
+  at: z.string(),
+  data: z.record(z.string(), z.unknown()),
 });
 
 // ============================================================
@@ -196,6 +399,12 @@ export const AuditReportSchema = z.object({
   overall: z.enum(['pass', 'fail', 'warning']),
   summary: z.string(),
   timestamp: z.string(),
+  /**
+   * `true` when the report comes from a simulated run. A simulated report is
+   * never a verification: it is forced to `overall: 'warning'` and must not be
+   * used as completion evidence.
+   */
+  simulated: z.boolean().optional(),
 });
 
 // ============================================================
@@ -324,6 +533,44 @@ export const LearningEventSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+/**
+ * Lifecycle of a governed learning:
+ * `observation -> lesson -> candidate -> validated -> policy -> monitored`.
+ * Each record moves exactly one stage forward and keeps an auditable trail of
+ * transitions; `validated` (and every later stage) requires evidence.
+ */
+export const LearningStageSchema = z.enum([
+  'observation',
+  'lesson',
+  'candidate',
+  'validated',
+  'policy',
+  'monitored',
+]);
+
+export const LearningTransitionSchema = z.object({
+  from: LearningStageSchema,
+  to: LearningStageSchema,
+  at: z.string(),
+  actor: z.string(),
+  reason: z.string().optional(),
+});
+
+export const LearningRecordSchema = z.object({
+  id: z.string(),
+  stage: LearningStageSchema,
+  title: z.string(),
+  content: z.string(),
+  source: z.string(),
+  impact: LearningImpactSchema,
+  /** Evidence accumulated while promoting the record (command output, ids, ...). */
+  evidence: z.array(z.string()),
+  transitions: z.array(LearningTransitionSchema),
+  relatedMission: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 // ============================================================
 // Protocol Schemas
 // ============================================================
@@ -387,6 +634,19 @@ export type MissionType = z.infer<typeof MissionTypeSchema>;
 export type MissionPriority = z.infer<typeof MissionPrioritySchema>;
 export type MissionStatus = z.infer<typeof MissionStatusSchema>;
 export type Mission = z.infer<typeof MissionSchema>;
+export type MissionEvidence = z.infer<typeof MissionEvidenceSchema>;
+export type MissionTransition = z.infer<typeof MissionTransitionSchema>;
+export type EvidenceProvenance = z.infer<typeof EvidenceProvenanceSchema>;
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export type TaskErrorCode = z.infer<typeof TaskErrorCodeSchema>;
+export type TaskAcceptance = z.infer<typeof TaskAcceptanceSchema>;
+export type TaskCheckResult = z.infer<typeof TaskCheckResultSchema>;
+export type TaskDefinition = z.infer<typeof TaskDefinitionSchema>;
+export type TaskError = z.infer<typeof TaskErrorSchema>;
+export type AdapterResult = z.infer<typeof AdapterResultSchema>;
+export type TaskResult = z.infer<typeof TaskResultSchema>;
+export type TaskEventType = z.infer<typeof TaskEventTypeSchema>;
+export type TaskEvent = z.infer<typeof TaskEventSchema>;
 export type AgentType = z.infer<typeof AgentTypeSchema>;
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type Agent = z.infer<typeof AgentSchema>;
@@ -489,6 +749,9 @@ export type DriftInfo = z.infer<typeof DriftInfoSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;
+export type LearningStage = z.infer<typeof LearningStageSchema>;
+export type LearningTransition = z.infer<typeof LearningTransitionSchema>;
+export type LearningRecord = z.infer<typeof LearningRecordSchema>;
 export type ProtocolStep = z.infer<typeof ProtocolStepSchema>;
 export type AgentState = z.infer<typeof AgentStateSchema>;
 export type McpTool = z.infer<typeof McpToolSchema>;

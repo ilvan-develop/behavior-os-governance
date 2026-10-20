@@ -1,0 +1,193 @@
+{
+  "phase": "IDENTIFY",
+  "correlationId": "mission-1792490880917-qrygt0p165b",
+  "gaps": [
+    {
+      "id": "G-001",
+      "severity": "critical",
+      "component": "packages/orchestrator/src/orchestrator.ts",
+      "consequence": "Callers received status 'executed' even though no task was dispatched, validated, or completed.",
+      "rootCause": "The orchestrator was a stub.",
+      "remediation": "Replaced with a task engine that dispatches registered adapters, validates results, records evidence, and completes/fails the mission.",
+      "acceptanceTest": "Real shell task completes the mission; failure/timeout/cancel paths never report success.",
+      "status": "CLOSED",
+      "evidence": "packages/orchestrator/tests/orchestrator.test.ts (17 cases), including a real child process."
+    },
+    {
+      "id": "G-002",
+      "severity": "high",
+      "component": "packages/schemas/src/index.ts",
+      "consequence": "No typed task contract, status, error taxonomy, acceptance criterion, or result schema existed.",
+      "rootCause": "Task orchestration was never modeled as a first-class domain.",
+      "remediation": "Added TaskStatus, TaskErrorCode, TaskAcceptance, TaskDefinition, TaskError, AdapterResult, TaskResult and TaskEvent schemas.",
+      "acceptanceTest": "Malformed adapter results are rejected; task results conform to the schema.",
+      "status": "CLOSED",
+      "evidence": "Adapter output is parsed with AdapterResultSchema before use; test 'rejects malformed adapter output'."
+    },
+    {
+      "id": "G-003",
+      "severity": "high",
+      "component": "packages/core/src/engine/mission-engine.ts",
+      "consequence": "A caller could assert passing evidence without executing anything; no executed-vs-reported distinction.",
+      "rootCause": "Sprint 1 accepted caller-supplied evidence only.",
+      "remediation": "Added provenance (executed/reported/simulated), executionId, verificationMode and EVIDENCE_UNVERIFIED.",
+      "acceptanceTest": "Executed-mode mission rejects reported and simulated evidence; accepts executed evidence with executionId.",
+      "status": "CLOSED",
+      "evidence": "packages/core/tests/evidence-integrity.test.ts (10 cases) and mission-engine tests."
+    },
+    {
+      "id": "G-004",
+      "severity": "high",
+      "component": "packages/orchestrator",
+      "consequence": "No timeouts, retries, cancellation, retry budgets, loop detection, or circuit breaking.",
+      "rootCause": "Stub implementation.",
+      "remediation": "Implemented bounded retries, per-task deadlines, cancellation, loop detection and per-adapter circuit breakers.",
+      "acceptanceTest": "Timeout, cancellation, retry exhaustion, loop detection and open-circuit tests produce explicit terminal outcomes.",
+      "status": "CLOSED",
+      "evidence": "Orchestrator failure-injection tests; circuit-breaker.ts."
+    },
+    {
+      "id": "G-005",
+      "severity": "high",
+      "component": "packages/orchestrator",
+      "consequence": "Agent/adapter output was untrusted and unvalidated.",
+      "rootCause": "No task contract.",
+      "remediation": "Adapter results are schema-validated and mapped to INVALID_OUTPUT/INVALID_INPUT.",
+      "acceptanceTest": "Malformed adapter output fails the task and mission without completion.",
+      "status": "CLOSED",
+      "evidence": "Malformed adapter output test in orchestrator.test.ts."
+    },
+    {
+      "id": "G-006",
+      "severity": "medium",
+      "component": "orchestrator",
+      "consequence": "No correlated mission/task progress events.",
+      "rootCause": "No task lifecycle.",
+      "remediation": "Added typed task events with mission correlation, per-mission buffers and secret-free payloads.",
+      "acceptanceTest": "Task lifecycle events are emitted in order for a real execution.",
+      "status": "CLOSED",
+      "evidence": "Event-order, secret-exclusion and concurrent-buffer tests in orchestrator.test.ts."
+    },
+    {
+      "id": "G-007",
+      "severity": "medium",
+      "component": "plugins/opencode-v2/src/governance-log.ts",
+      "consequence": "Durable audit is opt-in and disabled by default; the hash chain is valid but not durable.",
+      "rootCause": "BEHAVIOR_OS_AUDIT_LOG is not configured in this environment.",
+      "remediation": "Kept the opt-in sink and documented the requirement; append/restart/tamper paths are covered by tests.",
+      "acceptanceTest": "Audit-sink tests pass; the final report states durable status truthfully.",
+      "status": "OPEN_DOCUMENTED",
+      "evidence": "packages/core/tests/audit-sink.test.ts; sink remains disabled in this session."
+    },
+    {
+      "id": "G-008",
+      "severity": "medium",
+      "component": "governance host integration",
+      "consequence": "Human approval is not proven to reach a UI; escalation approval is host-specific.",
+      "rootCause": "No approval transport in the core orchestrator.",
+      "remediation": "Escalated orchestrator runs stop as blocked pending a later allowed run; no approval is inferred.",
+      "acceptanceTest": "Escalated governance verdict blocks execution with an explicit approval-required outcome.",
+      "status": "OPEN_EXTERNAL",
+      "evidence": "Orchestrator escalation test; host approval UI not available for verification."
+    },
+    {
+      "id": "G-009",
+      "severity": "medium",
+      "component": "packages/core/src/persistence/postgres-store.ts",
+      "consequence": "Async write-through cannot prove durable rollback; no nested savepoints.",
+      "rootCause": "The Postgres adapter batches async writes and reports errors at flush.",
+      "remediation": "Guarantees remain scoped to synchronous stores; documented.",
+      "acceptanceTest": "Postgres tests document flush behavior; no false atomicity claim.",
+      "status": "OPEN_DOCUMENTED",
+      "evidence": "docs/CLAIMS.md persistence section; postgres-store tests."
+    },
+    {
+      "id": "G-010",
+      "severity": "medium",
+      "component": "plugins/opencode-v2/src/index.ts",
+      "consequence": "Whole-snapshot rollback can erase a concurrent lifecycle transition in the same plugin instance.",
+      "rootCause": "No per-mission mutex; storage writes are serialized but state mutation is not.",
+      "remediation": "Not addressed in S3; keep the documented limitation.",
+      "acceptanceTest": "A concurrent lifecycle failure test would be required before claiming a fix.",
+      "status": "OPEN",
+      "evidence": "Documented in docs/ARCHITECTURE.md mission exposure section."
+    },
+    {
+      "id": "G-011",
+      "severity": "medium",
+      "component": "packages/orchestrator",
+      "consequence": "Task records are not separately persisted; resumption is caller-supplied and relies on mission evidence.",
+      "rootCause": "The task domain is new and the store has no task methods.",
+      "remediation": "Resumption skips gates already backed by executed evidence; the plan remains caller-supplied.",
+      "acceptanceTest": "Resuming an active mission skips tasks whose required gates already have executed evidence.",
+      "status": "CLOSED_WITH_LIMITATION",
+      "evidence": "Resume test in orchestrator.test.ts; limitation documented in ARCHITECTURE.md."
+    },
+    {
+      "id": "G-012",
+      "severity": "high",
+      "component": "OpenCode host session",
+      "consequence": "The long-lived plugin could be stale relative to the built source.",
+      "rootCause": "The host loaded an older build; no explicit hot reload.",
+      "remediation": "Rebuilt the plugin and core packages; the host then observed the new governance helper.",
+      "acceptanceTest": "A call blocked by the old rule succeeds after the rebuild, against the same source.",
+      "status": "CLOSED_OBSERVED",
+      "evidence": "bos_start_mission succeeded in this session; after pnpm build, the previously blocked C4 documentation edit succeeded."
+    },
+    {
+      "id": "G-013",
+      "severity": "medium",
+      "component": "MCP/plugin tool surface",
+      "consequence": "The orchestrator is a library only; MCP and plugin do not expose orchestration.",
+      "rootCause": "Exposing it requires a new workspace dependency and a dependency install, which governance denied.",
+      "remediation": "Deferred; documented as a limitation. No tool count changed (MCP 30 + 2, plugin 32).",
+      "acceptanceTest": "A tool-level orchestration test would be required before claiming exposure.",
+      "status": "OPEN_BLOCKED",
+      "evidence": "pnpm install was denied by license-check before the heuristic was fixed; the mission kept the dependency graph unchanged."
+    },
+    {
+      "id": "G-014",
+      "severity": "medium",
+      "component": "learning engine",
+      "consequence": "No full OBSERVATION→LESSON→CANDIDATE→VALIDATED→POLICY→MONITORED lifecycle; learning records and proposes only.",
+      "rootCause": "The learning engine predates the lifecycle requirement.",
+      "remediation": "Not implemented in S3; documented as an open gap.",
+      "acceptanceTest": "A lifecycle state-machine test with persistence would be required.",
+      "status": "OPEN",
+      "evidence": "packages/core/src/engine/learning-engine.ts (record + confidence proposals only)."
+    },
+    {
+      "id": "G-015",
+      "severity": "high",
+      "component": "plugins/opencode-v2/src/governance.ts",
+      "consequence": "license-check fired on documentation and read-only text that merely quoted an install command, blocking unrelated edits.",
+      "rootCause": "new-dependency was derived from any text without requiring an action able to execute.",
+      "remediation": "Derived command signals are dropped for non-executing actions; explicit metadata signals are preserved.",
+      "acceptanceTest": "An edit whose context quotes the command is allowed; a real bash command is still flagged.",
+      "status": "CLOSED",
+      "evidence": "3 new cases in plugins/opencode-v2/tests/governance.test.ts; the previously blocked C4 edit then succeeded."
+    },
+    {
+      "id": "G-016",
+      "severity": "high",
+      "component": "dependency tree",
+      "consequence": "The real audit security stage fails on 6 advisories: 2 critical (tinypool), 1 high (braces), 3 moderate.",
+      "rootCause": "Pre-existing dev-dependency versions (vitest 3.2.7 / tinypool 1.1.1; changesets -> braces 3.0.3).",
+      "remediation": "Upgrade lockfile dependencies; requires a network install and a separate change.",
+      "acceptanceTest": "pnpm audit --audit-level=high exits 0.",
+      "status": "OPEN_RELEASE_BLOCKER",
+      "evidence": "pnpm audit output recorded in s3-evidence.json; a real audit therefore reports fail."
+    },
+    {
+      "id": "G-017",
+      "severity": "low",
+      "component": "packages/core/src/engine/audit-engine.ts",
+      "consequence": "The real audit lint stage only recognises eslint/oxlint, so it reports skipped although Biome is the project linter.",
+      "rootCause": "The stage predates the Biome migration.",
+      "remediation": "Add Biome detection in a follow-up; Biome is run directly by pnpm lint:check in the ladder.",
+      "acceptanceTest": "A real audit reports the lint stage as passed or failed based on Biome.",
+      "status": "OPEN",
+      "evidence": "Audit engine source lines 72-87; full audit output in s3-evidence.json."
+    }
+  ]
+}

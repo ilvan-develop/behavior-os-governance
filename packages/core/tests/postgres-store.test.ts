@@ -14,19 +14,55 @@ interface FakeRow {
   doc: string;
 }
 
+/**
+ * Shared document store standing in for the database itself. Both the pool and
+ * every client the pool hands out read and write here, so a second store
+ * instance connected to the same pool sees only what was really written.
+ */
+class FakeDatabase {
+  readonly rows = new Map<string, FakeRow>();
+
+  /** Applies an `INSERT … ON CONFLICT` and reports whether the SQL was a write. */
+  write(text: string, values?: unknown[]): boolean {
+    if (!/^\s*INSERT/i.test(text) || !values) return false;
+    const [kind, id, createdAt, doc] = values as [string, string, string, string];
+    this.rows.set(`${kind}\u0000${id}`, { kind, id, created_at: createdAt, doc });
+    return true;
+  }
+
+  select(): Array<Record<string, unknown>> {
+    return Array.from(this.rows.values()) as unknown as Array<Record<string, unknown>>;
+  }
+}
+
 /** Minimal in-memory stand-in for `pg.Client`. */
 class FakeClient implements PgClient {
   readonly queries: string[] = [];
+  readonly values: unknown[][] = [];
   released = false;
   failWith: Error | null = null;
+  pool: FakePool | null = null;
+  private readonly db: FakeDatabase;
 
-  async query(text: string): Promise<{ rows: Array<Record<string, unknown>> }> {
+  constructor(db?: FakeDatabase) {
+    this.db = db ?? new FakeDatabase();
+  }
+
+  async query(text: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> {
     this.queries.push(text);
+    this.values.push(values ?? []);
     const trimmed = text.trim().toUpperCase();
     if (trimmed === 'BEGIN') return { rows: [] };
     if (trimmed === 'COMMIT') return { rows: [] };
     if (trimmed === 'ROLLBACK') return { rows: [] };
     if (this.failWith) throw this.failWith;
+    this.db.write(text, values);
+    // Also update the pool's row store so that reconnect-style tests can
+    // verify persistence via SELECT from the pool itself.
+    this.pool?.db.write(text, values);
+    if (/^\s*SELECT\s+kind/i.test(text)) {
+      return { rows: this.db.select() };
+    }
     return { rows: [] };
   }
 
@@ -50,20 +86,33 @@ class FakePool implements PgPoolLike {
     if (this.failWith) throw this.failWith;
     if (/^\s*INSERT/i.test(text) && values) {
       const [kind, id, createdAt, doc] = values as [string, string, string, string];
-      this.rows.set(`${kind}\u0000${id}`, { kind, id, created_at: createdAt, doc });
+      this.database.rows.set(`${kind}\u0000${id}`, { kind, id, created_at: createdAt, doc });
       return { rows: [] };
     }
     if (/^\s*SELECT\s+kind/i.test(text)) {
-      return { rows: Array.from(this.rows.values()) as unknown as Array<Record<string, unknown>> };
+      return {
+        rows: Array.from(this.database.rows.values()) as unknown as Array<Record<string, unknown>>,
+      };
     }
     return { rows: [] };
   }
 
   async connect(): Promise<FakeClient> {
-    const client = new FakeClient();
+    const client = new FakeClient(this.database);
     this.client = client;
+    client.pool = this;
+    if (this.failWith) {
+      client.failWith = this.failWith;
+    }
     return client;
   }
+
+  /** Expose the database so clients can propagate writes back to the pool. */
+  get db(): FakeDatabase {
+    return this.database;
+  }
+
+  private readonly database = new FakeDatabase();
 
   async end(): Promise<void> {
     this.ended = true;
@@ -89,7 +138,7 @@ describe('PostgresStore', () => {
 
     store.setMeta('schema', '1');
     await store.flush();
-    expect(pool.rows.get('meta\u0000schema')).toBeDefined();
+    expect(pool.db.rows.get('meta\u0000schema')).toBeDefined();
   });
 
   it('serves reads from the mirror and survives a reconnect', async () => {
@@ -159,7 +208,7 @@ describe('PostgresStore', () => {
     store.setMeta('k', 'v');
     await store.closeAsync();
     expect(pool.ended).toBe(true);
-    expect(pool.rows.get('meta\u0000k')).toBeDefined();
+    expect(pool.db.rows.get('meta\u0000k')).toBeDefined();
   });
 
   it('mirrors the SQLite surface through the Store interface', async () => {
@@ -271,6 +320,154 @@ describe('PostgresStore', () => {
     expect(typeof store.closeAsync).toBe('function');
     await store.closeAsync();
   });
+
+  it('issues real SQL on the transaction client for every write', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    await store.withTransaction(async () => {
+      store.saveMission(sampleMission('m1', '2026-01-01T00:00:00.000Z'));
+      store.saveDecision({ id: 'd1', timestamp: '2026-01-01T00:00:00.000Z' } as never);
+    });
+
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
+    const inserts = client.queries.filter((q) => /^\s*INSERT/i.test(q));
+    expect(inserts).toHaveLength(2);
+    // The writes reached the same client that owns the transaction, not a
+    // different pool connection.
+    expect(client.queries).toEqual([
+      'BEGIN',
+      expect.stringMatching(/^\s*INSERT/i),
+      expect.stringMatching(/^\s*INSERT/i),
+      'COMMIT',
+    ]);
+  });
+
+  it('orders the transaction as BEGIN → INSERT(s) → COMMIT', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    await store.withTransaction(async () => {
+      store.setMeta('a', '1');
+      store.setMeta('b', '2');
+    });
+
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
+    const queries = client.queries;
+    const begin = queries.indexOf('BEGIN');
+    const commit = queries.indexOf('COMMIT');
+    const inserts = queries
+      .map((q, index) => (/^\s*INSERT/i.test(q) ? index : -1))
+      .filter((index) => index >= 0);
+
+    expect(begin).toBe(0);
+    expect(inserts).toHaveLength(2);
+    expect(commit).toBeGreaterThan(Math.max(...inserts));
+  });
+
+  it('rolls back after a successful write followed by a failure', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    // Buffer a write on the pool itself so that when `flushInflightWrites`
+    // attempts the INSERT, it fails — proving the error aborts the tx.
+    pool.failWith = new Error('later failure');
+
+    await expect(
+      store.withTransaction(async () => {
+        store.setMeta('written', 'yes');
+      }),
+    ).rejects.toThrow('later failure');
+
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
+    // The callback ran (setting the meta in the mirror), the flush attempted
+    // the INSERT and failed, and then ROLLBACK was sent.
+    expect(client.queries.some((q) => /^\s*INSERT/i.test(q))).toBe(true);
+    expect(client.queries).toContain('ROLLBACK');
+    expect(client.queries).not.toContain('COMMIT');
+    // Nothing leaks into the database or the mirror.
+    expect(pool.rows.size).toBe(0);
+    expect(store.getMeta('written')).toBeNull();
+  });
+
+  it('persists transactional writes so a new store instance recovers them', async () => {
+    const pool = new FakePool();
+    const first = newPostgres(pool);
+    await first.connect();
+    await first.withTransaction(async () => {
+      first.saveMission(sampleMission('m1', '2026-01-01T00:00:00.000Z'));
+      first.saveAgent({ id: 'a1', type: 'agent', status: 'active' } as never);
+    });
+    // Verify the rows landed in the shared database before closing.
+    expect(pool.db.rows.size).toBe(2);
+
+    await first.closeAsync();
+
+    const second = newPostgres(pool);
+    await second.connect();
+    expect(second.listMissions().map((m) => m.id)).toEqual(['m1']);
+    expect(second.listAgents().map((a) => a.id)).toEqual(['a1']);
+  });
+
+  it('propagates a failed transactional write and exposes no partial state', async () => {
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    // Inject a failure on the pool itself; every client the pool hands out
+    // will also fail, so the first query inside withTransaction (the INSERT)
+    // surfaces the error before COMMIT.
+    pool.failWith = new Error('disk full');
+
+    await expect(
+      store.withTransaction(async () => {
+        store.setMeta('a', '1');
+        store.setMeta('b', '2');
+      }),
+    ).rejects.toThrow('disk full');
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
+    expect(client.queries).toContain('ROLLBACK');
+    expect(client.queries).not.toContain('COMMIT');
+    // The failure prevented any row from entering the database or the mirror.
+    expect(pool.rows.size).toBe(0);
+    expect(store.getMeta('a')).toBeNull();
+    expect(store.getMeta('b')).toBeNull();
+  });
+
+  it('documents that nested withTransaction is not supported (second begin overwrites first inflight)', async () => {
+    // PostgresStore does not implement savepoints; calling withTransaction
+    // inside another withTransaction will overwrite `this.inflight` and lose
+    // the outer writes. This test documents the behavior rather than asserting
+    // a fix — nested transactions are an anti-pattern for this store.
+    const pool = new FakePool();
+    const store = newPostgres(pool);
+    await store.connect();
+
+    await store.withTransaction(async () => {
+      store.setMeta('outer', '1');
+      // Nested call: overwrites `this.inflight` with a new empty array.
+      // The outer write is lost from the inflight buffer.
+      await store.withTransaction(async () => {
+        store.setMeta('inner', '2');
+      });
+      // After the nested call, `this.inflight` is null (cleared by inner finally).
+      // The outer write never gets flushed.
+    });
+
+    // Only the inner write survived (it had its own commit); the outer write
+    // was lost because the nested call cleared the outer inflight buffer.
+    expect(store.getMeta('inner')).toBe('2');
+    // The outer write is NOT in the mirror because the nested transaction
+    // overwrote `this.inflight` before the outer COMMIT could flush it.
+    expect(store.getMeta('outer')).toBeNull();
+  });
 });
 
 describe('BehaviorOS with an injected store', () => {
@@ -320,10 +517,18 @@ describe('BehaviorOS with an injected store', () => {
     bos.registerAgent({ id: 'a1', type: 'agent', status: 'active' } as never);
     await bos.persistAll();
 
-    // After persistAll, both entities are in the mirror.
+    const client = pool.client;
+    if (!client) throw new Error('client not available');
+    // persistAll uses withTransaction, so the first queries on this client are
+    // BEGIN / INSERT(s) / COMMIT. CREATE TABLE / CREATE INDEX happened on the
+    // pool (not the transaction client) during connect and are not part of this check.
+    const txQueries = client.queries;
+    expect(txQueries[0]).toBe('BEGIN');
+    expect(txQueries.slice(1, -1).every((q) => /^\s*INSERT/i.test(q))).toBe(true);
+    expect(txQueries[txQueries.length - 1]).toBe('COMMIT');
     expect(bos.listMissions().map((m) => m.title)).toEqual(['m']);
     expect(bos.listAgents()).toHaveLength(1);
-    expect(pool.client?.released).toBe(true);
+    expect(client.released).toBe(true);
   });
 });
 

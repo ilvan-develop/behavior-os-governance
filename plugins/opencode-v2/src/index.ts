@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { BehaviorOS, type BehaviorOSSnapshot, PROTOCOL_STEPS } from '@behavior-os/core';
-import type { DNA, ProtocolStep } from '@behavior-os/schemas';
+import type { DNA, LearningStage, ProtocolStep } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
@@ -69,8 +69,12 @@ function toStorageJson(value: unknown): StorageJson {
 }
 
 /**
- * Persist the current engine snapshot so state survives a restart. Best-effort:
- * a missing or failing storage domain must never break a tool call.
+ * Persist the current engine snapshot so state survives a restart.
+ *
+ * Observability writes are best-effort, but lifecycle transitions pass
+ * `strict: true`: a completion/failure/cancellation that durable storage did
+ * not accept is reported as `PERSISTENCE_FAILED` and rolled back, never as a
+ * success. A host without `ctx.storage` therefore cannot complete missions.
  *
  * Writes are serialized per instance (single-flight): the storage API is a
  * plain get/set, so two tool calls persisting at once must not interleave a
@@ -82,16 +86,58 @@ function toStorageJson(value: unknown): StorageJson {
  */
 let persistQueue: Promise<void> = Promise.resolve();
 
-async function persistState(ctx: Context): Promise<void> {
-  const run = persistQueue.then(() => persistStateOnce(ctx));
-  persistQueue = run.catch(() => {});
+/**
+ * Serialize lifecycle state mutation, not just the storage writes.
+ *
+ * A lifecycle transition captures a whole snapshot, mutates in memory, persists
+ * and — if persistence fails — restores the captured snapshot. `persistQueue`
+ * serializes the writes, but two transitions can still interleave at the
+ * `await` boundary: the failing one would then restore a snapshot taken before
+ * the other's mutation and silently erase it (G-010). This queue holds the
+ * whole capture -> mutate -> persist -> rollback window, so transitions are
+ * atomic per plugin instance.
+ *
+ * The queue never rejects: a failed task resolves the chain so later
+ * transitions still run, while the rejection is delivered to its own caller.
+ */
+let lifecycleQueue: Promise<void> = Promise.resolve();
+
+function withLifecycleLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = lifecycleQueue.then(task);
+  lifecycleQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
   return run;
 }
 
+interface PersistOutcome {
+  ok: boolean;
+  error?: string;
+}
+
+async function persistState(
+  ctx: Context,
+  options: { strict?: boolean } = {},
+): Promise<PersistOutcome> {
+  const run = persistQueue.then(() => persistStateOnce(ctx, options.strict === true));
+  persistQueue = run.catch(() => {});
+  try {
+    await run;
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: describeError(error) };
+  }
+}
+
 /** One serialized persist round: plan -> adopt/merge -> write -> verify. */
-async function persistStateOnce(ctx: Context): Promise<void> {
+async function persistStateOnce(ctx: Context, strict = false): Promise<void> {
   const storage: Context['storage'] | undefined = ctx.storage;
-  if (!storage || typeof storage.set !== 'function' || !behaviorOS) return;
+  if (!storage || typeof storage.set !== 'function' || !behaviorOS) {
+    if (strict) throw new Error('storage unavailable');
+    return;
+  }
+  const revisionBefore = storageRevision;
   try {
     await writeSnapshot(storage);
     // Post-write verification: a plain get/set backend has no CAS, so a
@@ -127,8 +173,31 @@ async function persistStateOnce(ctx: Context): Promise<void> {
       }
     }
   } catch (error) {
+    if (strict) {
+      // `writeSnapshot` advances storageRevision before awaiting storage.set.
+      // If the write fails, the next persist must re-adopt and re-merge the
+      // foreign snapshot instead of skipping it as already observed.
+      storageRevision = revisionBefore;
+      throw error;
+    }
     console.warn(`[Behavior-OS] State persist failed: ${describeError(error)}`);
   }
+}
+
+/**
+ * Persist a lifecycle transition or restore the pre-transition snapshot.
+ * Lifecycle tools must never report success for a state durable storage did
+ * not accept; best-effort persistence is only acceptable for non-lifecycle
+ * observability writes.
+ */
+async function persistLifecycleChange(
+  ctx: Context,
+  before: BehaviorOSSnapshot,
+): Promise<PersistOutcome> {
+  const outcome = await persistState(ctx, { strict: true });
+  if (outcome.ok) return outcome;
+  getBehaviorOS().importState(before);
+  return outcome;
 }
 
 /** Read -> adopt/merge if a newer foreign snapshot exists -> write the stamp. */
@@ -403,6 +472,25 @@ export default Plugin.define({
         add: (tool: PluginToolInfo) => editor.add({ ...tool, options: { codemode: false } }),
       };
 
+      /**
+       * Register a lifecycle tool. Its whole capture -> mutate -> persist ->
+       * rollback window runs under the lifecycle lock, so a failing transition
+       * can never roll back a concurrent transition's committed mutation.
+       */
+      const addLifecycle = (tool: PluginToolInfo): void => {
+        const execute = tool.execute as
+          | ((input: unknown) => Promise<{ content: string }>)
+          | undefined;
+        if (!execute) {
+          tools.add(tool);
+          return;
+        }
+        tools.add({
+          ...tool,
+          execute: (input: unknown) => withLifecycleLock(() => execute(input)),
+        });
+      };
+
       // Tool 1: bos_evaluate_governance
       tools.add({
         name: 'bos_evaluate_governance',
@@ -515,7 +603,7 @@ export default Plugin.define({
       });
 
       // Tool 4: bos_create_mission
-      tools.add({
+      addLifecycle({
         name: 'bos_create_mission',
         description: 'Create a new mission in Behavior-OS',
         input: {
@@ -535,11 +623,22 @@ export default Plugin.define({
               ],
             },
             priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+            requiredChecks: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Gates that must each have passing evidence before completion',
+            },
           },
           required: ['title', 'type', 'priority'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { title: string; type: string; priority: string };
+          const params = input as {
+            title: string;
+            type: string;
+            priority: string;
+            requiredChecks?: string[];
+          };
+          const before = bos.exportState();
           const mission = bos.createMission({
             title: params.title,
             type: params.type as
@@ -551,8 +650,14 @@ export default Plugin.define({
               | 'audit'
               | 'incident',
             priority: params.priority as 'critical' | 'high' | 'medium' | 'low',
+            requiredChecks: params.requiredChecks,
           });
-          await persistState(ctx);
+          const persisted = await persistLifecycleChange(ctx, before);
+          if (!persisted.ok) {
+            return {
+              content: `Mission creation failed [PERSISTENCE_FAILED]: ${persisted.error ?? 'unknown storage error'}`,
+            };
+          }
           recordLog('mission', 'info', 'bos_create_mission', `Created mission ${mission.id}`);
           return {
             content: `Mission created: ${mission.id}`,
@@ -561,25 +666,47 @@ export default Plugin.define({
       });
 
       // Tool 5: bos_start_mission
-      tools.add({
+      addLifecycle({
         name: 'bos_start_mission',
         description: 'Start a mission by ID',
         input: {
           type: 'object',
           properties: {
             missionId: { type: 'string' },
+            expectedVersion: { type: 'number' },
+            actor: { type: 'string' },
           },
           required: ['missionId'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { missionId: string };
-          const mission = bos.startMission(params.missionId);
-          if (!mission) {
+          const params = input as {
+            missionId: string;
+            expectedVersion?: number;
+            actor?: string;
+          };
+          const before = bos.exportState();
+          const result = bos.transitionMission(params.missionId, 'active', {
+            expectedVersion: params.expectedVersion,
+            actor: params.actor,
+          });
+          if (!result.ok) {
             return {
-              content: `Mission "${params.missionId}" not found`,
+              content: `Mission transition refused [${result.code}]: ${result.message}`,
             };
           }
-          await persistState(ctx);
+          if (result.changed) {
+            bos.advanceProtocolStep('bos_start_mission');
+          }
+          // A replay to the current state is already durable: do not turn a
+          // storage outage into a false failure for a no-op.
+          const persisted = result.changed
+            ? await persistLifecycleChange(ctx, before)
+            : { ok: true };
+          if (!persisted.ok) {
+            return {
+              content: `Mission transition failed [PERSISTENCE_FAILED]: ${persisted.error ?? 'unknown storage error'}`,
+            };
+          }
           recordLog(
             'mission',
             'info',
@@ -587,7 +714,294 @@ export default Plugin.define({
             `Started mission "${params.missionId}"`,
           );
           return {
-            content: `Mission "${params.missionId}" started. Status: ${mission.status}`,
+            content: `Mission "${params.missionId}" started. Status: ${result.mission.status}`,
+          };
+        },
+      });
+
+      // Tool 5a: bos_complete_mission
+      addLifecycle({
+        name: 'bos_complete_mission',
+        description:
+          'Complete a mission only when every required check has passing, non-simulated evidence. Refuses invalid transitions, stale versions and missing/failed evidence.',
+        input: {
+          type: 'object',
+          properties: {
+            missionId: { type: 'string' },
+            evidence: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  gate: { type: 'string' },
+                  status: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+                  source: { type: 'string' },
+                  detail: { type: 'string' },
+                  simulated: { type: 'boolean' },
+                  provenance: {
+                    type: 'string',
+                    enum: ['executed', 'reported', 'simulated'],
+                    description: 'How the evidence was produced; executed requires executionId',
+                  },
+                  executionId: {
+                    type: 'string',
+                    description: 'Unique id of the execution that produced executed evidence',
+                  },
+                },
+                required: ['gate', 'status', 'source'],
+              },
+            },
+            expectedVersion: { type: 'number' },
+            actor: { type: 'string' },
+          },
+          required: ['missionId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            missionId: string;
+            evidence?: Array<{
+              gate: string;
+              status: 'passed' | 'failed' | 'skipped';
+              source: string;
+              detail?: string;
+              simulated?: boolean;
+              provenance?: 'executed' | 'reported' | 'simulated';
+              executionId?: string;
+            }>;
+            expectedVersion?: number;
+            actor?: string;
+          };
+          const before = bos.exportState();
+          const result = bos.transitionMission(params.missionId, 'completed', {
+            evidence: params.evidence,
+            expectedVersion: params.expectedVersion,
+            actor: params.actor,
+          });
+          if (!result.ok) {
+            recordLog(
+              'mission',
+              'warn',
+              'bos_complete_mission',
+              `Refused [${result.code}]: ${result.message}`,
+            );
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId: params.missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          const persisted = result.changed
+            ? await persistLifecycleChange(ctx, before)
+            : { ok: true };
+          if (!persisted.ok) {
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: 'PERSISTENCE_FAILED',
+                  message: `Completion was not persisted: ${persisted.error ?? 'unknown storage error'}`,
+                  missionId: params.missionId,
+                  status: bos.getMission(params.missionId)?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          recordLog(
+            'mission',
+            'info',
+            'bos_complete_mission',
+            `Completed mission "${params.missionId}" (basis: ${result.mission.completionBasis})`,
+          );
+          return {
+            content: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId: params.missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                completionBasis: result.mission.completionBasis ?? null,
+                evidenceVerified: result.mission.completionBasis === 'evidence',
+              },
+              null,
+              2,
+            ),
+          };
+        },
+      });
+
+      // Tool 5b: bos_fail_mission
+      addLifecycle({
+        name: 'bos_fail_mission',
+        description: 'Mark a mission as failed with an explicit reason and audit trail.',
+        input: {
+          type: 'object',
+          properties: {
+            missionId: { type: 'string' },
+            reason: { type: 'string' },
+            expectedVersion: { type: 'number' },
+            actor: { type: 'string' },
+          },
+          required: ['missionId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            missionId: string;
+            reason?: string;
+            expectedVersion?: number;
+            actor?: string;
+          };
+          const before = bos.exportState();
+          const result = bos.transitionMission(params.missionId, 'failed', {
+            reason: params.reason,
+            expectedVersion: params.expectedVersion,
+            actor: params.actor,
+          });
+          if (!result.ok) {
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId: params.missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          const persisted = result.changed
+            ? await persistLifecycleChange(ctx, before)
+            : { ok: true };
+          if (!persisted.ok) {
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: 'PERSISTENCE_FAILED',
+                  message: `Failure was not persisted: ${persisted.error ?? 'unknown storage error'}`,
+                  missionId: params.missionId,
+                  status: bos.getMission(params.missionId)?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          recordLog(
+            'mission',
+            'info',
+            'bos_fail_mission',
+            `Failed mission "${params.missionId}": ${params.reason ?? 'no reason'}`,
+          );
+          return {
+            content: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId: params.missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                reason: result.mission.lastTransitionReason ?? null,
+              },
+              null,
+              2,
+            ),
+          };
+        },
+      });
+
+      // Tool 5c: bos_cancel_mission
+      addLifecycle({
+        name: 'bos_cancel_mission',
+        description: 'Cancel a mission that will not be completed, recording the reason.',
+        input: {
+          type: 'object',
+          properties: {
+            missionId: { type: 'string' },
+            reason: { type: 'string' },
+            expectedVersion: { type: 'number' },
+            actor: { type: 'string' },
+          },
+          required: ['missionId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            missionId: string;
+            reason?: string;
+            expectedVersion?: number;
+            actor?: string;
+          };
+          const before = bos.exportState();
+          const result = bos.transitionMission(params.missionId, 'cancelled', {
+            reason: params.reason,
+            expectedVersion: params.expectedVersion,
+            actor: params.actor,
+          });
+          if (!result.ok) {
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: result.code,
+                  message: result.message,
+                  missionId: params.missionId,
+                  status: result.mission?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          const persisted = result.changed
+            ? await persistLifecycleChange(ctx, before)
+            : { ok: true };
+          if (!persisted.ok) {
+            return {
+              content: JSON.stringify(
+                {
+                  ok: false,
+                  code: 'PERSISTENCE_FAILED',
+                  message: `Cancellation was not persisted: ${persisted.error ?? 'unknown storage error'}`,
+                  missionId: params.missionId,
+                  status: bos.getMission(params.missionId)?.status ?? null,
+                },
+                null,
+                2,
+              ),
+            };
+          }
+          recordLog(
+            'mission',
+            'info',
+            'bos_cancel_mission',
+            `Cancelled mission "${params.missionId}": ${params.reason ?? 'no reason'}`,
+          );
+          return {
+            content: JSON.stringify(
+              {
+                ok: true,
+                changed: result.changed,
+                missionId: params.missionId,
+                status: result.mission.status,
+                version: result.mission.version ?? 0,
+                reason: result.mission.lastTransitionReason ?? null,
+              },
+              null,
+              2,
+            ),
           };
         },
       });
@@ -612,7 +1026,14 @@ export default Plugin.define({
             priority?: string;
             limit?: number;
           };
-          const missions = bos.listMissions(params.limit ?? 50);
+          // Apply the advertised filters before the limit, matching the MCP
+          // tool. The engine itself only supports a limit.
+          const missions = bos
+            .listMissions(1000)
+            .filter((mission) => !params.status || mission.status === params.status)
+            .filter((mission) => !params.type || mission.type === params.type)
+            .filter((mission) => !params.priority || mission.priority === params.priority)
+            .slice(0, params.limit ?? 50);
           return {
             content: JSON.stringify(missions, null, 2),
           };
@@ -630,25 +1051,39 @@ export default Plugin.define({
             missionId: { type: 'string' },
             agentId: { type: 'string' },
             stages: { type: 'array', items: { type: 'string' } },
+            simulate: {
+              type: 'boolean',
+              description:
+                'true (default) runs a simulated audit and never reports a pass; false executes the real checks',
+            },
           },
           required: ['missionId'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { missionId: string; agentId?: string; stages?: string[] };
+          const params = input as {
+            missionId: string;
+            agentId?: string;
+            stages?: string[];
+            simulate?: boolean;
+          };
           const report = bos.runAudit({
             missionId: params.missionId,
             agentId: params.agentId,
             stages: params.stages,
+            simulate: params.simulate,
           });
           await persistState(ctx);
+          const label = report.simulated
+            ? 'SIMULATED audit — no verification executed'
+            : 'Audit complete';
           recordLog(
             'tool',
             'info',
             'bos_run_audit',
-            `Audit complete: ${report.overall} by ${report.agentId}`,
+            `${label}: ${report.overall} by ${report.agentId}`,
           );
           return {
-            content: `Audit complete: ${report.overall} (agent: ${report.agentId}, dna: ${report.dnaPattern ?? 'none'})`,
+            content: `${label}: ${report.overall} (agent: ${report.agentId}, dna: ${report.dnaPattern ?? 'none'})`,
           };
         },
       });
@@ -762,7 +1197,8 @@ export default Plugin.define({
       // Tool 10: bos_record_learning
       tools.add({
         name: 'bos_record_learning',
-        description: 'Record a learning event',
+        description:
+          'Record a learning event, or promote an existing learning record one lifecycle stage (observation → lesson → candidate → validated → policy → monitored). Promotion to validated requires evidence.',
         input: {
           type: 'object',
           properties: {
@@ -774,8 +1210,22 @@ export default Plugin.define({
             content: { type: 'string' },
             impact: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
             relatedMission: { type: 'string' },
+            learningId: {
+              type: 'string',
+              description: 'Existing learning record to promote (instead of recording a new event)',
+            },
+            stage: {
+              type: 'string',
+              enum: ['observation', 'lesson', 'candidate', 'validated', 'policy', 'monitored'],
+              description: 'Target stage; must be exactly one step after the current stage',
+            },
+            evidence: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Evidence for the promotion; required to reach validated',
+            },
+            reason: { type: 'string' },
           },
-          required: ['type', 'source', 'content', 'impact'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
@@ -784,7 +1234,80 @@ export default Plugin.define({
             content: string;
             impact: string;
             relatedMission?: string;
+            learningId?: string;
+            stage?: string;
+            evidence?: string[];
+            reason?: string;
           };
+
+          // Promotion path: move an existing record exactly one stage forward.
+          if (params.learningId) {
+            if (!params.stage) {
+              return {
+                content:
+                  'Learning promotion refused [INVALID_INPUT]: provide the target `stage` for `learningId`.',
+              };
+            }
+            return withLifecycleLock(async () => {
+              if (typeof bos.advanceLearningRecord !== 'function') {
+                return {
+                  content:
+                    'Learning promotion unavailable [STALE_HOST]: this session loaded an older @behavior-os/core. Restart the session after building to load the lifecycle API.',
+                };
+              }
+              const before = bos.exportState();
+              const advanced = bos.advanceLearningRecord(
+                params.learningId as string,
+                params.stage as LearningStage,
+                {
+                  actor: bos.resolveAgentIdentity().agentId,
+                  ...(params.reason ? { reason: params.reason } : {}),
+                  ...(params.evidence ? { evidence: params.evidence } : {}),
+                },
+              );
+              if (!advanced.ok) {
+                return {
+                  content: `Learning promotion refused [${advanced.code}]: ${advanced.message}`,
+                };
+              }
+              const persisted = await persistLifecycleChange(ctx, before);
+              if (!persisted.ok) {
+                return {
+                  content: `Learning promotion failed [PERSISTENCE_FAILED]: ${persisted.error ?? 'unknown storage error'}`,
+                };
+              }
+              recordLog(
+                'learning',
+                'info',
+                'bos_record_learning',
+                `Advanced learning ${advanced.record.id} to ${advanced.record.stage}`,
+              );
+              return {
+                content: `Learning advanced: ${advanced.record.id} -> ${advanced.record.stage}`,
+              };
+            });
+          }
+
+          const missing = (['type', 'source', 'content', 'impact'] as const).filter(
+            (field) => !params[field],
+          );
+          if (missing.length > 0) {
+            return {
+              content: `Learning not recorded [INVALID_INPUT]: missing ${missing.join(', ')} (required when no learningId is given).`,
+            };
+          }
+
+          const record =
+            typeof bos.createLearningRecord === 'function'
+              ? bos.createLearningRecord({
+                  title: params.content.slice(0, 80),
+                  content: params.content,
+                  source: params.source,
+                  impact: params.impact as 'low' | 'medium' | 'high' | 'critical',
+                  ...(params.relatedMission ? { relatedMission: params.relatedMission } : {}),
+                  ...(params.evidence ? { evidence: params.evidence } : {}),
+                })
+              : null;
           const event = bos.recordLearning({
             type: params.type as 'insight' | 'pattern' | 'fix' | 'failure' | 'optimization',
             source: params.source,
@@ -794,7 +1317,9 @@ export default Plugin.define({
           });
           await persistState(ctx);
           return {
-            content: `Learning recorded: ${event.id}`,
+            content: record
+              ? `Learning recorded: ${event.id} (record ${record.id} at observation; promote it with learningId + stage)`
+              : `Learning recorded: ${event.id} (lifecycle record unavailable [STALE_HOST]: restart the session to load the rebuilt core)`,
           };
         },
       });

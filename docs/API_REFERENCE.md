@@ -44,11 +44,15 @@ class BehaviorOS {
   // Missions
   createMission(options: {
     title: string; type: string; priority: string;
-    dnaPattern?: string; createdBy?: string; advanceProtocol?: boolean;
+    dnaPattern?: string; createdBy?: string; requiredChecks?: string[]; advanceProtocol?: boolean;
   }): Mission;
   startMission(missionId: string, options?: { advanceProtocol?: boolean }): Mission | null;
-  completeMission(missionId: string): Mission | null;
-  failMission(missionId: string, reason?: string): Mission | null;
+  completeMission(missionId: string, options?: MissionTransitionOptions): Mission | null;
+  failMission(missionId: string, reason?: string, options?: Omit<MissionTransitionOptions, 'reason'>): Mission | null;
+  transitionMission(missionId: string, to: MissionStatus, options?: MissionTransitionOptions): MissionTransitionResult;
+  pauseMission(missionId: string, options?: MissionTransitionOptions): MissionTransitionResult;
+  resumeMission(missionId: string, options?: MissionTransitionOptions): MissionTransitionResult;
+  cancelMission(missionId: string, options?: MissionTransitionOptions): MissionTransitionResult;
   listMissions(limit?: number): Mission[];   // default 50
   getMission(missionId: string): Mission | null;
 
@@ -166,8 +170,14 @@ class BehaviorOSSDK {
 
   createMission(options: {
     title: string; type: string; priority: string; dnaPattern?: string;
+    requiredChecks?: string[];
   }): Mission;
-  startMission(missionId: string): Mission | null;
+  startMission(missionId: string, options?: { advanceProtocol?: boolean }): Mission | null;
+  transitionMission(
+    missionId: string,
+    to: MissionStatus,
+    options?: MissionTransitionOptions,
+  ): MissionTransitionResult;
 
   recordLearning(options: {
     type: string; source: string; content: string; impact: string; relatedMission?: string;
@@ -181,13 +191,14 @@ class BehaviorOSSDK {
 
 ## MCP tools
 
-The MCP server exposes **27 tools** and 2 resources; the OpenCode plugin adds
-`bos_get_log` and `bos_verify_audit_trail` (29). The full argument list is in
+The MCP server exposes **30 tools** and 2 resources; the OpenCode plugin adds
+`bos_get_log` and `bos_verify_audit_trail` (32). The full argument list is in
 [`COMMANDS.md`](./COMMANDS.md).
 
 Tool names used in earlier drafts of this document that **do not exist**:
-`bos_get_dna_pattern`, `bos_list_dna_patterns`, `bos_complete_mission`,
-`bos_fail_mission`, `bos_get_mission`, `bos_get_audit_report`,
-`bos_get_patterns`, `bos_display_dna`, `bos_validate_dna`, `bos_resolve_truth`.
-Completing or failing a mission is an engine/SDK call (`completeMission`,
-`failMission`), not a tool.
+`bos_get_dna_pattern`, `bos_list_dna_patterns`, `bos_get_mission`,
+`bos_get_audit_report`, `bos_get_patterns`, `bos_display_dna`,
+`bos_validate_dna`, `bos_resolve_truth`. Mission lifecycle is exposed through
+`bos_complete_mission`, `bos_fail_mission` and `bos_cancel_mission`; pause and
+resume are `BehaviorOS` methods (`pauseMission`, `resumeMission`) and are not
+tools in S1.

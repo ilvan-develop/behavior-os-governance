@@ -1,4 +1,24 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md"]
+  "instructions": ["docs/PROTOCOL.md", "docs/ARCHITECTURE.md", "docs/OPENCODE_V2.md"],
+  "formatter": true,
+  "watcher": {
+    "ignore": ["dist/**", "coverage/**", "node_modules/**", ".turbo/**", "docs/api/**"]
+  },
+  "permissions": [
+    { "action": "shell", "resource": "*", "effect": "ask" },
+    { "action": "shell", "resource": "pnpm typecheck", "effect": "allow" },
+    { "action": "shell", "resource": "pnpm test", "effect": "allow" },
+    { "action": "shell", "resource": "pnpm build", "effect": "allow" },
+    { "action": "shell", "resource": "pnpm verify:*", "effect": "allow" },
+    { "action": "shell", "resource": "pnpm smoke:*", "effect": "allow" },
+    { "action": "shell", "resource": "git push *", "effect": "deny" },
+    { "action": "shell", "resource": "pnpm publish *", "effect": "deny" },
+    { "action": "shell", "resource": "npm publish *", "effect": "deny" },
+    { "action": "read", "resource": "*.env", "effect": "deny" },
+    { "action": "read", "resource": "*.env.*", "effect": "deny" },
+    { "action": "read", "resource": "*.env.example", "effect": "allow" },
+    { "action": "external_directory", "resource": "*", "effect": "ask" },
+    { "action": "webfetch", "resource": "*", "effect": "ask" }
+  ]
 }
