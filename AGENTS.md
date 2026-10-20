@@ -19,7 +19,7 @@ packages/core/         11 engines + BehaviorOS facade + persistence
 packages/sdk/          TypeScript SDK
 packages/cli/          CLI (init, validate, status, simulate, deploy, ...)
 packages/mcp-server/   MCP server: 30 tools + 2 resources (stdio)
-packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker (17 tests)
+packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (53 tests)
 plugins/opencode-v2/   OpenCode V2 plugin: 32 bos_* tools + hooks
 dnas/                  21 DNA pattern YAML files
 docs/                  Documentation; docs/CLAIMS.md is the source of truth

@@ -434,7 +434,8 @@ describe('AutonomousOrchestrator idempotency and resumption', () => {
         status: 'passed',
         source: 'prior run',
         provenance: 'executed',
-        executionId: 'exec-a',
+        executionId: 'a:1:exec-a',
+        taskId: 'a',
       },
     ]);
     expect(prior.ok).toBe(true);
@@ -492,6 +493,81 @@ describe('AutonomousOrchestrator idempotency and resumption', () => {
           event.type === 'task.completed' && event.taskId === 'a' && event.data.skipped === true,
       ),
     ).toBe(true);
+  });
+
+  it('does not reuse another task evidence when two tasks share a gate name', async () => {
+    const behaviorOS = new BehaviorOS();
+    await behaviorOS.loadDNA(TEST_DNA);
+    const mission: Mission = behaviorOS.createMission({
+      title: 'Duplicate gate mission',
+      type: 'feature',
+      priority: 'high',
+      dnaPattern: TEST_DNA.name,
+      createdBy: 'agent-1',
+      requiredChecks: ['shared-gate'],
+      verificationMode: 'executed',
+      advanceProtocol: false,
+    });
+    expect(behaviorOS.transitionMission(mission.id, 'active').ok).toBe(true);
+    expect(
+      behaviorOS.addMissionEvidence(mission.id, [
+        {
+          gate: 'shared-gate',
+          status: 'passed',
+          source: 'task a prior run',
+          provenance: 'executed',
+          executionId: 'a:1:prior',
+        },
+      ]).ok,
+    ).toBe(true);
+
+    const orchestrator = new AutonomousOrchestrator({ behaviorOS, dna: TEST_DNA, dnasDir });
+    orchestrator.registerAgent({
+      id: 'agent-1',
+      dnaPattern: TEST_DNA.name,
+      capabilities: ['execute'],
+      authority: 'admin',
+    });
+    let calls = 0;
+    orchestrator.registerAdapter({
+      name: 'counted',
+      async execute() {
+        calls += 1;
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const sharedAcceptance = [
+      {
+        gate: 'shared-gate',
+        description: 'shared gate name',
+        type: 'exit-code' as const,
+        expected: '0',
+      },
+    ];
+    const result = await orchestrator.executeMission(
+      basePlan([
+        nodeTask({
+          id: 'a',
+          adapter: 'never-registered',
+          input: {},
+          acceptance: sharedAcceptance,
+        }),
+        nodeTask({
+          id: 'b',
+          adapter: 'counted',
+          input: {},
+          acceptance: sharedAcceptance,
+        }),
+      ]),
+      'agent-1',
+      { resumeMissionId: mission.id },
+    );
+
+    expect(result.outcome).toBe('completed');
+    expect(calls).toBe(1);
+    expect(result.tasks.find((task) => task.id === 'a')?.attempts).toBe(0);
+    expect(result.tasks.find((task) => task.id === 'b')?.attempts).toBe(1);
   });
 
   it('loads a shipped DNA pattern from dnas/ and executes against it', async () => {

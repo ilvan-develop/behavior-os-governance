@@ -40,6 +40,8 @@ export interface MissionEvidenceInput {
   simulated?: boolean;
   provenance?: 'executed' | 'reported' | 'simulated';
   executionId?: string;
+  /** Task whose execution produced this evidence. */
+  taskId?: string;
   tool?: string;
   command?: string;
   exitCode?: number;
@@ -146,6 +148,7 @@ function normalizeEvidence(entries: MissionEvidenceInput[], now: string): Normal
       ...(provenance === 'simulated' || entry.simulated === true ? { simulated: true } : {}),
       provenance,
       ...(executionId ? { executionId } : {}),
+      ...(entry.taskId?.trim() ? { taskId: entry.taskId.trim() } : {}),
       ...(entry.tool ? { tool: entry.tool } : {}),
       ...(entry.command !== undefined ? { command: entry.command } : {}),
       ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),

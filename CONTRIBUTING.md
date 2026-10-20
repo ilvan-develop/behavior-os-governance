@@ -30,7 +30,7 @@ behavioros/
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools
 │   ├── mcp-server/  # MCP server implementation (30 tools + 2 resources)
-│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker; 17 tests)
+│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 53 tests)
 ├── plugins/
 │   └── opencode-v2/ # OpenCode v2 plugin (32 tools)
 ├── dnas/            # 21 DNA pattern YAML files

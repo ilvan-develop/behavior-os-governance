@@ -256,26 +256,78 @@ pending ──▶ active ──▶ completed   (terminal)
 ## Task orchestration (S3)
 
 `AutonomousOrchestrator` (`packages/orchestrator/src/orchestrator.ts`) executes a
-mission plan through real adapters. It is a library, not a new tool surface:
-MCP still exposes 30 tools and the plugin 32.
+mission plan through real adapters. `ControlLoop`
+(`packages/orchestrator/src/control-loop.ts`) adds durable, evidence-driven
+continuation on top of it. Both are libraries, not new tool surfaces: MCP still
+exposes 30 tools and the plugin 32.
 
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
 - Adapter output is validated against `AdapterResultSchema` before it can affect
   task or mission state.
-- Each task declares acceptance checks; bounded retries, per-task timeouts, loop
-  detection and a per-adapter circuit breaker stop runaway plans.
+- Each task declares acceptance checks and optional `dependsOn` task ids;
+  bounded retries, per-task timeouts, loop detection and a per-adapter circuit
+  breaker stop runaway plans. A blocked task pauses the mission but independent
+  branches continue; dependants are recorded as `DEPENDENCY_BLOCKED`.
 - A governance `deny` blocks the run; `escalate` pauses it for human approval.
 - In-process idempotency keys replay a completed task instead of executing it
   twice; resuming a mission skips gates already backed by executed evidence.
+  Evidence is bound to the task that produced it (`taskId`, with an execution-id
+  prefix fallback for older records), so two tasks that happen to share a gate
+  name cannot satisfy each other.
+- `ControlLoop` persists run state atomically after every task transition:
+  mission/run ids, phase, task graph, attempts, failure codes, evidence refs,
+  approval state, validation and audit results, next eligible action and
+  termination reason. A resumed loop seeds prior executed evidence and skips
+  completed tasks instead of dispatching them again. The mission id is persisted
+  by a `missionCreated` observer before governance or dispatch, and a mission
+  tag carrying the run id lets a later process adopt a mission created just
+  before a crash instead of creating a second one.
+- The state file is validated on load (task/evidence/error shapes and enums).
+  The `done` terminal claim is re-derived on resume; a `failed` state remains
+  terminal and is not resurrected.
+  Persisted task bodies are also checked against the
+  plan (id, phase, adapter, agent, input, acceptance, dependencies) before
+  dispatch, so a tampered phase label cannot bypass the plan signature.
+  `authorizedPhases` is re-applied on every resume: a caller-supplied list is
+  authoritative, an omitted list falls back to the persisted list, and an empty
+  list denies every task. A state created without a restriction therefore cannot
+  bypass a narrower caller list, and a listed phase requires every task to
+  declare that phase.
+- A pending approval is scoped as `mission` or `task`; `recordApproval` records a
+  human decision and `retryBlocked` reopens a blocked task after an adapter/agent
+  fix. Neither bypasses phase or agent authorization. A mission-scoped approval
+  is still evaluated against the same DNA on resume: if the escalate rule still
+  matches, the mission remains paused; the loop never bypasses governance.
+- `ControlLoop` classifies results as `PASS`, `PASS_WITH_LIMITATIONS`, `FAIL`,
+  `BLOCKED` or `UNVERIFIED`. Missing, `reported`, `simulated` or non-executed
+  evidence can never be a `PASS`; a final independent auditor is mandatory before
+  a terminal `done`. A persisted audit narrative is never trusted on resume: the
+  loop re-runs the independent auditor (or blocks as unverified when none is
+  available) and replaces stale audit-derived limitations.
+- Acceptance gates must be unique across tasks; a plan where two tasks claim the
+  same gate is rejected, so task evidence can never be attributed to the wrong
+  task.
+- Tasks may declare a `phase`; `authorizedPhases` prevents an unauthorized phase
+  from starting. Boundary: the loop's mission may complete its authorized branch
+  while the control state remains blocked on an unauthorized or blocked task.
+- Resume is at-least-once for a task interrupted while `running`: completed tasks
+  are skipped from executed evidence, but a side-effecting adapter must honour
+  its idempotency key if the process died after the side effect and before
+  evidence was recorded.
 - Events are per mission and exclude secrets; persistence failures are reported,
   not swallowed.
-- 17 tests in `packages/orchestrator/tests/orchestrator.test.ts` cover the real
-  path and failure injection.
+- 53 tests in `packages/orchestrator/tests/` cover real execution, failure
+  injection, dependency/agent blocking, durable resume, phase re-authorization,
+  task-bound evidence, approval boundaries, limitations, persisted-audit
+  revalidation and terminal-state guards. `control-loop.integration.test.ts`
+  exercises the public `ControlLoop` → `AutonomousOrchestrator.executeMission`
+  path with an in-memory engine and temporary state only.
 
-Boundary: task records are not persisted separately, so resumption relies on
-mission evidence; the orchestrator is not yet wired into the MCP/plugin tool
-surface.
+Boundary: the control-loop state file can contain task inputs and must be
+protected like any other execution artifact; `seedEvidence` is trusted caller
+input and must only come from such a protected prior run. The orchestrator
+remains a library; the loop is not yet wired into the MCP/plugin tool surface.
 
 ## Integration Points
 
@@ -290,6 +342,33 @@ surface.
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`
 - DNA patterns loaded from `dnas/` and merged with built-ins
+
+#### Notification coalescing (producer side)
+
+The plugin posts synthetic session messages for DNA selection, mission creation,
+denials and escalations with `delivery: 'queue'`. To keep a long turn chain from
+accumulating one message per decision, `notifications.ts` coalesces them before
+they reach the host:
+
+- **Identity**: `(sessionID, kind, action, normalized reason)`. Only whitespace
+  is normalized; case, punctuation and wording are preserved so two different
+  decisions never share a key.
+- **Window**: 60 s per session, starting at the first admitted notice.
+- **Cap**: at most 3 notices per session per window.
+- **Reset**: only the `session.prompt` hook resets a window. OpenCode does not
+  run that hook for synthetic messages, so a notice cannot re-enable itself.
+  The hook runs before admission, so a prompt that fails preparation reopens
+  the window early; that errs toward more notices, never fewer.
+- **Persistence**: the window and keys are snapshotted into `ctx.storage`
+  (`behavioros:notifications:v1`). `take()` is synchronous, so the duplicate
+  check and the record cannot interleave; snapshot writes are serialized.
+- **Observability**: each suppression appends one `advisory` governance-log
+  entry with the reason and aggregate counters; it never emits another
+  synthetic message.
+
+The coalescer is producer-side only. It does **not** acknowledge, expire,
+delete or replay host inbox records, and it does not guarantee timely
+delivery. Those remain consumer responsibilities in OpenCode.
 
 ### CLI
 - Project initialization

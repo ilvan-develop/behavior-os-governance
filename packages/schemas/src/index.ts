@@ -123,6 +123,8 @@ export const MissionEvidenceSchema = z.object({
   provenance: EvidenceProvenanceSchema.optional(),
   /** Identity of the concrete execution that produced this evidence. */
   executionId: z.string().min(1).optional(),
+  /** Task whose execution produced this evidence; prevents cross-task reuse. */
+  taskId: z.string().min(1).optional(),
   /** Adapter/tool that executed the check (e.g. `shell`). */
   tool: z.string().min(1).optional(),
   /** Command or operation, when the source executed one. */
@@ -203,6 +205,7 @@ export const TaskErrorCodeSchema = z.enum([
   'RETRY_EXHAUSTED',
   'LOOP_DETECTED',
   'CIRCUIT_OPEN',
+  'DEPENDENCY_BLOCKED',
   'ACCEPTANCE_FAILED',
   'EXECUTION_FAILED',
   'PERSISTENCE_FAILED',
@@ -232,6 +235,8 @@ export const TaskDefinitionSchema = z.object({
   id: z.string().min(1),
   missionId: z.string().min(1),
   parentTaskId: z.string().min(1).optional(),
+  /** Tasks that must complete before this task is eligible. */
+  dependsOn: z.array(z.string().min(1)).optional(),
   correlationId: z.string().min(1),
   idempotencyKey: z.string().min(1),
   type: z.string().min(1),

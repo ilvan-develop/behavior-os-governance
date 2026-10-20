@@ -55,6 +55,8 @@ export interface TaskDefinitionInput {
   /** Stable task id. Defaults to `task-<index>`. */
   id?: string;
   parentTaskId?: string;
+  /** Tasks that must complete before this task is eligible. */
+  dependsOn?: string[];
   type?: string;
   objective: string;
   adapter: string;
@@ -84,6 +86,22 @@ export interface MissionPlan {
   idempotencyKey?: string;
 }
 
+/**
+ * Observation hooks for durable control loops. Hooks are synchronous on purpose:
+ * a control loop must persist the transition before the next task is selected.
+ * A hook that throws is treated as a persistence failure and stops the mission.
+ */
+export interface MissionObserver {
+  /**
+   * Called as soon as the mission id exists and before governance or dispatch.
+   * A durable control loop persists this id here so a crash cannot create a
+   * second mission on resume.
+   */
+  missionCreated?: (mission: Mission) => void;
+  taskStarted?: (task: TaskDefinition) => void;
+  taskSettled?: (task: TaskDefinition, result: TaskResult) => void;
+}
+
 export interface ExecuteMissionOptions {
   signal?: AbortSignal;
   /** Default `executed`: completion requires executed evidence + executionId. */
@@ -93,6 +111,17 @@ export interface ExecuteMissionOptions {
   resumeMissionId?: string;
   /** Repeated identical failures that abort a task. Default 2. */
   loopThreshold?: number;
+  /**
+   * Executed evidence from a prior control-loop run. Seeded before dispatch so
+   * a new mission can skip tasks that were already proven by an earlier run.
+   *
+   * This is trusted caller input: the engine validates shape/provenance, but
+   * cannot prove that an `executionId` originated in this process. Callers must
+   * only seed evidence read from a protected prior run artifact.
+   */
+  seedEvidence?: MissionEvidence[];
+  /** Durable control-loop observation hooks. */
+  observer?: MissionObserver;
 }
 
 export type MissionOutcome = 'completed' | 'failed' | 'cancelled' | 'blocked';
@@ -137,6 +166,7 @@ const BLOCKED_CODES: ReadonlySet<TaskErrorCode> = new Set([
   'AGENT_NOT_FOUND',
   'APPROVAL_REQUIRED',
   'CIRCUIT_OPEN',
+  'DEPENDENCY_BLOCKED',
 ]);
 
 const TERMINAL_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
@@ -210,6 +240,21 @@ export class AutonomousOrchestrator {
 
   getAdapter(name: string): TaskAdapter | undefined {
     return this.adapters.get(name);
+  }
+
+  /** Read-only mission lookup for durable control loops. */
+  getMission(missionId: string): Mission | null {
+    return this.behaviorOS.getMission(missionId);
+  }
+
+  /** Read-only agent lookup so a control loop can block a bad branch, not the run. */
+  hasAgent(agentId: string): boolean {
+    return this.agents.has(agentId);
+  }
+
+  /** Read-only mission list for durable control loops. */
+  listMissions(): Mission[] {
+    return this.behaviorOS.listMissions();
   }
 
   /** Subscribe to lifecycle events. Returns an unsubscribe function. */
@@ -406,6 +451,29 @@ export class AutonomousOrchestrator {
       resumed: existing !== null,
     });
 
+    try {
+      options.observer?.missionCreated?.(mission);
+    } catch (error) {
+      const observerError = this.observerFailure(error);
+      const failed = this.behaviorOS.transitionMission(mission.id, 'failed', {
+        actor: agentId,
+        reason: observerError.message,
+      });
+      this.emit('mission.failed', mission.id, correlationId, {
+        code: observerError.code,
+      });
+      return this.result(
+        failed.ok ? failed.mission : mission,
+        'failed',
+        [],
+        null,
+        correlationId,
+        startedAt,
+        observerError,
+        options,
+      );
+    }
+
     // Governance runs after the mission exists (so a denial is auditable) and
     // before any task is dispatched (so it is a real pre-execution veto).
     const governanceContext: Record<string, unknown> = {
@@ -479,14 +547,45 @@ export class AutonomousOrchestrator {
       );
     }
 
+    if (options.seedEvidence && options.seedEvidence.length > 0) {
+      const seeded = this.behaviorOS.addMissionEvidence(mission.id, options.seedEvidence, {
+        actor: agentId,
+      });
+      if (!seeded.ok) {
+        const failed = this.behaviorOS.transitionMission(mission.id, 'failed', {
+          actor: agentId,
+          reason: seeded.message,
+        });
+        return this.result(
+          failed.ok ? failed.mission : mission,
+          'failed',
+          [],
+          governance,
+          correlationId,
+          startedAt,
+          {
+            code: 'PERSISTENCE_FAILED',
+            message: seeded.message,
+            retryable: false,
+          },
+          options,
+        );
+      }
+      mission = seeded.mission;
+    }
+
     // -----------------------------------------------------------------------
-    // Task dispatch (sequential, fail-fast, resumable from executed evidence)
+    // Task dispatch (dependency-aware, fail-fast on failed/cancelled, paused on
+    // blocked; resumable from executed evidence). A blocked approval or external
+    // dependency must not stop independent authorized tasks.
     // -----------------------------------------------------------------------
     const results: TaskResult[] = [];
     let terminalError: TaskError | undefined;
+    let blockedError: TaskError | undefined;
     let cancelled = false;
 
-    for (const task of tasks) {
+    while (true) {
+      if (terminalError) break;
       if (options.signal?.aborted) {
         cancelled = true;
         terminalError = {
@@ -496,6 +595,61 @@ export class AutonomousOrchestrator {
         };
         break;
       }
+
+      const pending = tasks.filter((task) => task.status === 'pending');
+      if (pending.length === 0) break;
+
+      // Tasks whose dependency already failed/blocked/cancelled cannot run.
+      // This is done before eligibility so independent branches keep moving.
+      const dependencyBlocked = pending.filter((task) =>
+        (task.dependsOn ?? []).some((dependencyId) => {
+          const dependency = tasks.find((candidate) => candidate.id === dependencyId);
+          return (
+            dependency !== undefined &&
+            dependency.status !== 'pending' &&
+            dependency.status !== 'running' &&
+            dependency.status !== 'completed'
+          );
+        }),
+      );
+      if (dependencyBlocked.length > 0) {
+        for (const task of dependencyBlocked) {
+          const error: TaskError = {
+            code: 'DEPENDENCY_BLOCKED',
+            message: `Task "${task.id}" cannot run because a dependency did not complete successfully`,
+            retryable: false,
+          };
+          const result = this.taskFailure(task, this.now(), error, 'blocked');
+          task.status = 'blocked';
+          task.updatedAt = this.now();
+          results.push(result);
+          blockedError ??= error;
+          this.emit('task.blocked', mission.id, correlationId, { code: error.code }, task.id);
+          const observerError = await this.observeSettled(options, task, result);
+          if (observerError) {
+            terminalError = observerError;
+            break;
+          }
+        }
+        continue;
+      }
+
+      const next = pending.find((task) =>
+        (task.dependsOn ?? []).every((dependencyId) => {
+          const dependency = tasks.find((candidate) => candidate.id === dependencyId);
+          return dependency?.status === 'completed';
+        }),
+      );
+      if (!next) {
+        // Normalization rejects cycles, so this is defensive only.
+        terminalError = {
+          code: 'INVALID_INPUT',
+          message: 'No eligible task remains; the task graph is blocked',
+          retryable: false,
+        };
+        break;
+      }
+      const task = next;
 
       const existingEvidence = this.completedEvidenceFor(task, mission);
       if (existingEvidence) {
@@ -512,6 +666,8 @@ export class AutonomousOrchestrator {
           evidence: existingEvidence,
           completedAt: this.now(),
         };
+        task.status = 'completed';
+        task.updatedAt = this.now();
         results.push(skipped);
         this.emit(
           'task.completed',
@@ -523,10 +679,27 @@ export class AutonomousOrchestrator {
           },
           task.id,
         );
+        const observerError = await this.observeSettled(options, task, skipped);
+        if (observerError) {
+          terminalError = observerError;
+          break;
+        }
         continue;
       }
 
+      task.status = 'running';
+      task.updatedAt = this.now();
+      try {
+        options.observer?.taskStarted?.(task);
+      } catch (error) {
+        terminalError = this.observerFailure(error);
+        break;
+      }
+
       const taskResult = await this.executeTask(task, options);
+      task.status = taskResult.status;
+      task.attempts = taskResult.attempts;
+      task.updatedAt = this.now();
       results.push(taskResult);
       this.emit(
         taskResult.status === 'completed'
@@ -561,8 +734,24 @@ export class AutonomousOrchestrator {
           };
           break;
         }
+        mission = recorded.mission;
       }
 
+      const observerError = await this.observeSettled(options, task, taskResult);
+      if (observerError) {
+        terminalError = observerError;
+        break;
+      }
+
+      if (taskResult.status === 'blocked') {
+        blockedError ??= taskResult.error ?? {
+          code: 'APPROVAL_REQUIRED',
+          message: `Task "${task.id}" is blocked pending approval or an external dependency`,
+          retryable: false,
+        };
+        // Keep dispatching independent branches.
+        continue;
+      }
       if (taskResult.status !== 'completed') {
         terminalError = taskResult.error ?? {
           code: 'EXECUTION_FAILED',
@@ -614,6 +803,28 @@ export class AutonomousOrchestrator {
         correlationId,
         startedAt,
         terminalError,
+        options,
+      );
+    }
+
+    if (blockedError) {
+      const paused = this.behaviorOS.transitionMission(mission.id, 'paused', {
+        actor: agentId,
+        reason: `Blocked task requires approval or an external dependency: ${blockedError.message}`,
+      });
+      if (paused.ok) finalMission = paused.mission;
+      this.emit('mission.blocked', mission.id, correlationId, {
+        code: blockedError.code,
+        ...(blockedError.fingerprint ? { fingerprint: blockedError.fingerprint } : {}),
+      });
+      return this.result(
+        finalMission,
+        'blocked',
+        results,
+        governance,
+        correlationId,
+        startedAt,
+        blockedError,
         options,
       );
     }
@@ -1023,6 +1234,7 @@ export class AutonomousOrchestrator {
       detail: check.detail,
       provenance: 'executed',
       ...(executionId ? { executionId } : {}),
+      taskId: task.id,
       tool: task.adapter,
       ...(typeof task.input.command === 'string' ? { command: task.input.command } : {}),
       ...(input.result?.exitCode !== undefined && input.result.exitCode !== null
@@ -1044,6 +1256,7 @@ export class AutonomousOrchestrator {
           detail: input.error.message,
           provenance: 'executed',
           executionId,
+          taskId: task.id,
           tool: task.adapter,
           ...(typeof task.input.command === 'string' ? { command: task.input.command } : {}),
           recordedAt: completedAt,
@@ -1232,10 +1445,25 @@ export class AutonomousOrchestrator {
         Math.trunc(task.timeoutMs ?? this.options.defaultTimeoutMs ?? 30_000),
       );
 
+      if (task.dependsOn !== undefined && !Array.isArray(task.dependsOn)) {
+        throw new OrchestratorError(
+          'INVALID_INPUT',
+          `Task "${id}" dependsOn must be an array of task ids`,
+        );
+      }
+      const dependsOn = [...new Set((task.dependsOn ?? []).map((dependency) => dependency.trim()))];
+      if (dependsOn.some((dependency) => dependency.length === 0)) {
+        throw new OrchestratorError('INVALID_INPUT', `Task "${id}" has an empty dependency id`);
+      }
+      if (dependsOn.includes(id)) {
+        throw new OrchestratorError('INVALID_INPUT', `Task "${id}" cannot depend on itself`);
+      }
+
       tasks.push({
         id,
         missionId,
         ...(task.parentTaskId ? { parentTaskId: task.parentTaskId } : {}),
+        ...(dependsOn.length > 0 ? { dependsOn } : {}),
         correlationId: missionId,
         idempotencyKey: task.idempotencyKey ?? `${missionId}:${id}`,
         type: task.type ?? 'execute',
@@ -1253,7 +1481,37 @@ export class AutonomousOrchestrator {
       });
     });
 
+    this.validateDependencies(tasks);
     return tasks;
+  }
+
+  private validateDependencies(tasks: TaskDefinition[]): void {
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    for (const task of tasks) {
+      for (const dependency of task.dependsOn ?? []) {
+        if (!byId.has(dependency)) {
+          throw new OrchestratorError(
+            'INVALID_INPUT',
+            `Task "${task.id}" depends on unknown task "${dependency}"`,
+          );
+        }
+      }
+    }
+
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const visit = (id: string): void => {
+      if (visiting.has(id)) {
+        throw new OrchestratorError('INVALID_INPUT', `Task dependency cycle detected at "${id}"`);
+      }
+      if (visited.has(id)) return;
+      visiting.add(id);
+      const task = byId.get(id);
+      for (const dependency of task?.dependsOn ?? []) visit(dependency);
+      visiting.delete(id);
+      visited.add(id);
+    };
+    for (const task of tasks) visit(task.id);
   }
 
   private missionRequiredChecks(plan: MissionPlan, tasks: TaskDefinition[]): string[] {
@@ -1313,17 +1571,20 @@ export class AutonomousOrchestrator {
   /** Evidence for a task whose required gates already have executed passes. */
   private completedEvidenceFor(task: TaskDefinition, mission: Mission): MissionEvidence[] | null {
     const required = task.acceptance
-      .filter((criterion) => criterion.required)
+      .filter((criterion) => criterion.required !== false)
       .map((criterion) => criterion.gate);
     if (required.length === 0) return null;
 
     const evidence = mission.evidence ?? [];
     const matched: MissionEvidence[] = [];
     for (const gate of required) {
-      const latest = [...evidence].reverse().find((entry) => entry.gate === gate);
+      const latest = [...evidence]
+        .reverse()
+        .find((entry) => entry.gate === gate && this.evidenceBelongsToTask(entry, task.id));
       if (
         latest?.status !== 'passed' ||
         latest?.provenance !== 'executed' ||
+        latest?.simulated === true ||
         !latest?.executionId
       ) {
         return null;
@@ -1331,6 +1592,39 @@ export class AutonomousOrchestrator {
       matched.push(latest);
     }
     return matched;
+  }
+
+  /**
+   * Evidence must identify the task that produced it. The execution id fallback
+   * keeps old mission records resumable without allowing a gate with the same
+   * name in another task to satisfy this task.
+   */
+  private evidenceBelongsToTask(entry: MissionEvidence, taskId: string): boolean {
+    if (entry.taskId) return entry.taskId === taskId;
+    return entry.executionId?.startsWith(`${taskId}:`) ?? false;
+  }
+
+  private observerFailure(error: unknown): TaskError {
+    return {
+      code: 'PERSISTENCE_FAILED',
+      message: `Control-loop observer failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      retryable: false,
+    };
+  }
+
+  private async observeSettled(
+    options: ExecuteMissionOptions,
+    task: TaskDefinition,
+    result: TaskResult,
+  ): Promise<TaskError | undefined> {
+    try {
+      options.observer?.taskSettled?.(task, result);
+      return undefined;
+    } catch (error) {
+      return this.observerFailure(error);
+    }
   }
 
   private emit(
