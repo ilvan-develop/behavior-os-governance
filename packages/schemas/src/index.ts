@@ -364,6 +364,12 @@ export const GovernanceDecisionSchema = z.object({
   verdict: GovernanceVerdictSchema,
   reason: z.string(),
   rulesEvaluated: z.array(z.string()),
+  /**
+   * Rule ids that actually matched and fired (block/escalate/warn/log/
+   * transform) during this evaluation, as opposed to `rulesEvaluated`, which
+   * lists every rule examined. Optional for backward compatibility.
+   */
+  firedRules: z.array(z.string()).optional(),
   timestamp: z.string(),
   agentId: z.string(),
   missionId: z.string().optional(),
@@ -555,6 +561,13 @@ export const EvolutionProposalSchema = z.object({
   kind: z.enum(['governance-warn']),
   /** The learning-event type that motivated the proposal. */
   pattern: z.string(),
+  /**
+   * The condition the derived warn rule matches on. Always present on
+   * proposals emitted by the learning engine: a proposal without a real
+   * context key to match would be an inert rule (the request would never
+   * compare equal), so applyEvolution skips such proposals by construction.
+   */
+  condition: z.object({ type: z.string(), value: z.unknown() }).optional(),
   ruleId: z.string(),
   description: z.string(),
   /** 0..1; see `LearningEngine.confidenceFor` for the exact formula. */
