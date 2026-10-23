@@ -1,0 +1,132 @@
+{
+  "evidenceId": "C5",
+  "title": "behavioros agent lists registered agents from the SQLite registry instead of only printing local state",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T09:10:00Z",
+  "timestampNote": "Historical measuredAt values in this file were written in local time (UTC+1) with a Z suffix; host governance logs use UTC. The 2026-10-21 correction uses actual UTC. Results are unaffected.",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": {
+    "command": "behavioros agent",
+    "implementation": "packages/cli/src/cli.ts printed the .behavioros/state.json summary and a hard-coded 'use the SDK to register agents' message.",
+    "consequence": "The command never read the engine's agents table, so it could not answer which agents were registered.",
+    "secondaryDefect": "SqliteStore's constructor left the SQLite connection open when PRAGMA/migrate threw. On Windows the leaked handle made the corrupt database file impossible to remove or replace (observed as EPERM in the new regression test)."
+  },
+  "after": {
+    "implementation": [
+      "packages/cli/src/agents.ts: resolveAgentRegistryPath + listRegisteredAgents (read-only SqliteStore access)",
+      "packages/cli/src/cli.ts: --db option; lists id, name, type/status, DNA pattern and current mission",
+      "packages/core/src/persistence/sqlite-store.ts: closes the handle before rethrowing a migration failure"
+    ],
+    "pathResolution": [
+      "--db when explicitly provided",
+      "<dir>/behavioros.db",
+      "<dir>/.behavioros/behavioros.db"
+    ],
+    "exitCodes": "0 for a missing or empty registry; 1 when the registry exists but cannot be read (corrupt/locked database).",
+    "tests": "6 cases in packages/cli/tests/agents.test.ts + 1 case in packages/core/tests/sqlite-store.test.ts"
+  },
+  "regressionProof": {
+    "cliCases": [
+      "missing registry is reported without throwing",
+      "engine-persisted agents are listed ordered by id",
+      "a .behavioros/behavioros.db registry is found when the root database is absent",
+      "an explicit --db path is honoured even when missing",
+      "a corrupt database is reported as an error, not as an empty registry",
+      "a valid empty registry returns an empty list"
+    ],
+    "coreCase": "A failed migration throws and the database file can be removed immediately afterwards; the same assertion fails with the previous leaked handle on Windows.",
+    "endToEnd": {
+      "command": "node packages/cli/dist/cli.js agent -d <temp project>",
+      "cases": [
+        "registered agent: exit 0; output includes 'agent-1  DevBot  [developer/idle]  DNA=open-source  mission=none' and '1 registered agent(s)'",
+        "no registry: exit 0; output includes 'No agent registry found'",
+        "corrupt registry: exit 1; output includes 'Could not read the registry: file is not a database'"
+      ]
+    }
+  },
+  "measured": {
+    "typecheck": {
+      "command": "pnpm typecheck --force",
+      "exitCode": 0,
+      "result": "10/10 tasks, 0 cached"
+    },
+    "lint": {
+      "command": "pnpm lint:check",
+      "exitCode": 0,
+      "result": "170 files checked, no fixes applied"
+    },
+    "cliFocused": {
+      "command": "pnpm --filter @behavior-os/cli test",
+      "exitCode": 0,
+      "result": "3 files / 20 cases (6 new agent-registry cases)"
+    },
+    "coreSqliteFocused": {
+      "command": "pnpm --filter @behavior-os/core exec vitest run tests/sqlite-store.test.ts",
+      "exitCode": 0,
+      "result": "1 file / 6 cases"
+    },
+    "test": {
+      "command": "pnpm test --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 66 files / 775 cases, 0 cached"
+    },
+    "build": {
+      "command": "pnpm build --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 0 cached"
+    },
+    "governance": {
+      "command": "pnpm verify:governance",
+      "exitCode": 0,
+      "result": "24/24 claims, 0 failures"
+    },
+    "coverage": {
+      "command": "pnpm test:coverage",
+      "exitCode": 0,
+      "result": "66 files / 775 cases",
+      "statements": "77.67% (3350/4313)",
+      "branches": "73.17% (2310/3157)",
+      "functions": "84.33% (646/766)",
+      "lines": "77.71% (3097/3985)"
+    }
+  },
+  "hashes": {
+    "packages/cli/src/agents.ts": "17F84E3D2F1FE558A62F5F24C3F1E9D6C8D74B6C5431C64A11C0DEB0425CFD89",
+    "packages/cli/src/cli.ts": "7C2BBF382C584F64DFDE99EB85C0EA18ABB9D3C1024D9E769AF1135F32D8A23A",
+    "packages/cli/tests/agents.test.ts": "3BE8FEF504CDC9EEE471A1A4E887AF997F677F39947FF11080F5C62B99E735A2",
+    "packages/core/src/persistence/sqlite-store.ts": "B9DBD8941E675644929A6D6BD881DFC09C7F5E2F691AA69E385B53349A71DCC6",
+    "packages/core/tests/sqlite-store.test.ts": "3B5D6F6E85BABBC8A01B242D0C6E231A51C95AADAAD058FB6CE77E7367433FAB",
+    "docs/CLI.md": "4305D576081FA993E43CBC0330DC03AA833F05F2A6A85A004468E1DF791C11EE",
+    ".changeset/c5-agent-registry.md": "0D0A53800DAFFC5B4F2D0C40156EDB0C4197FFD0632EBB73CD8E1C919450B5C8"
+  },
+  "limitations": [
+    "The registry is the engine's SQLite `agents` table. The OpenCode plugin's ctx.storage snapshot has no agents field and is not read by this command.",
+    "The command is read-only; registration still happens through the SDK/engine registerAgent API.",
+    "A missing registry and an empty registry are both exit 0 by design; the distinction is the message.",
+    "A corrupt database is reported and exits 1, but the CLI does not attempt repair.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "Release automation remains human-gated and unverified; no commit, push, tag, publish or deploy was performed."
+  ],
+  "corrections": [
+    {
+      "observedAt": "2026-10-21T08:56:32Z",
+      "field": "after.implementation[0]",
+      "original": "read-only SqliteStore access",
+      "corrected": "opens the registry with SqliteStore, which uses a read-write SQLite connection, runs idempotent migrations and may create WAL/SHM files; the command does not write domain data but requires directory write access.",
+      "reason": "DatabaseSync is opened read-write and the constructor runs PRAGMA journal_mode=WAL plus migrate(). The listing itself only reads agents."
+    }
+  ],
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution",
+    "agent registration/editing through the CLI"
+  ]
+}

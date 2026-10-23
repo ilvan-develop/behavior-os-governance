@@ -1,0 +1,124 @@
+{
+  "evidenceId": "C6",
+  "title": "drift-check compares DNA rules and gates with DriftEngine instead of comparing state against a DNA baseline",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T08:31:00Z",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": {
+    "command": "behavioros drift-check",
+    "implementation": "packages/cli/src/cli.ts compared `state.selectedDna`/`state.currentStep` with top-level keys of `.behavioros/baseline.json`",
+    "baselineShape": "`diff` writes a map of DNA file stems to parsed DNA documents, so `baseline.selectedDna` and `baseline.currentStep` are undefined",
+    "consequence": "The result was a false drift every time a diff baseline was used, and governance rules/quality gates were never compared.",
+    "coverage": "packages/cli/tests/cli.test.ts had 1 trivial assertion (`expect(true).toBe(true)`)."
+  },
+  "after": {
+    "implementation": "packages/cli/src/drift.ts: loadDnaDirectory + compareDnaSnapshots (DriftEngine) + compareStateToBaseline + runDriftCheck",
+    "modes": [
+      "DNA map baseline from `diff`: compares every dnas/*.yaml snapshot with DriftEngine, reports added/removed patterns and rule/gate additions, removals and changes.",
+      "Legacy state baseline (`selectedDna`/`currentStep`): still compares those fields field by field."
+    ],
+    "exitCodes": "0 when the snapshots match, 1 when drift is detected or the baseline/YAML is invalid.",
+    "tests": "13 new cases in packages/cli/tests/drift.test.ts (2 files / 14 cases in the CLI package)."
+  },
+  "fix": {
+    "kind": "bug fix with an extracted, testable drift module",
+    "changes": [
+      {
+        "file": "packages/cli/src/drift.ts",
+        "change": "new: DNA snapshot loader, DriftEngine wrapper, legacy state comparison, runDriftCheck"
+      },
+      {
+        "file": "packages/cli/src/cli.ts",
+        "change": "drift-check now calls runDriftCheck; prints findings; exits 1 on drift or invalid input"
+      },
+      {
+        "file": "packages/cli/tests/drift.test.ts",
+        "change": "new: 13 cases covering identical, changed, significant, added/removed, legacy state, invalid baseline and invalid YAML"
+      },
+      {
+        "file": "docs/CLI.md",
+        "change": "documents DriftEngine comparison and exit code 1 on drift"
+      },
+      { "file": "README.md", "change": "command table updated" },
+      { "file": "docs/CLAIMS.md", "change": "C6 marked closed with the measured test count" },
+      { "file": ".changeset/c6-drift-check.md", "change": "patch changeset for @behavior-os/cli" }
+    ]
+  },
+  "regressionProof": {
+    "preFix": "The old command compared state fields to a DNA map; no test asserted the comparison and the CLI had 1 trivial case.",
+    "postFix": "13 unit/integration cases fail if the DriftEngine comparison, added/removed detection, legacy state path or invalid input handling regresses.",
+    "endToEnd": {
+      "command": "node packages/cli/dist/cli.js drift-check -d <temp project>",
+      "cases": [
+        "matching snapshot: exit 0, 'No drift detected. 1 DNA pattern(s) match the baseline.'",
+        "changed rule action block -> warn: exit 1, 'Drift in sample: 0 rule(s) added, 0 removed, 1 changed...'",
+        "added/removed pattern: exit 1, both reported",
+        "legacy state baseline: exit 1, 'DNA pattern changed' and 'Protocol step changed'"
+      ]
+    }
+  },
+  "measured": {
+    "typecheck": {
+      "command": "pnpm typecheck --force",
+      "exitCode": 0,
+      "result": "10/10 tasks, 0 cached"
+    },
+    "lint": {
+      "command": "pnpm lint:check",
+      "exitCode": 0,
+      "result": "165 files checked, no fixes applied"
+    },
+    "test": {
+      "command": "pnpm test --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 64 files / 757 cases, 0 cached"
+    },
+    "cliFocused": {
+      "command": "pnpm --filter @behavior-os/cli test",
+      "exitCode": 0,
+      "result": "2 files / 14 cases (13 new drift cases)"
+    },
+    "build": { "command": "pnpm build --force", "exitCode": 0, "result": "8/8 tasks, 0 cached" },
+    "coverage": {
+      "command": "pnpm test:coverage",
+      "exitCode": 0,
+      "result": "64 files / 757 cases",
+      "statements": "77.5% (3274/4224)",
+      "branches": "73.08% (2275/3113)",
+      "functions": "84.06% (633/753)",
+      "lines": "77.55% (3024/3899)"
+    },
+    "governance": {
+      "command": "pnpm verify:governance",
+      "exitCode": 0,
+      "result": "24/24 claims, 0 failures"
+    }
+  },
+  "hashes": {
+    "packages/cli/src/drift.ts": "75497D7C5267E95BEAFA6B62256432CE5C29F5FC95E07F6F2EDE82D5209CCF42",
+    "packages/cli/src/cli.ts": "D7C09E743B5084B087B0477C5B2BDF9B7AB68FF630DB78A76D815E90F0AA02D8",
+    "packages/cli/tests/drift.test.ts": "0DD7B6739C62D39A4E2C2B329CB925D34D0763708076BADEF9A596BA87B7C36C",
+    "docs/CLI.md": "C5E3AA5131029DE817CDDDF78C1928EDF8016D2F68A01DDA882C0AA3B24DE1D9",
+    "README.md": "FD7350B0BBE495339524A9387C5188187E8C932C1D25B01FB3B5001D31853040",
+    "docs/CLAIMS.md": "515722ABBA09E5B968E4CAED6BEBA1C43159CD8A32FBA20F26C6599782AC7DB7",
+    ".changeset/c6-drift-check.md": "8E3EF90E872958942C493F28DF12943DB041A8CFC423268033691D3C7B1B8003"
+  },
+  "limitations": [
+    "DriftEngine's contract covers governance rules and quality gates; persona, workflow and metadata changes are not flagged by design.",
+    "A baseline still has to be created by `behavioros diff`; drift-check does not create it.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "Release automation remains human-gated and unverified; no commit, push, tag, publish or deploy was performed."
+  ],
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution"
+  ]
+}

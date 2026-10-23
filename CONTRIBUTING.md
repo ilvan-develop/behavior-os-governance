@@ -26,16 +26,16 @@ pnpm typecheck
 behavioros/
 ├── packages/
 │   ├── schemas/     # Zod validation schemas
-│   ├── core/        # 11 engines + BehaviorOS facade + persistence (SQLite/Postgres)
+│   ├── core/        # 14 engines + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools
-│   ├── mcp-server/  # MCP server implementation (30 tools + 2 resources)
-│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 53 tests)
+│   ├── mcp-server/  # MCP server implementation (38 tools + 2 resources)
+│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 64 tests)
 ├── plugins/
 │   └── opencode-v2/ # OpenCode v2 plugin (32 tools)
 ├── dnas/            # 21 DNA pattern YAML files
 ├── docs/            # Documentation (CLAIMS.md is the source of truth)
-├── examples/        # Usage examples (outside the pnpm workspace — its tests are not run by `pnpm test`)
+├── examples/        # Usage examples (a pnpm workspace member — `pnpm test` runs its 4 cases)
 └── .behavioros/     # CLI docs + `state.example.json` (state.json/baseline.json are runtime)
 ```
 

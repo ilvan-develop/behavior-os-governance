@@ -1,0 +1,166 @@
+{
+  "evidenceId": "G-016",
+  "title": "Dependency audit gate: from exit 1 to a clean, non-suppressed exit 0",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T00:38:44Z",
+  "lastReviewedAt": "2026-10-21T09:15:00Z",
+  "currentVerification": {
+    "note": "The gates below were the G-016-time snapshot. The repository later advanced to 66 files / 775 cases and 170 linted files; re-verified with pnpm verify:all exit 0.",
+    "test": "66 files / 775 cases, 8/8 tasks, exit 0",
+    "lint": "173 files, no fixes applied, exit 0 (3 evidence JSON documents added after the 170-file measurement)",
+    "typecheck": "10/10 tasks, 0 cached, exit 0",
+    "build": "8/8 tasks, 0 cached, exit 0",
+    "coverage": "77.67% statements / 73.17% branches / 84.33% functions / 77.71% lines",
+    "securityAudit": "0 vulnerabilities, exit 0",
+    "newerEvidence": [
+      "docs/analysis/c5-agent-registry.json",
+      "docs/analysis/c02-mcp-rate-limit.json",
+      "docs/analysis/test-reliability.json"
+    ]
+  },
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": {
+    "command": "pnpm audit --audit-level=high",
+    "exitCode": 1,
+    "summary": "4 vulnerabilities found",
+    "severity": "1 low | 1 moderate | 2 high",
+    "highAdvisories": [
+      {
+        "package": "braces",
+        "advisory": "GHSA-vfj7-8cjw-p6xm",
+        "vulnerable": "<=3.0.3",
+        "patched": "<0.0.0 (no patched release)",
+        "path": "@changesets/cli -> @manypkg/get-packages -> globby -> fast-glob -> micromatch -> braces"
+      },
+      {
+        "package": "markdown-it",
+        "advisory": "GHSA-gfr2-rv44-r23c",
+        "vulnerable": ">=14.1.0 <14.3.3",
+        "patched": ">=14.3.3",
+        "path": "typedoc -> markdown-it@14.3.2"
+      }
+    ]
+  },
+  "intermediate": {
+    "command": "pnpm audit --audit-level=high",
+    "exitCode": 1,
+    "summary": "3 vulnerabilities found",
+    "severity": "1 low | 2 high",
+    "note": "After upgrading @changesets/cli to 3.0.3, the braces path moved to lint-staged -> micromatch. markdown-it was still 14.3.2."
+  },
+  "after": {
+    "command": "pnpm audit --audit-level=high",
+    "exitCode": 0,
+    "summary": "No known vulnerabilities found",
+    "fullAuditCommand": "pnpm audit",
+    "fullAuditExitCode": 0,
+    "fullAuditSummary": "No known vulnerabilities found",
+    "ignoreConfig": "none: package.json has no pnpm.auditConfig.ignoreCves or ignoreGhsas",
+    "resolvedVersions": {
+      "braces": "absent (pnpm why braces returns no path)",
+      "markdown-it": "14.3.3 (typedoc range is ^14.3.0)"
+    }
+  },
+  "fix": {
+    "kind": "real dependency upgrades plus one patched transitive pin; no advisory suppression",
+    "changes": [
+      {
+        "file": "package.json",
+        "change": "@changesets/cli ^2.29.0 -> ^3.0.3"
+      },
+      {
+        "file": "package.json",
+        "change": "lint-staged ^15.4.0 -> ^16.4.0"
+      },
+      {
+        "file": "package.json",
+        "change": "pnpm.overrides.markdown-it = 14.3.3 (satisfies typedoc's ^14.3.0)"
+      },
+      {
+        "file": "package.json",
+        "change": "added security:audit = pnpm audit --audit-level=high; verify:all now runs it"
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "change": "security job calls pnpm run security:audit (single gate definition) and installs with --frozen-lockfile"
+      },
+      {
+        "file": "AGENTS.md",
+        "change": "verification ladder includes pnpm run security:audit"
+      },
+      {
+        "file": "packages/core/tests/repo-scripts.test.ts",
+        "change": "7 cases: guards the audit gate in verify:all/CI and rejects audit ignore lists"
+      },
+      {
+        "file": "docs/CLAIMS.md",
+        "change": "documents the measured audit result and the non-suppression policy"
+      },
+      {
+        "file": ".changeset/security-audit-gate.md",
+        "change": "empty changeset: dev-only tooling change, no published package version bump"
+      }
+    ]
+  },
+  "regressionProof": {
+    "preFixManifestAtHead": {
+      "security:audit": null,
+      "verify:allRunsAudit": false
+    },
+    "currentManifest": {
+      "security:audit": "pnpm audit --audit-level=high",
+      "verify:allRunsAudit": true
+    },
+    "focusedTest": {
+      "command": "pnpm --filter @behavior-os/core exec vitest run tests/repo-scripts.test.ts",
+      "files": 1,
+      "cases": 7,
+      "exitCode": 0
+    },
+    "changesetStatus": {
+      "command": "pnpm exec changeset status --since HEAD",
+      "exitCode": 0,
+      "note": "the empty changeset had to be intent-to-add for git to see it; it is untracked until a human commits"
+    }
+  },
+  "gates": {
+    "command": "pnpm verify:all",
+    "exitCode": 0,
+    "typecheck": "9/9 tasks, 0 cached",
+    "lint": "160 files, no fixes applied",
+    "tests": "62 files / 738 cases, 7/7 tasks, 0 cached",
+    "build": "7/7 tasks, 0 cached",
+    "verify:governance": "24/24 claims, 0 failures",
+    "verify:plugin": "32 bos_* tools, hooks registered",
+    "smoke:mcp": "30 tools, 2 resources, governance denied as expected",
+    "verify:opencode": "38/38 checks passed",
+    "security:audit": "0 vulnerabilities, exit 0"
+  },
+  "hashes": {
+    "package.json": "B9AF6674C31BC5CF2806CF455A293A5636CBEEB84F0EA73013CA69B9962B8A14",
+    "pnpm-lock.yaml": "640B68C964E1DEF5F7CE8114A746CE94741A5C5702195DA5A4082996F46BCD99",
+    "packages/core/tests/repo-scripts.test.ts": "6F610252C0D1A9FC2BE2C8FED51FFA962C8F78083589AB84C348AC5645502EBB",
+    ".github/workflows/ci.yml": "0CC73CD64B4E849CB3447857BCBE8E2EFB6F88B3917E6C9BFAEC540C1C50F19B",
+    "docs/CLAIMS.md": "51E4825824B872F4826C6DBA62809C917092637B056A4C1B2033FA723333D400"
+  },
+  "limitations": [
+    "pnpm audit requires registry access; offline the gate fails closed instead of reporting a false green.",
+    "The working tree also contains pre-existing uncommitted notification, vitest and control-loop changes; they were preserved and re-verified, not authored by this mission.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "Release workflow triggers on main while the checkout branch is master; no remote is configured, so the default branch could not be confirmed. Release automation remains human-gated and unverified.",
+    "C02 (no rate limiting on MCP tools) was open when G-016 was measured; it was closed later with a per-tool token bucket, see docs/analysis/c02-mcp-rate-limit.json."
+  ],
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution",
+    "any governance DNA, schema or policy change"
+  ]
+}

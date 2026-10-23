@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-534-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-778-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -47,7 +47,7 @@ pnpm test
 | Agents don't learn from mistakes | Learning engine records events & detects recurring patterns |
 | Hard to coordinate multiple agents | 7-step protocol + auto-derived missions for traceable work |
 | No quality gates | Quality gates + audit stages (lint → typecheck → security → coverage) |
-| Reinventing infrastructure every project | 11 core engines, 27 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 21 core engines, 57 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -86,11 +86,11 @@ pnpm test
 └──────────────────────────────────────────────────────┘
 
 > The 9-layer diagram above is documentation of the conceptual stack. Only the
-> **11 engines** listed below are implemented in code; there is no separate
+> **15 engines** listed below are implemented in code; there is no separate
 > "Behavioral" or "Compiler" engine.
 ```
 
-### 11 Core Engines Powering the Stack
+### 17 Core Engines Powering the Stack
 
 | Engine | Purpose |
 |---|---|
@@ -168,20 +168,20 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 27 Tools + 2 Resources
+### MCP Server — 30 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
 | Category | Tools |
 |---|---|
 | **Governance** | `bos_select_dna`, `bos_list_dna`, `bos_evaluate_governance`, `bos_preflight` |
-| **Mission** | `bos_create_mission`, `bos_start_mission`, `bos_list_missions` |
+| **Mission** | `bos_create_mission`, `bos_start_mission`, `bos_list_missions`, `bos_complete_mission`, `bos_fail_mission`, `bos_cancel_mission` |
 | **Quality** | `bos_check_quality`, `bos_run_audit` |
 | **Decision** | `bos_decide` |
 | **Evolution** | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes` |
 | **Code editing** | `bos_code_edit` (dry-run by default), `bos_list_code_edits` |
 | **Learning** | `bos_record_learning`, `bos_get_insights` |
-| **Status** | `bos_get_status`, `bos_get_state` |
+| **Status** | `bos_get_status`, `bos_get_state`, `bos_set_agent`, `bos_whoami` |
 | **Listing** | `bos_list_decisions`, `bos_list_pipeline_runs`, `bos_list_audit_reports` |
 | **Analytics** | `bos_recommendations` |
 | **Drift** | `bos_drift` |
@@ -214,6 +214,22 @@ const store = new PostgresStore({ connectionString: process.env.DATABASE_URL });
 await store.connect();
 const bos = new BehaviorOS({ persistence: { store } });
 ```
+
+### MCP tool rate limiting
+
+Every MCP tool is throttled in-process with a per-tool token bucket. The default
+is **300 calls per tool per 60 s** (5/s average), which stops a looping agent
+without starving unrelated tools:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BEHAVIOROS_MCP_RATE_LIMIT_MAX` | `300` | Bucket capacity / calls per window |
+| `BEHAVIOROS_MCP_RATE_LIMIT_WINDOW_MS` | `60000` | Refill window in milliseconds |
+| `BEHAVIOROS_MCP_RATE_LIMIT_DISABLED` | unset | `true` disables the limiter (trusted local automation only) |
+
+A throttled call does no engine work and returns a normal tool error
+(`isError: true`) with the retry delay. The limiter is per process and per tool;
+it is a runaway-agent guard, not a distributed quota or an authorization layer.
 
 ### Governed Code Editing (opt-in)
 
@@ -259,10 +275,10 @@ blocked `deploy` pre-flight, `autonomous` without `--task`).
 | `npx @behavior-os/cli simulate` | Evaluate one action against the loaded DNA rules |
 | `npx @behavior-os/cli deploy` | Print the deployment gate plan + a real pre-flight (**does not deploy**) |
 | `npx @behavior-os/cli ecosystem` | Report what can be read from disk (DNA patterns, verdicts) |
-| `npx @behavior-os/cli agent` | Show the local state summary and how to register agents |
+| `npx @behavior-os/cli agent` | Show the local state summary and registered agents from the SQLite registry |
 | `npx @behavior-os/cli autonomous` | Dry-run the 7-step protocol on `--task` (audit simulated, no work executed) |
 | `npx @behavior-os/cli protocol` | Check the 7 steps against the local state file |
-| `npx @behavior-os/cli drift-check` | Compare `selectedDna`/`currentStep` with the baseline |
+| `npx @behavior-os/cli drift-check` | Compare every DNA rule/gate with the baseline (`DriftEngine`; exits 1 on drift) |
 
 ## Test Status
 
@@ -270,13 +286,13 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric | Value |
 |---|---|
-| Test files (`*.test.ts`) | 53 |
-| Test cases (`it`/`test` blocks) | 534 |
+| Test files (`*.test.ts`) | 66 |
+| Test cases (executed by `pnpm test`) | 778 |
 | Typecheck | `pnpm typecheck` (10/10 tasks, 0 errors) |
 | Build | `pnpm build` (ESM + DTS) |
-| Coverage | `pnpm test:coverage` (same 53 files / 534 cases, exit 0) |
+| Coverage | `pnpm test:coverage` (same 66 files / 778 cases, exit 0) |
 | Lint | `pnpm lint:check` (Biome, clean) |
-| Clean | `pnpm clean` (7/7 tasks, removes `dist/`) |
+| Clean | `pnpm clean` (8/8 tasks, removes `dist/`) |
 
 ## Quick Start
 
@@ -345,7 +361,7 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. Inside
 this repository it is auto-loaded from `.opencode/plugins/behavioros.ts`, a thin
-loader that re-exports the built package; it exposes the full 29-tool surface
+loader that re-exports the built package; it exposes the full 32-tool surface
 (`bos_*`) plus governance hooks (`tool:execute.before`) and session context — no
 MCP server registration required.
 
@@ -370,10 +386,10 @@ mcpServers:
 | Package | Description | Version |
 |---|---|---|
 | `@behavior-os/schemas` | Zod v4.4.3 schemas for all types | 2.0.0 |
-| `@behavior-os/core` | 11 engines + EngineRegistry | 2.0.0 |
+| `@behavior-os/core` | 21 engines + EngineRegistry | 2.0.0 |
 | `@behavior-os/sdk` | High-level TypeScript SDK | 2.0.0 |
 | `@behavior-os/cli` | CLI (12 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check) | 2.0.0 |
-| `@behavior-os/mcp-server` | MCP server with 30 tools + 2 resources | 2.0.0 |
+| `@behavior-os/mcp-server` | MCP server with 57 tools + 2 resources | 2.0.0 |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 32 tools + hooks | 2.0.0 |
 
 ## License

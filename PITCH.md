@@ -102,7 +102,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | Revisão manual constante | Governança automatizada |
 | Erros se repetem | Engine de aprendizado deteta padrões recorrentes |
 | Coordenação difícil | Protocolo de 7 passos + missões rastreáveis |
-| Infraestrutura ad-hoc | 11 engines + CLI + SDK prontos |
+| Infraestrutura ad-hoc | 21 engines + CLI + SDK prontos |
 
 ---
 
@@ -134,10 +134,10 @@ npx behavioros simulate --action deploy --agent my-agent
 
 ## Status do Projeto
 
-- ✅ 53 ficheiros de teste / 534 casos (`pnpm test`)
+- ✅ 66 ficheiros de teste / 778 casos (`pnpm test`)
 - ✅ 0 erros de typecheck (`pnpm typecheck`, 10/10 tarefas)
 - ✅ `pnpm lint:check` limpo (Biome)
-- ✅ `pnpm test:coverage` passa (53 ficheiros / 534 casos)
+- ✅ `pnpm test:coverage` passa (66 ficheiros / 778 casos)
 - ✅ Build ESM + DTS
 - ✅ v2.0.0
 

@@ -1,11 +1,12 @@
 # Behavior-OS Changelog
 
-> **Nota de verificação:** as entradas abaixo foram escritas antes da auditoria de
-> afirmações e continham números aspiracionais (ex.: "22 engines", "45+ tools",
-> "9 resources", "5,200+ testes"). Os valores medidos são: **11 engines**,
-> **27** tools MCP + **2** resources, **29** tools no plugin OpenCode, **21**
-> padrões DNA e **53 ficheiros / 534 casos** de teste. Fonte de verdade:
-> [docs/CLAIMS.md](docs/CLAIMS.md).
+> **Snapshot histórico:** as entradas abaixo registam o que cada release afirmou
+> na altura e contêm números aspiracionais desse momento (ex.: "22 engines",
+> "45+ tools", "9 resources", "5,200+ testes"). Não são o estado atual.
+>
+> Estado medido em 2026-10-23: **21 engines**, **57** tools MCP + **2**
+> resources, **32** tools no plugin OpenCode, **21** padrões DNA e **77
+> ficheiros / 869 casos** de teste. Fonte viva: [docs/CLAIMS.md](docs/CLAIMS.md).
 
 All notable changes to this project will be documented in this file.
 

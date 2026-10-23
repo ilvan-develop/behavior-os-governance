@@ -38,7 +38,7 @@ applicable gate exits 0.
 ```text
 Gate: pnpm test
 Exit code: 0
-Evidence: 53 files / 534 tests passed
+Evidence: <files> files / <tests> tests passed
 ```
 
 Use the real numbers from the output. Do not copy counts from documentation.

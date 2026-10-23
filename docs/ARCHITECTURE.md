@@ -317,7 +317,7 @@ exposes 30 tools and the plugin 32.
   evidence was recorded.
 - Events are per mission and exclude secrets; persistence failures are reported,
   not swallowed.
-- 53 tests in `packages/orchestrator/tests/` cover real execution, failure
+- 64 tests in `packages/orchestrator/tests/` cover real execution, failure
   injection, dependency/agent blocking, durable resume, phase re-authorization,
   task-bound evidence, approval boundaries, limitations, persisted-audit
   revalidation and terminal-state guards. `control-loop.integration.test.ts`
@@ -332,7 +332,7 @@ remains a library; the loop is not yet wired into the MCP/plugin tool surface.
 ## Integration Points
 
 ### MCP Server (standalone)
-- 30 tools + 2 resources exposed via Model Context Protocol
+- 57 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 

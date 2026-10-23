@@ -123,7 +123,7 @@ All data is validated through Zod v4.4.3 schemas:
 ## Integration Points
 
 ### MCP Server (standalone for external clients)
-- 27 registered tools + 2 resources (`behavioros://protocol/steps`, `behavioros://dna/catalog`)
+- 57 registered tools + 2 resources (`behavioros://protocol/steps`, `behavioros://dna/catalog`)
 - JSON-RPC over stdio
 
 ### OpenCode v2 Plugin (single native channel)

@@ -1,0 +1,156 @@
+{
+  "incident": "notification-inbox-backlog",
+  "status": "implemented-validated-not-deployed",
+  "date": "2026-10-20",
+  "authorization": "Operator conditional Phase 3 authorization: coalescer implementation and local validation only; no host restart, commit, release, DNA change, queue operation, or mission transition.",
+  "symptom": "Repeated-looking Behavior-OS notices appeared in a burst and historical notices arrived long after the decisions they described.",
+  "rootCause": {
+    "classification": "late FIFO drain of distinct historical notices, not duplicate delivery",
+    "evidence": [
+      "19 synthetic deliveries carried 19 distinct message IDs; zero duplicate IDs.",
+      "14 notices drained between 12:00:11Z and 12:03:01Z (170 s); the other 5 were delivered earlier.",
+      "session_inbox was empty at 12:09:32Z; the last rejection was 11:56:20Z; no synthetic delivery occurred after 12:03:01Z.",
+      "The host inbox schema has no acknowledgement, attempt, cursor, dedupe or expiry columns. Delivery is acknowledged implicitly by deleting the row after it is materialised into session_message with the same ID and a new sequence/time.",
+      "The plugin producer emitted one notice per deny, escalate, DNA selection and mission creation with delivery=queue and no coalescing or staleness metadata.",
+      "Representative IDs: msg_158e62637001ooIrt97ZUf87sE (sequence 1348, produced 10:40:40Z, delivered 12:02:44Z) and msg_1592bb4330010G1mzcjvGW2FKF (sequence 3433, produced 11:56:38Z, delivered 12:03:01Z)."
+    ]
+  },
+  "fix": {
+    "scope": "producer side only",
+    "files": ["plugins/opencode-v2/src/notifications.ts", "plugins/opencode-v2/src/index.ts"],
+    "identityKey": [
+      "sessionID",
+      "kind",
+      "action",
+      "reason normalized by collapsing whitespace and trimming"
+    ],
+    "normalization": "Whitespace only. Case, punctuation and wording are preserved so distinct decisions never share a key.",
+    "windowMs": 60000,
+    "maxPerSessionPerWindow": 3,
+    "resetSemantics": "Only the session.prompt hook resets a window. OpenCode does not run that hook for synthetic messages, so a notice cannot re-enable itself. The hook runs before admission, so a prompt that fails preparation reopens the window early; this errs toward more notices, never fewer.",
+    "persistence": "Versioned snapshot under ctx.storage key behavioros:notifications:v1. take() is synchronous, so the duplicate check, cap check and record cannot interleave within one runtime. Snapshot writes are serialized so an older snapshot cannot overwrite a newer one.",
+    "delivery": "delivery=queue is unchanged; notices never interrupt a turn.",
+    "metadata": ["bosKind", "bosKey", "bosAt", "bosSuppressedDuplicate", "bosSuppressedCap"],
+    "observability": "Each suppression appends one advisory governance-log entry with the suppression reason and aggregate counters. It never emits another synthetic message."
+  },
+  "hostBoundary": {
+    "notImplemented": [
+      "inbox acknowledgement",
+      "persistent delivery cursor",
+      "notice expiry",
+      "dead-letter queue or quarantine",
+      "deletion or replay of host inbox records"
+    ],
+    "reason": "These live in the OpenCode host consumer, not in this repository. The coalescer reduces producer redundancy and does not claim timely delivery."
+  },
+  "filesChanged": [
+    "plugins/opencode-v2/src/notifications.ts (new)",
+    "plugins/opencode-v2/src/index.ts",
+    "plugins/opencode-v2/tests/notifications.test.ts (new)",
+    "plugins/opencode-v2/tests/plugin-registration.test.ts",
+    "docs/ARCHITECTURE.md",
+    "docs/CLAIMS.md",
+    "docs/analysis/incident-notification-backlog.json (new)"
+  ],
+  "tests": {
+    "focused": {
+      "command": "pnpm --filter @behavior-os/opencode-plugin exec vitest run tests/notifications.test.ts tests/plugin-registration.test.ts",
+      "files": 2,
+      "cases": 52,
+      "exitCode": 0
+    },
+    "pluginSuite": {
+      "command": "pnpm --filter @behavior-os/opencode-plugin test",
+      "files": 8,
+      "cases": 136,
+      "exitCode": 0
+    },
+    "rootSuite": {
+      "command": "pnpm exec vitest run",
+      "files": 60,
+      "cases": 689,
+      "exitCode": 0
+    },
+    "ladder": [
+      {
+        "command": "pnpm typecheck",
+        "result": "9/9 tasks successful",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm lint:check",
+        "result": "154 files checked, no fixes applied",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm build",
+        "result": "7/7 tasks successful",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm verify:governance",
+        "result": "24/24 claims proven, 0 failures",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm verify:plugin",
+        "result": "32 tools, all hooks registered",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm smoke:mcp",
+        "result": "30 tools, MCP smoke passed",
+        "exitCode": 0
+      },
+      {
+        "command": "pnpm verify:opencode",
+        "result": "38/38 checks passed",
+        "exitCode": 0
+      }
+    ],
+    "coveredRegressions": [
+      "identical identity inside the window is suppressed",
+      "distinct action, kind, reason or session is not suppressed",
+      "whitespace normalization does not merge different case or punctuation",
+      "window boundary at exactly windowMs",
+      "per-session cap and recovery after the window",
+      "reset clears the window and returns counters",
+      "snapshot/restore continues suppression and respects expiry",
+      "deep-copied snapshot cannot mutate live state",
+      "invalid snapshots are rejected without changing live state",
+      "many callers in one turn produce exactly one send",
+      "transport rejection does not crash or retry the blocked operation",
+      "metadata carries kind, key, time and suppression counters",
+      "governance log remains append-only and retains every deny decision",
+      "mission version, status and timestamps are unchanged by coalescing",
+      "restart restores the window and a real prompt reopens it"
+    ]
+  },
+  "preserved": {
+    "docs/analysis/governance-conformance.json": "Pre-existing working-tree change preserved byte-for-byte. SHA-256 221748E18F75E39C0ADBAB87569A31C70E4275B01FC2BC8061AAFC8EE016F25F. The file was backed up before the governance gate regenerated it and restored afterwards."
+  },
+  "residualRisks": [
+    "Host-side lateness remains: the coalescer does not acknowledge, expire or prioritise inbox records (C11).",
+    "Cross-process dedupe is not guaranteed: ctx.storage has no compare-and-swap, so two plugin instances sharing one session could each admit one notice. Within one process, take() is atomic.",
+    "If session.synthetic rejects, the key is already recorded. The governance decision remains in the log, but the on-screen notice may be lost for that window.",
+    "The window is wall-clock based; a clock jump can extend it.",
+    "The live host still runs the previous plugin build. The change is not active until a separately authorised restart.",
+    "pnpm audit --audit-level=high still fails (G-016) and remains an unrelated release blocker."
+  ],
+  "missionState": {
+    "id": "mission-1792497140760-6gv8pli4dvh",
+    "status": "active",
+    "version": 1,
+    "transitioned": false,
+    "note": "Inspected as required by the operator; no completion or cancellation was attempted."
+  },
+  "notDone": [
+    "host rebuild or restart",
+    "commit, merge, push, tag, publish or deploy",
+    "DNA or governance-policy change",
+    "schema change",
+    "host queue operation",
+    "retry of previously blocked shell or edit calls",
+    "mission completion or cancellation"
+  ]
+}

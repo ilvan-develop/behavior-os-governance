@@ -1,0 +1,134 @@
+{
+  "evidenceId": "C3",
+  "title": "examples/ moved into the pnpm workspace and covered by the root test ladder",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T02:34:00Z",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": {
+    "workspaceGlobs": ["packages/*", "plugins/*"],
+    "examplesInWorkspace": false,
+    "rootVitestProjects": ["packages/*", "plugins/*"],
+    "examplesVitestConfig": null,
+    "consequence": "examples/tests/examples.test.ts (4 real cases) was not executed by pnpm test, and a bare `vitest run` inside examples/ inherited the root projects glob and failed with 'No projects were found'."
+  },
+  "after": {
+    "workspaceGlobs": ["packages/*", "plugins/*", "examples"],
+    "examplesInWorkspace": true,
+    "rootVitestProjects": ["packages/*", "plugins/*", "examples"],
+    "examplesVitestConfig": "examples/vitest.config.ts (include tests/**/*.test.ts, node environment)",
+    "exampleCases": 4,
+    "exampleTestCommand": "pnpm --filter behavioros-examples test",
+    "exampleTestResult": "1 file / 4 cases passed, exit 0"
+  },
+  "fix": {
+    "kind": "workspace membership plus a package-local Vitest configuration",
+    "changes": [
+      { "file": "pnpm-workspace.yaml", "change": "added \"examples\" to packages" },
+      { "file": "examples/package.json", "change": "vitest ^3.0.0 -> ^4.1.11; added clean script" },
+      {
+        "file": "examples/vitest.config.ts",
+        "change": "new local config so the package is runnable in isolation"
+      },
+      {
+        "file": "vitest.config.ts",
+        "change": "root projects include examples; product coverage denominator remains packages/* and plugins/*"
+      },
+      {
+        "file": "docs/CLAIMS.md",
+        "change": "C3 marked closed; counts updated to 63 files / 744 cases, typecheck 10/10, lint 162 files, build 8/8, clean 8/8"
+      },
+      {
+        "file": "README.md",
+        "change": "badge and test-status table updated to 63 files / 744 cases; clean 8/8"
+      },
+      {
+        "file": "AGENTS.md",
+        "change": "monorepo layout now lists examples/ and the current orchestrator count (64)"
+      },
+      { "file": "docs/ARCHITECTURE.md", "change": "orchestrator test count 53 -> 64" },
+      {
+        "file": ".changeset/c3-examples-workspace.md",
+        "change": "empty changeset: dev/test tooling only, no published package version bump"
+      }
+    ]
+  },
+  "measured": {
+    "pnpmTest": {
+      "command": "pnpm test --force",
+      "exitCode": 0,
+      "tasks": "8 successful, 8 total, 0 cached",
+      "files": 63,
+      "cases": 744,
+      "examples": "1 file / 4 cases passed, exit 0"
+    },
+    "coverage": {
+      "command": "pnpm test:coverage",
+      "exitCode": 0,
+      "files": 63,
+      "cases": 744,
+      "statements": "77.36% (3217/4158)",
+      "branches": "73.14% (2234/3054)",
+      "functions": "83.91% (626/746)",
+      "lines": "77.36% (2967/3835)",
+      "note": "product denominator is packages/*/src and plugins/*/src; examples/ is a demo app and is deliberately excluded from the coverage denominator while its tests still run"
+    },
+    "typecheck": {
+      "command": "pnpm typecheck --force",
+      "exitCode": 0,
+      "result": "10 successful, 10 total, 0 cached"
+    },
+    "lint": {
+      "command": "pnpm lint:check",
+      "exitCode": 0,
+      "result": "162 files checked, no fixes applied"
+    },
+    "build": {
+      "command": "pnpm build --force",
+      "exitCode": 0,
+      "result": "8 successful, 8 total, 0 cached"
+    },
+    "clean": {
+      "command": "pnpm clean",
+      "exitCode": 0,
+      "result": "8 successful, 8 total, 0 cached; examples/dist removed"
+    },
+    "governance": {
+      "command": "pnpm verify:governance",
+      "exitCode": 0,
+      "result": "24/24 claims proven, 0 failures"
+    }
+  },
+  "regressionProof": {
+    "preFix": "A bare `pnpm --filter behavioros-examples test` failed before examples/vitest.config.ts existed: 'No projects were found. The projects definition: [packages/*, plugins/*]'.",
+    "postFix": "The same command runs 4/4 cases; root `pnpm test --force` reports 8 tasks and 63 files / 744 cases.",
+    "isolation": "examples/vitest.config.ts keeps the package runnable without changing the root project list."
+  },
+  "hashes": {
+    "pnpm-workspace.yaml": "5312273202F896C12236C7E62B463AEB69C15D6A4DF47ABE3A63C90C2DFBBA53",
+    "examples/package.json": "3B7FD3E047B09A8FBA64A45BD06ACE5B6FA3788BB7C1FCAF00BBE911F0EB6D64",
+    "examples/vitest.config.ts": "F72B3D8EBF80335B62D32E4996311DC7037F1089A8636C620371D49F6BE5EBAC",
+    "vitest.config.ts": "A050E6D99785B9AC5689D71FB991129274DBFE4A51F4EA76D01CA7EA15F2A5A6",
+    "docs/CLAIMS.md": "1A1478752CE9C3A606E35C4DD57FA3F27C991FDB72FD46FE978C05067E5115EB",
+    "README.md": "F7AA8FE189C49ED0CF717E77BB625CCB60FDE23F94730413505BA7DE20BBAE89",
+    "AGENTS.md": "551F216B070654B17120D727BA4D661E587771725F56C47AC54D183B848C64B7",
+    "docs/ARCHITECTURE.md": "D28F317726B6678451245AACF9E2D91F6ED7AAF470DAC9F8F4F3DC148E7E4A4D"
+  },
+  "limitations": [
+    "examples/src/index.ts is a demo entrypoint whose main() is not imported by the 4 tests; it is intentionally outside the product coverage denominator.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "The working tree contains pre-existing uncommitted notification, vitest and control-loop changes; they were preserved and re-verified, not authored by this mission.",
+    "Release automation remains human-gated and unverified; no commit, push, tag, publish or deploy was performed."
+  ],
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution"
+  ]
+}

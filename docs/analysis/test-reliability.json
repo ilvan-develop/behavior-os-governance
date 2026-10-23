@@ -1,0 +1,108 @@
+{
+  "evidenceId": "TEST-RELIABILITY",
+  "title": "Remove load-dependent test timeouts in the core and OpenCode plugin suites without weakening assertions",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T09:14:00Z",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": [
+    {
+      "suite": "plugins/opencode-v2",
+      "timeout": "20s",
+      "failure": "The cold first plugin import timed out at 20.1s during a full parallel turbo test run; the greeting test failed while the same test passed in isolation."
+    },
+    {
+      "suite": "packages/core",
+      "timeout": "Vitest default 5s",
+      "failure": "The 'keeps control-plane files trackable by git' test shells out to `git check-ignore`. It took 7.155s during a full parallel turbo test run (66 files / 775 cases) and failed the default 5s timeout; standalone it took 232ms."
+    }
+  ],
+  "after": [
+    {
+      "file": "plugins/opencode-v2/vitest.config.ts",
+      "change": "testTimeout and hookTimeout 20_000 -> 60_000"
+    },
+    {
+      "file": "packages/core/vitest.config.ts",
+      "change": "testTimeout and hookTimeout -> 30_000, with the measured 7.1s cold-run value documented inline"
+    }
+  ],
+  "whyThisIsNotWeakening": [
+    "No test assertion, skip, retry count or coverage threshold changed.",
+    "The tests still perform the same real work: the plugin still loads the real DNA/plugin graph, and the core test still executes `git check-ignore` against the real control-plane files.",
+    "The timeouts are now above the measured contention envelope instead of below it; a genuinely hanging test still fails after 30s/60s.",
+    "The git test already batched all paths into one `git check-ignore` call; the failure was scheduler/AV contention, not an O(n) spawn loop."
+  ],
+  "measured": {
+    "focusedCore": {
+      "command": "pnpm --filter @behavior-os/core exec vitest run tests/opencode-config.test.ts -t \"keeps control-plane files trackable by git\"",
+      "exitCode": 0,
+      "result": "1 file / 1 case passed, 232ms"
+    },
+    "focusedPlugin": {
+      "command": "pnpm --filter @behavior-os/opencode-plugin test",
+      "exitCode": 0,
+      "result": "8 files / 136 cases"
+    },
+    "fullSuite": {
+      "command": "pnpm test --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 66 files / 775 cases, 0 cached; core 41/470, schemas 4/34, sdk 2/11, cli 3/20, mcp 4/36, orchestrator 3/64, plugin 8/136, examples 1/4"
+    },
+    "typecheck": {
+      "command": "pnpm typecheck --force",
+      "exitCode": 0,
+      "result": "10/10 tasks, 0 cached"
+    },
+    "lint": {
+      "command": "pnpm lint:check",
+      "exitCode": 0,
+      "result": "170 files checked, no fixes applied"
+    },
+    "build": {
+      "command": "pnpm build --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 0 cached"
+    },
+    "governance": {
+      "command": "pnpm verify:governance",
+      "exitCode": 0,
+      "result": "24/24 claims, 0 failures"
+    },
+    "coverage": {
+      "command": "pnpm test:coverage",
+      "exitCode": 0,
+      "result": "66 files / 775 cases",
+      "statements": "77.67%",
+      "branches": "73.17%",
+      "functions": "84.33%",
+      "lines": "77.71%"
+    },
+    "verifyAll": {
+      "command": "pnpm verify:all",
+      "exitCode": 0,
+      "result": "all 9 gates passed; test task replayed the successful 66/775 cache entry"
+    }
+  },
+  "hashes": {
+    "plugins/opencode-v2/vitest.config.ts": "8BBF481565ADF5E14482B7B17791EFBFC19062691CCFD262DEF154A3915D1CB7",
+    "packages/core/vitest.config.ts": "BF0FAF13637CA705692152A187EE825FA7A302FFE3D045FCBDBFC3B9611381FB"
+  },
+  "limitations": [
+    "The underlying cause is environment contention (parallel turbo tasks, Windows Git startup and antivirus scanning), not an application defect; the timeouts make the suite deterministic within the measured envelope, they do not make the machine faster.",
+    "A future machine that is substantially slower than the measured 7.1s contention could still exceed 30s; the inline comment records the measurement so the next adjuster has evidence.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "Release automation remains human-gated and unverified; no commit, push, tag, publish or deploy was performed."
+  ],
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution"
+  ]
+}

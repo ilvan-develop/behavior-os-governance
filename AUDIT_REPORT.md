@@ -23,7 +23,7 @@ Behavior-OS é uma plataforma de governança comportamental para equipes de agen
 ### 1. Credencial Plaintext no `.env` do Repositório
 
 **Arquivo:** `.env`  
-**Linha:** `OPENCODE_PASSWORD=sovwxgYrbpUluS9WQ3NgsMbb7FG_m8D72gPeBLSb8f0`  
+**Linha:** `OPENCODE_PASSWORD=<REDACTED-2026-10-21>`  
 **Problema:** Senha exposta em texto plano no repositório Git. Mesmo com `.env` listado no `.gitignore`, o arquivo existe no working directory e pode ser commitado acidentalmente.
 
 **Ações Imediatas:**

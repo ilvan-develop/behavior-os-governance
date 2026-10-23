@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "phase": "3B",
+  "title": "Live notification coalescer validation",
+  "generatedAt": "2026-10-20T14:58:00.000Z",
+  "authorization": {
+    "type": "explicit",
+    "option": "A",
+    "scope": [
+      "one A/B session with two identical npm install lodash --dry-run attempts",
+      "one independent C session with the same command",
+      "read-only inspection of messages, inbox, logs, coalescer state, audit chain and mission",
+      "one new evidence artifact at docs/analysis/phase3b-live-notification-validation.json"
+    ],
+    "restrictions": [
+      "no host restart",
+      "no DNA, schema, mission or policy change",
+      "no commit, merge, push, tag, publish, release or deploy",
+      "no cleanup, deletion or rewrite of inbox rows or logs",
+      "no command execution instead of a governance deny",
+      "immediate stop on event loss or unexpected integrity change"
+    ]
+  },
+  "environment": {
+    "host": {
+      "pid": 14828,
+      "version": "2.0.23",
+      "url": "http://127.0.0.1:49374",
+      "processStartLocal": "2026-10-20T14:01:55+01:00",
+      "restarted": false
+    },
+    "dna": "Open Source",
+    "mission": {
+      "id": "mission-1792497140760-6gv8pli4dvh",
+      "status": "active",
+      "version": 1,
+      "createdAt": "2026-10-20T11:52:20.760Z",
+      "updatedAt": "2026-10-20T11:52:20.760Z",
+      "transitions": 1,
+      "transition": "pending -> active at 2026-10-20T11:52:20.760Z by system"
+    },
+    "loadedBuild": {
+      "evidence": "Host started 2026-10-20T13:01:55Z; plugin loaded 13:01:58.672Z; dist/notifications.js watcher 13:02:03.286Z; state restored by p14828-ksu2y at 13:02:03.753Z.",
+      "distIndexSha256": "F2BF5F4FA5289B5596BCE09A581F01AD250D51CC14607D20C0658FF076798CFD",
+      "distNotificationsSha256": "46CE08C7B07043BE1C766474DB390F78489BA4969109BF4A323EFBDFF5623805",
+      "buildMtime": "2026-10-20T12:44:56Z"
+    },
+    "coalescerKey": "plugin:006200650068006100760069006f0072002d006f0073:behavioros:notifications:v1",
+    "stateKey": "plugin:006200650068006100760069006f0072002d006f0073:behavioros:state"
+  },
+  "preTest": {
+    "capturedAt": "2026-10-20T13:23:28.443Z",
+    "stateRevision": 313,
+    "notificationsKeyPresent": false,
+    "inboxTotal": 20,
+    "historicalInboxRows": 20,
+    "historicalSessionId": "ses_ece835f94ffe7nAQiVNDChqAwM",
+    "workingTree": {
+      "modified": [
+        "docs/ARCHITECTURE.md",
+        "docs/CLAIMS.md",
+        "docs/analysis/governance-conformance.json",
+        "plugins/opencode-v2/src/index.ts",
+        "plugins/opencode-v2/tests/plugin-registration.test.ts"
+      ],
+      "untracked": [
+        "docs/analysis/incident-notification-backlog.json",
+        "plugins/opencode-v2/src/notifications.ts",
+        "plugins/opencode-v2/tests/notifications.test.ts"
+      ]
+    },
+    "conformanceSha256": "221748E18F75E39C0ADBAB87569A31C70E4275B01FC2BC8061AAFC8EE016F25F"
+  },
+  "method": {
+    "sessionLaunch": "opencode run --title <title> --format json --auto <prompt> against the already running host; no --standalone and no second plugin instance.",
+    "promptTransport": "The test prompt was stored in a temporary file and expanded into an environment variable, so the outer shell command did not contain the literal dependency command. This prevented the outer shell hook from intercepting the launch and let the agent issue the command inside the new session.",
+    "testCommand": "npm install lodash --dry-run",
+    "expectedGovernanceDecision": "deny via Open Source rule license-check: Block dependencies with incompatible licenses",
+    "expectedCoalescerBehavior": "A/B: first deny admitted, second identical deny suppressed; C: one deny admitted in a distinct session."
+  },
+  "tests": {
+    "AB": {
+      "sessionId": "ses_ea68289a7ffeqNNPfeoddhfYhl",
+      "title": "Phase 3B A/B coalescer live",
+      "createdAt": "2026-10-20T13:25:57.518Z",
+      "idleAt": "2026-10-20T13:26:17.055Z",
+      "idleOutcome": "succeeded",
+      "cliExitCode": 0,
+      "attempts": [
+        {
+          "tool": "shell",
+          "command": "npm install lodash --dry-run",
+          "status": "error",
+          "executed": false,
+          "error": "[Behavior-OS:Open Source] Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+          "startedAt": "2026-10-20T13:26:01.928Z",
+          "endedAt": "2026-10-20T13:26:02.029Z"
+        },
+        {
+          "tool": "shell",
+          "command": "npm install lodash --dry-run",
+          "status": "error",
+          "executed": false,
+          "error": "[Behavior-OS:Open Source] Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+          "startedAt": "2026-10-20T13:26:01.922Z",
+          "endedAt": "2026-10-20T13:26:02.036Z"
+        }
+      ],
+      "governanceLog": {
+        "denyEntries": [
+          {
+            "seq": 4838,
+            "at": "2026-10-20T13:26:02.008Z",
+            "action": "shell",
+            "outcome": "deny",
+            "detail": "Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+            "hash": "3ac9dbf158df89d69952ed19368f681a515d58c7dbcd91cccae59438090154de"
+          },
+          {
+            "seq": 4839,
+            "at": "2026-10-20T13:26:02.015Z",
+            "action": "shell",
+            "outcome": "deny",
+            "detail": "Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+            "hash": "52c8b7fa17cdef1b2222cb544d2c4e2ed61bdeaf6af816fa9083994fbf9bfee4"
+          }
+        ],
+        "suppressionAdvisory": {
+          "seq": 4840,
+          "at": "2026-10-20T13:26:02.015Z",
+          "detail": "Suppressed duplicate notification (deny); duplicate=1 cap=0 sent=1",
+          "hash": "8a9c00fa6ccb712e4d142a3cfd1e2038ac957a0655d25b7123cffb3eed18a1b6"
+        }
+      },
+      "coalescerState": {
+        "windowStartedAt": 1792502762008,
+        "sent": 1,
+        "suppressedDuplicate": 1,
+        "suppressedCap": 0,
+        "keys": [
+          "[\"ses_ea68289a7ffeqNNPfeoddhfYhl\",\"deny\",\"shell\",\"Blocked by rule: license-check (Block dependencies with incompatible licenses)\"]"
+        ]
+      },
+      "syntheticMessages": [
+        {
+          "id": "msg_1597d8a19001iV8li1qapJHJ9z",
+          "seq": 29,
+          "createdAt": "2026-10-20T13:26:08.146Z",
+          "bosKind": "deny",
+          "bosAt": 1792502762008,
+          "bosSuppressedDuplicate": 0,
+          "bosSuppressedCap": 0,
+          "text": "[Behavior-OS] Blocked \"shell\" - Blocked by rule: license-check (Block dependencies with incompatible licenses)"
+        }
+      ],
+      "inboxRows": 0,
+      "result": "PASS: both attempts denied before execution; exactly one notification admitted; the second identical notification was suppressed with an explicit advisory and state counter."
+    },
+    "C": {
+      "sessionId": "ses_ea681cbc7ffeKFoGMYw471KOVN",
+      "title": "Phase 3B C distinct session live",
+      "createdAt": "2026-10-20T13:26:46.090Z",
+      "idleAt": "2026-10-20T13:27:00.561Z",
+      "idleOutcome": "succeeded",
+      "cliExitCode": 0,
+      "attempts": [
+        {
+          "tool": "shell",
+          "command": "npm install lodash --dry-run",
+          "status": "error",
+          "executed": false,
+          "error": "[Behavior-OS:Open Source] Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+          "startedAt": "2026-10-20T13:26:48.512Z",
+          "endedAt": "2026-10-20T13:26:48.555Z"
+        }
+      ],
+      "governanceLog": {
+        "denyEntries": [
+          {
+            "seq": 4847,
+            "at": "2026-10-20T13:26:48.540Z",
+            "action": "shell",
+            "outcome": "deny",
+            "detail": "Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+            "hash": "f1358c1d6bde438a20ad3229a7f7cde324cbcea699fc1ce955223be1482b13f4"
+          }
+        ],
+        "suppressionAdvisory": null
+      },
+      "coalescerState": {
+        "windowStartedAt": 1792502808540,
+        "sent": 1,
+        "suppressedDuplicate": 0,
+        "suppressedCap": 0,
+        "keys": [
+          "[\"ses_ea681cbc7ffeKFoGMYw471KOVN\",\"deny\",\"shell\",\"Blocked by rule: license-check (Block dependencies with incompatible licenses)\"]"
+        ]
+      },
+      "syntheticMessages": [
+        {
+          "id": "msg_1597e3fdc001MaamwyPVH7Ete4",
+          "seq": 25,
+          "createdAt": "2026-10-20T13:26:52.750Z",
+          "bosKind": "deny",
+          "bosAt": 1792502808540,
+          "bosSuppressedDuplicate": 0,
+          "bosSuppressedCap": 0,
+          "text": "[Behavior-OS] Blocked \"shell\" - Blocked by rule: license-check (Block dependencies with incompatible licenses)"
+        }
+      ],
+      "inboxRows": 0,
+      "result": "PASS: a distinct session admitted its own deny notification; cross-session admission is not suppressed. This does not test intra-session action/reason distinctness."
+    }
+  },
+  "harnessArtifact": {
+    "notPartOfABorC": true,
+    "cause": "The first launch attempt placed the prompt literally in the outer shell command; the outer shell hook evaluated it as a dependency command and denied the launch before opencode run started.",
+    "sessionId": "ses_ea73b17f8ffe7YORyX8131Pu1R",
+    "denyLogSeq": 4828,
+    "denyAt": "2026-10-20T13:24:10.179Z",
+    "action": "shell",
+    "outcome": "deny",
+    "executed": false,
+    "error": "[Behavior-OS:Open Source] Blocked by rule: license-check (Block dependencies with incompatible licenses)",
+    "inboxRow": {
+      "id": "msg_1597bd54f001fNyKpdakGA4jrz",
+      "enqueuedAt": "2026-10-20T13:24:10.193Z",
+      "delivery": "queue",
+      "bosAt": 1792502650180
+    },
+    "deliveredSyntheticMessage": {
+      "id": "msg_1597bd54f001fNyKpdakGA4jrz",
+      "createdAt": "2026-10-20T13:30:17.461Z",
+      "deliveryLatencySeconds": 367.268
+    },
+    "currentSessionCoalescerState": "reset by the next prompt at 2026-10-20T14:55:53.035Z; the artifact is no longer in the notifications state",
+    "currentSessionInboxRows": 0,
+    "note": "This was a real deny caused by the test harness, not an A/B or C test event. It did not execute any command and did not alter the mission, DNA, schema or historical inbox rows."
+  },
+  "finalState": {
+    "capturedAt": "2026-10-20T14:56:03.730Z",
+    "notifications": {
+      "timeUpdated": "2026-10-20T14:55:53.035Z",
+      "sessions": {
+        "ses_ea68289a7ffeqNNPfeoddhfYhl": {
+          "windowStartedAt": 1792502762008,
+          "sent": 1,
+          "suppressedDuplicate": 1,
+          "suppressedCap": 0
+        },
+        "ses_ea681cbc7ffeKFoGMYw471KOVN": {
+          "windowStartedAt": 1792502808540,
+          "sent": 1,
+          "suppressedDuplicate": 0,
+          "suppressedCap": 0
+        }
+      }
+    },
+    "inbox": {
+      "total": 20,
+      "historicalRows": 20,
+      "historicalSessionId": "ses_ece835f94ffe7nAQiVNDChqAwM",
+      "oldestHistoricalId": "msg_154bf05b0001c4MBu44a3z9qLQ",
+      "newestHistoricalId": "msg_154df11a2001Wthf6HVZFeUJ0W",
+      "aBSessionRows": 0,
+      "cSessionRows": 0,
+      "currentSessionRows": 0,
+      "historicalIds": [
+        "msg_154bf05b0001c4MBu44a3z9qLQ",
+        "msg_154bfe1dd0011ACyiNZL105MBC",
+        "msg_154c05f8c001g4079X2f06w3Ve",
+        "msg_154c65b98001sTxPc9WdawNEzw",
+        "msg_154c96204001lIuvsjeUAVO68i",
+        "msg_154c96213001crdzKElVDXINB4",
+        "msg_154c962df001ZqNHWe6LJgdAcJ",
+        "msg_154c990e2001G5o2itLh5gukSo",
+        "msg_154c990fa001qeQZkB7G7jwFME",
+        "msg_154cbf2ea001Jp1JEKXQMuMMtp",
+        "msg_154cbf395001syeb76nBOda1V3",
+        "msg_154cc3d01001idz5Vu6aqFxK3x",
+        "msg_154cc3d0e001FdRhtG3S137uXB",
+        "msg_154cc3d150019ft6vvou5CrJCB",
+        "msg_154cc3da4001OaK03aYnKhS7YF",
+        "msg_154cd87ed001YGtc757N78pWze",
+        "msg_154cf34a20012ZRLoVL5NL1yWL",
+        "msg_154d8db7c001bqm8AM1hDgjlEu",
+        "msg_154d8db8e001w4OAwjtxAONR69",
+        "msg_154df11a2001Wthf6HVZFeUJ0W"
+      ]
+    },
+    "state": {
+      "revision": 318,
+      "revisionNote": "Revision 313 -> 318 reflects governance snapshots and event persistence, including the authorized bos_get_state inspection; no mission transition occurred.",
+      "timeUpdated": "2026-10-20T13:26:48.549Z",
+      "writer": "p14828-ksu2y",
+      "dna": "Open Source",
+      "currentStep": 7,
+      "activeMission": "mission-1792497140760-6gv8pli4dvh",
+      "missionStatus": "active",
+      "missionVersion": 1,
+      "missionCount": 26,
+      "missionStatusCounts": {
+        "active": 22,
+        "pending": 2,
+        "completed": 2
+      }
+    },
+    "auditTrail": {
+      "toolResult": {
+        "valid": true,
+        "checked": 54,
+        "complete": false,
+        "head": "80e3159b418fdc41c5d4c08fd3dd973e90507dac780ace7ed6b822f48cc49b45",
+        "anchor": "6940192dbe1c232928d675e8d9df87a81d7c83548e52c6f50c51e80ba98083d5",
+        "length": 54,
+        "sink": {
+          "enabled": false,
+          "path": null,
+          "writeErrors": 0,
+          "durable": null
+        }
+      },
+      "persistedTailVerification": {
+        "entries": 50,
+        "firstSeq": 4798,
+        "lastSeq": 4847,
+        "firstPrevHash": "6940192dbe1c232928d675e8d9df87a81d7c83548e52c6f50c51e80ba98083d5",
+        "lastHash": "f1358c1d6bde438a20ad3229a7f7cde324cbcea699fc1ce955223be1482b13f4",
+        "valid": true,
+        "mismatches": [],
+        "scope": "persisted state-log tail only"
+      },
+      "interpretation": "The retained windows are hash-valid and their anchor matches. The full history is not complete because the durable audit sink is disabled; bos_verify_audit_trail can only attest the retained 54-entry window."
+    },
+    "repository": {
+      "head": "efc6540f26b876b2dd0ac28bac4de1e177079011",
+      "conformanceSha256": "221748E18F75E39C0ADBAB87569A31C70E4275B01FC2BC8061AAFC8EE016F25F",
+      "conformanceUnchanged": true,
+      "gitDiffCheckExitCode": 0,
+      "packageOrLockfileChanged": false,
+      "workingTreeBeforeEvidenceFile": {
+        "modified": [
+          "docs/ARCHITECTURE.md",
+          "docs/CLAIMS.md",
+          "docs/analysis/governance-conformance.json",
+          "plugins/opencode-v2/src/index.ts",
+          "plugins/opencode-v2/tests/plugin-registration.test.ts"
+        ],
+        "untracked": [
+          "docs/analysis/incident-notification-backlog.json",
+          "plugins/opencode-v2/src/notifications.ts",
+          "plugins/opencode-v2/tests/notifications.test.ts"
+        ]
+      },
+      "newEvidenceFile": "docs/analysis/phase3b-live-notification-validation.json"
+    }
+  },
+  "preservation": {
+    "missionUnchanged": true,
+    "dnaUnchanged": true,
+    "schemaUnchanged": true,
+    "policiesUnchanged": true,
+    "historicalInboxRowsUnchanged": true,
+    "historicalInboxCount": 20,
+    "conformanceFileUnchanged": true,
+    "hostNotRestarted": true,
+    "noCommitMergePushTagPublishReleaseOrDeploy": true,
+    "commandsExecuted": false,
+    "testCommandsDeniedBeforeExecution": true
+  },
+  "limitations": [
+    "C only proves cross-session admission; it does not prove intra-session distinction by action, reason or tool identity.",
+    "The durable audit sink is disabled. bos_verify_audit_trail reports valid=true but complete=false and only checks 54 retained entries; the full 4847-entry state-log history is not cryptographically verified.",
+    "The historical inbox has no ACK, cursor, expiry or dead-letter mechanism. The 20 historical rows remain queued. The harness artifact was queued at 13:24:10 and delivered at 13:30:17 (367.268 s), showing that delivery can be delayed even when no event is lost.",
+    "The harness artifact is a real deny in the current session, caused by the first launch command text. It is excluded from A/B and C; it executed no command and did not alter protected state.",
+    "The current session coalescer entry was reset by the subsequent prompt at 14:55:53.035Z; the artifact remains visible as a synthetic message, but the current session no longer appears in the notifications state.",
+    "The cap of 3 notices, 60-second window expiry/reset, cross-process deduplication and restart/reload behavior were not tested in this run.",
+    "The coalescer state uses ctx.storage without CAS; cross-process dedupe is not guaranteed.",
+    "The pre-coalescer build was not archived; rollback would require a rebuild from HEAD, which was not authorized.",
+    "G-016 remains open: pnpm audit --audit-level=high exits 1 with 6 vulnerabilities (2 critical tinypool, 1 high braces, 3 moderate). It was not touched in this operation."
+  ],
+  "verdict": {
+    "result": "PASS WITH LIMITATIONS",
+    "passEvidence": [
+      "A/B: two real denies, executed=false, exactly one admitted notification, one suppression advisory and sent=1/suppressedDuplicate=1.",
+      "C: one real deny, executed=false, one admitted notification in a distinct session, sent=1/suppressedDuplicate=0.",
+      "No test command executed; no package.json or lockfile change.",
+      "Mission, DNA, schema and policies unchanged; 20 historical inbox rows preserved.",
+      "Host PID 14828 and version 2.0.23 unchanged; no restart.",
+      "Conformance artifact hash unchanged; git diff --check exit 0.",
+      "New evidence artifact only; no commit, push, tag, publish, release or deploy."
+    ],
+    "limitationSummary": [
+      "C is cross-session only, not intra-session action/reason distinctness.",
+      "Audit trail is retained-window valid but complete=false; durable sink disabled.",
+      "Inbox delivery can be delayed; no ACK/cursor/expiry/dead-letter.",
+      "Harness artifact and current-session reset are documented and excluded from A/B/C.",
+      "Cap, expiry, cross-process dedupe and restart were not tested.",
+      "G-016 remains a release blocker."
+    ]
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "evidenceId": "C02",
+  "title": "MCP server applies a per-tool token-bucket rate limit to all 30 tools",
+  "status": "CLOSED",
+  "measuredAt": "2026-10-21T09:12:00Z",
+  "timestampNote": "Historical measuredAt values in this file were written in local time (UTC+1) with a Z suffix; host governance logs use UTC. The 2026-10-21 corrections use actual UTC. Results are unaffected.",
+  "environment": {
+    "platform": "win32",
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "baselineCommit": "e25e22eab47b22cc9e49fc3135b827d519c3fdeb",
+    "branch": "master",
+    "workingTree": "changes uncommitted; no commit, push, tag, publish or deploy performed"
+  },
+  "before": {
+    "claim": "C02: no MCP tool had a frequency limit.",
+    "implementation": "packages/mcp-server/src/server.ts registered 30 tools with no shared call accounting; a client could call any tool as fast as it could write stdio messages.",
+    "consequence": "A looping or compromised agent could starve the server and repeatedly execute governance mutations."
+  },
+  "after": {
+    "implementation": [
+      "packages/mcp-server/src/rate-limit.ts: ToolRateLimiter (per-tool token bucket), rateLimitConfigFromEnv, withRateLimit",
+      "packages/mcp-server/src/server.ts: every server.registerTool call is wrapped once at the registration boundary, so all 30 tools and future tools inherit the limit"
+    ],
+    "defaults": {
+      "maxCalls": 300,
+      "windowMs": 60000,
+      "averageRate": "5 calls/second/tool"
+    },
+    "environment": {
+      "BEHAVIOROS_MCP_RATE_LIMIT_MAX": "bucket capacity / calls per window (default 300)",
+      "BEHAVIOROS_MCP_RATE_LIMIT_WINDOW_MS": "refill window in ms (default 60000)",
+      "BEHAVIOROS_MCP_RATE_LIMIT_DISABLED": "'true' disables the limiter; intended only for trusted local automation"
+    },
+    "throttledResult": "MCP result with isError: true and text 'Rate limit exceeded for <tool>: retry after <n> ms (limit <max> calls per <window> ms)'. The handler is not invoked.",
+    "invalidConfig": "Malformed numeric values fall back to the secure default and emit a warning on stderr; they never disable the limiter.",
+    "tests": "11 cases in packages/mcp-server/tests/rate-limit.test.ts"
+  },
+  "regressionProof": {
+    "unitCases": [
+      "capacity consumed then retry delay reported",
+      "tokens refill over time instead of a fixed window",
+      "one bucket per tool (no cross-tool starvation)",
+      "disabled mode always allows",
+      "targeted and full reset",
+      "invalid max/window rejected",
+      "defaults, valid overrides, malformed env values",
+      "wrapper does not invoke the callback after the bucket is empty"
+    ],
+    "runtimeCase": "The test sets BEHAVIOROS_MCP_RATE_LIMIT_MAX=2 before importing the real server, calls bos_get_state over InMemoryTransport twice successfully, and asserts the third call is an MCP error containing 'Rate limit exceeded for bos_get_state'.",
+    "structuralCoverage": "The limiter is installed by overriding the instance's registerTool method before the 30 registrations, so no tool bypasses it; the existing structural test still counts exactly 30 tools."
+  },
+  "measured": {
+    "typecheck": {
+      "command": "pnpm typecheck --force",
+      "exitCode": 0,
+      "result": "10/10 tasks, 0 cached"
+    },
+    "lint": {
+      "command": "pnpm lint:check",
+      "exitCode": 0,
+      "result": "170 files checked, no fixes applied"
+    },
+    "mcpFocused": {
+      "command": "pnpm --filter @behavior-os/mcp-server test",
+      "exitCode": 0,
+      "result": "4 files / 36 cases (11 new rate-limit cases)"
+    },
+    "test": {
+      "command": "pnpm test --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 66 files / 775 cases, 0 cached"
+    },
+    "build": {
+      "command": "pnpm build --force",
+      "exitCode": 0,
+      "result": "8/8 tasks, 0 cached"
+    },
+    "governance": {
+      "command": "pnpm verify:governance",
+      "exitCode": 0,
+      "result": "24/24 claims, 0 failures"
+    },
+    "smoke": {
+      "command": "pnpm smoke:mcp",
+      "exitCode": 0,
+      "result": "30 tools + 2 resources in a fresh stdio process; governance escalation still produced"
+    },
+    "securityAudit": {
+      "command": "pnpm run security:audit",
+      "exitCode": 0,
+      "result": "No known vulnerabilities found"
+    },
+    "realAudit": {
+      "command": "node <temp script> importing packages/core/dist/index.js -> new BehaviorOS().runAudit({simulate:false})",
+      "exitCode": 0,
+      "result": "overall pass; 4/4 stages passed (lint, typecheck, security, coverage), 0 failed, 0 skipped; coverage report coverage/index.html"
+    },
+    "hostAudit": {
+      "command": "bos_run_audit(missionId=mission-1792569792099-mlvo2qy4oki, simulate=false)",
+      "result": "fail",
+      "note": "The long-lived host's in-process audit returned fail, while a fresh import of the rebuilt packages/core/dist passes 4/4. The host process predates the rebuild; restart it before trusting its audit result. The exact stale component was not instrumented."
+    }
+  },
+  "hashes": {
+    "packages/mcp-server/src/rate-limit.ts": "62A58BD9C7544B95AB2F2E0FADA6C39F68028154E52485752310310A30F6D983",
+    "packages/mcp-server/src/server.ts": "FA86EE4DBA3D775CBAB86762B6AA94FE6455542B7E63168141053E4E097D4B68",
+    "packages/mcp-server/tests/rate-limit.test.ts": "CD4366AFE77583FF459163D09B024217CBFEC020D6090C1309DB1B6D7B62DD13",
+    "README.md": "479B03EA0796273803D53315435CC8DCD568392E095DFAE4FAF0E9E23CE0F316",
+    "docs/CLAIMS.md": "114D6B269D44FAF105FB8167867699153D601D9B494DBA250950B010283ECEE3",
+    ".changeset/c02-mcp-rate-limit.md": "85FDAB4403BD82C064E5A7507AB8591AC2CED4E7E8C8998232EA0BD999A2ED86"
+  },
+  "hashNote": "Hashes are the C02 measurement snapshot. README.md was corrected later; see corrections[0].hashAfterCorrection. The source/test hashes still match the working tree.",
+  "limitations": [
+    "The limiter is per process and per tool. It is not a distributed quota; stdio MCP has one server process per client.",
+    "It throttles runaway behavior but is not authentication or authorization and does not replace the DNA governance rules.",
+    "The token buckets are in memory and reset on restart.",
+    "BEHAVIOROS_MCP_RATE_LIMIT_DISABLED=true removes the protection; it is documented for trusted local automation only.",
+    "The default 300 calls/60 s per tool is a safety default, not a capacity-tested production SLO.",
+    "Docker is not installed in this environment, so the container image was not built or run.",
+    "Release automation remains human-gated and unverified; no commit, push, tag, publish or deploy was performed."
+  ],
+  "corrections": [
+    {
+      "observedAt": "2026-10-21T08:56:32Z",
+      "file": "README.md",
+      "change": "The CLI table still said `behavioros agent` only shows how to register agents; it now reads registered agents from the SQLite registry.",
+      "hashAfterCorrection": "C4C8CC44A3EDF31B08AFD73171B29E5F8547AD0F228C7E63C2FF132B9D9229D5"
+    }
+  ],
+  "governanceDeviation": {
+    "observedAt": "2026-10-21T08:56:32Z",
+    "summary": "The C02 implementation files were edited before a mission existed for the change. The mission and this evidence were created afterwards; the pre-action gate cannot be reconstructed, so this is recorded as a process deviation, not as a passed gate.",
+    "preventiveAction": "Before the first mutating edit, create and start the mission, run bos_preflight for the intended action, and record the mission id in the change evidence. The plugin auto-creates a mission from prompt intent, but that alone does not prove a pre-action gate ran.",
+    "learningId": "learn-1792573046303-qsas29a0bi",
+    "learningRecordId": "learn-rec-1792573046303-jsuj4mznqro",
+    "learningStage": "lesson",
+    "status": "recorded; the deviation remains a historical limitation"
+  },
+  "notDone": [
+    "git commit, merge, push, tag, publish or deploy",
+    "Docker build/run",
+    "release workflow execution",
+    "distributed or cross-process rate limiting"
+  ]
+}
