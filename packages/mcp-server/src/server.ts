@@ -1,5 +1,7 @@
-import { pathToFileURL } from 'node:url';
-import { BehaviorOS, PROTOCOL_STEPS } from '@behavior-os/core';
+﻿import { dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
+
 import type {
   DecisionPolicy,
   DNA,
@@ -12,6 +14,10 @@ import type {
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { rateLimitConfigFromEnv, ToolRateLimiter, withRateLimit } from './rate-limit.js';
+
+/** Module directory: a stable anchor for relative config paths (R19). */
+const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
 // Global behaviorOS instance
 let behaviorOS: BehaviorOS | null = null;
@@ -21,7 +27,7 @@ function getBehaviorOS(): BehaviorOS {
     behaviorOS = new BehaviorOS({
       dnaPath: process.env.BEHAVIOROS_DNA_PATH,
       // Optional SQLite persistence: set BEHAVIOROS_DB_PATH to a file to keep
-      // missions/learnings/agents/audit_log across restarts.
+      // missions/learnings/agents/audit_log and role/policy state across restarts.
       persistence: process.env.BEHAVIOROS_DB_PATH
         ? { path: process.env.BEHAVIOROS_DB_PATH }
         : undefined,
@@ -42,6 +48,25 @@ export const server = new McpServer({
   name: 'behavioros',
   version: '2.0.0',
 });
+
+/**
+ * Throttle every tool at the registration boundary. Wrapping here (instead of
+ * in each handler) means all 30 tools and any future tool get the same limit;
+ * the override is local to this server instance and delegates to the original
+ * method with a bound receiver.
+ */
+const parsedRateLimit = rateLimitConfigFromEnv();
+for (const warning of parsedRateLimit.warnings) {
+  console.error(`[Behavior-OS] ${warning}`);
+}
+export const toolRateLimiter = new ToolRateLimiter(parsedRateLimit.config);
+const registerTool = server.registerTool.bind(server);
+server.registerTool = ((name, config, callback) =>
+  registerTool(
+    name,
+    config,
+    withRateLimit(name, callback, toolRateLimiter),
+  )) as typeof server.registerTool;
 
 /**
  * Exported for tests that need a fresh server instance (e.g. InMemoryTransport
@@ -765,7 +790,16 @@ server.registerTool(
   }) => {
     try {
       const bos = getBehaviorOS();
-      const report = bos.runAudit({ missionId, agentId, stages, simulate });
+      const report = await bos.runAudit({
+        missionId,
+        agentId,
+        stages,
+        simulate,
+        // A stdio MCP client can launch this server from any cwd; resolve the
+        // workspace from the environment the way the plugin does, so real
+        // stages never run outside the project (false red audits).
+        root: resolveAuditRoot(process.env, SERVER_DIR),
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify(report, null, 2) }],
       };
@@ -1669,6 +1703,1121 @@ async function loadDNAPatterns(): Promise<Record<string, DNA>> {
 
   return dnas;
 }
+
+// ============================================================
+// METRICS & OBSERVABILITY TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_get_metrics',
+  {
+    description: 'Get current system-wide governance metrics and observability data',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { readOnlyHint: true, title: 'Get Metrics' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const metrics = bos.getMetrics();
+      return { content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_reset_metrics',
+  {
+    description: 'Reset all governance metrics (useful for fresh measurements)',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { destructiveHint: true, title: 'Reset Metrics' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      // Metrics are in-memory only; reset by creating a new engine
+      const bosAny = bos as unknown as { registry?: { engines?: Map<string, unknown> } };
+      const registry = bosAny.registry;
+      if (registry?.engines) {
+        registry.engines.delete('metrics');
+      }
+      return { content: [{ type: 'text', text: 'Metrics reset successfully' }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// BRAINSTORMING & DYNAMIC DNA TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_create_brainstorm',
+  {
+    description: 'Create a new brainstorming session for multi-agent collaboration',
+    inputSchema: z.object({
+      title: z.string().describe('Title of the brainstorming topic'),
+      participants: z.array(z.string()).describe('Agent IDs participating'),
+      dnaPattern: z.string().describe('DNA pattern governing the session'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Create Brainstorm' },
+  },
+  async ({ title, participants, dnaPattern }) => {
+    try {
+      const bos = getBehaviorOS();
+      const session = bos.createBrainstormSession(title, participants, dnaPattern);
+      return { content: [{ type: 'text', text: JSON.stringify(session, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_brainstorms',
+  {
+    description: 'List all brainstorming sessions',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { readOnlyHint: true, title: 'List Brainstorms' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const sessions = bos.listBrainstormSessions();
+      return { content: [{ type: 'text', text: JSON.stringify(sessions, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_propose_idea',
+  {
+    description: 'Propose an idea in a brainstorming session',
+    inputSchema: z.object({
+      sessionId: z.string().describe('Brainstorm session ID'),
+      authorId: z.string().describe('Agent proposing the idea'),
+      title: z.string().describe('Idea title'),
+      description: z.string().describe('Idea description'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Propose Idea' },
+  },
+  async ({ sessionId, authorId, title, description }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getBrainstorm();
+      const result = engine.proposeIdea(sessionId, authorId, title, description);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_vote_idea',
+  {
+    description: 'Vote on an idea in a brainstorming session',
+    inputSchema: z.object({
+      sessionId: z.string().describe('Brainstorm session ID'),
+      ideaId: z.string().describe('Idea ID to vote on'),
+      voterId: z.string().describe('Agent voting'),
+      vote: z.enum(['support', 'oppose', 'neutral']).describe('Vote choice'),
+      reason: z.string().optional(),
+    }),
+    annotations: { readOnlyHint: false, title: 'Vote Idea' },
+  },
+  async ({ sessionId, ideaId, voterId, vote, reason }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getBrainstorm();
+      const result = engine.voteOnIdea(sessionId, ideaId, voterId, vote, reason);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_create_dynamic_dna',
+  {
+    description: 'Create a dynamic DNA that can be modified at runtime',
+    inputSchema: z.object({
+      dnaName: z.string().describe('Name for the dynamic DNA'),
+      baseDnaName: z.string().describe('Base DNA pattern name'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Create Dynamic DNA' },
+  },
+  async ({ dnaName, baseDnaName }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const baseDna = dnas[baseDnaName.toLowerCase()];
+      if (!baseDna) {
+        return {
+          content: [{ type: 'text', text: `Base DNA "${baseDnaName}" not found` }],
+          isError: true,
+        };
+      }
+      const manager = bos.getDynamicDNAManager();
+      const dynamic = manager.createDynamicDNA(dnaName, baseDna);
+      return { content: [{ type: 'text', text: JSON.stringify(dynamic, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_override_rule',
+  {
+    description: 'Override a governance rule in a dynamic DNA',
+    inputSchema: z.object({
+      dnaName: z.string().describe('Dynamic DNA name'),
+      ruleId: z.string().describe('Rule ID to override'),
+      action: z.enum(['block', 'escalate', 'warn', 'log', 'transform']).describe('New action'),
+      reason: z.string().describe('Reason for override'),
+      authorizedBy: z.string().describe('Who authorized'),
+    }),
+    annotations: { destructiveHint: true, title: 'Override Rule' },
+  },
+  async ({ dnaName, ruleId, action, reason, authorizedBy }) => {
+    try {
+      const bos = getBehaviorOS();
+      const manager = bos.getDynamicDNAManager();
+      const result = manager.addOverride(dnaName, ruleId, action, undefined, reason, authorizedBy);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// BEHAVIORAL UX TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_behavior_profile',
+  {
+    description: 'Generate a human-readable behavioral profile for an agent',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      persona: z.string().describe('Agent persona/role'),
+      dnaPattern: z.string().describe('Active DNA pattern name'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Behavior Profile' },
+  },
+  async ({ agentId, persona, dnaPattern }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const dna = dnas[dnaPattern.toLowerCase()];
+      if (!dna) {
+        return {
+          content: [{ type: 'text', text: `DNA pattern "${dnaPattern}" not found` }],
+          isError: true,
+        };
+      }
+      const ux = bos.getBehavioralUX();
+      const learnings = bos.getInsights(100);
+      const missions = bos.listMissions(50);
+      const profile = ux.generateProfile(agentId, persona, dnaPattern, dna, learnings, missions);
+      const md = ux.generateMarkdownReport(agentId, profile);
+      return { content: [{ type: 'text', text: md }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_behavior_diff',
+  {
+    description: 'Compare two DNA patterns and show behavioral drift with interpretation',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      olderDna: z.string().describe('Older DNA pattern name'),
+      newerDna: z.string().describe('Newer DNA pattern name'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Behavior Diff' },
+  },
+  async ({ agentId, olderDna, newerDna }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const older = dnas[olderDna.toLowerCase()];
+      const newer = dnas[newerDna.toLowerCase()];
+      if (!older || !newer) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `DNA patterns not found. Available: ${Object.keys(dnas).join(', ')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const driftEngine = bos.getDriftEngine();
+      const driftInfo = driftEngine.compare(older, newer);
+      const ux = bos.getBehavioralUX();
+      const diff = ux.compareBehaviors(agentId, older, newer, driftInfo);
+      const _profile =
+        ux.getAllDiffs().length > 0 ? ux.getAllDiffs()[ux.getAllDiffs().length - 1] : diff;
+      const md = ux.generateMarkdownReport(
+        agentId,
+        {
+          agentId,
+          persona: 'comparator',
+          dnaPattern: `${olderDna}→${newerDna}`,
+          dnaVersion: `${older.version}→${newer.version}`,
+          traits: [],
+          confidence: 0.5,
+          governanceScore: 50,
+          learnedBehaviors: [],
+          predictedFailures: [],
+          timestamp: new Date().toISOString(),
+        },
+        diff,
+      );
+      return { content: [{ type: 'text', text: md }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_teach_behavior',
+  {
+    description: 'Teach/correct agent behavior — record a behavioral education',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      pattern: z.string().describe('Behavior pattern to correct'),
+      correction: z.string().describe('Correct behavior description'),
+      reason: z.string().describe('Reason for correction'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Teach Behavior' },
+  },
+  async ({ agentId, pattern, correction, reason }) => {
+    try {
+      const bos = getBehaviorOS();
+      const ux = bos.getBehavioralUX();
+      const education = ux.teachBehavior(agentId, pattern, correction, reason, 'user');
+      // Also record as a learning event
+      bos.recordLearning({
+        type: 'fix',
+        source: 'behavior-education',
+        content: `Educated ${agentId}: ${correction}`,
+        impact: 'high',
+        relatedMission: education.id,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Behavior educated!\n\n**Pattern:** ${pattern}\n**Correction:** ${correction}\n**Reason:** ${reason}\n**ID:** ${education.id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_behavior_timeline',
+  {
+    description: 'Get evolution timeline showing how agent behavior changed over time',
+    inputSchema: z
+      .object({
+        agentId: z.string().optional().describe('Filter by agent ID'),
+        limit: z.number().optional().describe('Max entries (default 20)'),
+      })
+      .passthrough()
+      .optional(),
+    annotations: { readOnlyHint: true, title: 'Behavior Timeline' },
+  },
+  async (params: { agentId?: string; limit?: number } | undefined) => {
+    const agentId = params?.agentId;
+    const limit = params?.limit ?? 20;
+    try {
+      const bos = getBehaviorOS();
+      const ux = bos.getBehavioralUX();
+      const timeline = ux.getTimeline(agentId).slice(0, limit);
+      if (timeline.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: agentId
+                ? `No behavior events found for agent "${agentId}"`
+                : 'No behavior events recorded yet.',
+            },
+          ],
+        };
+      }
+      let md = '# 📈 Evolution Timeline\n\n';
+      for (const entry of timeline) {
+        md += `${entry.emoji} **${entry.timestamp}** — ${entry.event}\n\n`;
+        md += `${entry.description}\n\n`;
+        md += `_Impact: ${entry.impact} | Type: ${entry.type}_\n\n---\n\n`;
+      }
+      return { content: [{ type: 'text', text: md }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_behavior_summary',
+  {
+    description: 'Get a quick one-line behavior summary for an agent',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Behavior Summary' },
+  },
+  async ({ agentId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const ux = bos.getBehavioralUX();
+      const profile = ux.getProfile(agentId);
+      if (!profile) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No profile found for agent "${agentId}". Generate one with bos_behavior_profile first.`,
+            },
+          ],
+        };
+      }
+      const summary = ux.getBehaviorSummary(profile);
+      const statusEmoji = ux.getStatusEmoji(profile);
+      return {
+        content: [
+          { type: 'text', text: summary },
+          {
+            type: 'text',
+            text: `\n\n${statusEmoji} Governança: ${profile.governanceScore.toFixed(0)}% | Confiança: ${(profile.confidence * 100).toFixed(0)}%`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_behavior_report',
+  {
+    description: 'Generate a full markdown behavioral report for an agent',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      persona: z.string().describe('Agent persona'),
+      dnaPattern: z.string().describe('DNA pattern name'),
+      includeDiff: z.boolean().optional().describe('Include latest diff (default false)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Behavior Report' },
+  },
+  async ({ agentId, persona, dnaPattern, includeDiff = false }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const dna = dnas[dnaPattern.toLowerCase()];
+      if (!dna) {
+        return {
+          content: [{ type: 'text', text: `DNA "${dnaPattern}" not found` }],
+          isError: true,
+        };
+      }
+      const ux = bos.getBehavioralUX();
+      const learnings = bos.getLearningEvents();
+      const missions = bos.listMissions(50);
+      const profile = ux.generateProfile(agentId, persona, dnaPattern, dna, learnings, missions);
+      const latestDiff = includeDiff
+        ? ux.getAllDiffs().find((d: { newerDna: string }) => d.newerDna === dnaPattern)
+        : undefined;
+      const md = ux.generateMarkdownReport(agentId, profile, latestDiff);
+      return { content: [{ type: 'text', text: md }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// ANTI-PATTERN & PRAGMATIC CONVERSATION TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_scan_antipatterns',
+  {
+    description: 'Scan code/text for anti-patterns (TS errors, lint violations, security issues)',
+    inputSchema: z.object({
+      text: z.string().describe('Code or text to scan'),
+      source: z.string().optional().describe('Source location/file'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Scan Anti-Patterns' },
+  },
+  async ({ text, source }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getAntipatternEngine();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Antipattern engine not initialized' }],
+          isError: true,
+        };
+      const result = engine.scan(text, source);
+      let md = `# 🛡️ Anti-Pattern Scan Results\n\n## Summary\n- Critical: ${result.summary.critical}\n- High: ${result.summary.high}\n- Medium: ${result.summary.medium}\n- Low: ${result.summary.low}\n- Info: ${result.summary.info}\n- **Total: ${result.summary.total}**\n\n`;
+      if (result.patterns.length === 0) {
+        md += `✅ **No anti-patterns detected!** Clean code.\n`;
+      } else {
+        for (const p of result.patterns) {
+          const emoji =
+            p.severity === 'critical'
+              ? '🔴'
+              : p.severity === 'high'
+                ? '🟠'
+                : p.severity === 'medium'
+                  ? '🟡'
+                  : '🟢';
+          md += `${emoji} **${p.severity.toUpperCase()}** — ${p.type}\n\n`;
+          md += `- Pattern: \`${p.pattern}\`\n`;
+          md += `- Description: ${p.description}\n`;
+          md += `- Recommendation: ${p.recommendation}\n\n---\n\n`;
+        }
+      }
+      return { content: [{ type: 'text', text: md }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_fix_antipatterns',
+  {
+    description: 'Auto-fix critical and high severity anti-patterns',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { readOnlyHint: false, title: 'Fix Anti-Patterns' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getAntipatternEngine();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Antipattern engine not initialized' }],
+          isError: true,
+        };
+      const fixed = engine.autoFixCritical();
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Fixed ${fixed.length} critical/high anti-patterns automatically.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_antipattern_report',
+  {
+    description: 'Generate full anti-pattern remediation report',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { readOnlyHint: true, title: 'Anti-Pattern Report' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getAntipatternEngine();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Antipattern engine not initialized' }],
+          isError: true,
+        };
+      const report = engine.generateReport();
+      return { content: [{ type: 'text', text: report }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_start_conversation',
+  {
+    description: 'Start a pragmatic conversation between agents to solve a problem',
+    inputSchema: z.object({
+      title: z.string().describe('Conversation title'),
+      problem: z.string().describe('Problem description'),
+      participants: z.array(z.string()).describe('Agent IDs participating'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Start Conversation' },
+  },
+  async ({ title, problem, participants }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getPragmaticConversation();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Pragmatic conversation engine not initialized' }],
+          isError: true,
+        };
+      const result = engine.startSession({ title, problem, participants });
+      if (!result.success) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }], isError: true };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Pragmatic conversation started!\n\n**Session ID:** ${result.session?.id}\n**Title:** ${title}\n**Problem:** ${problem}\n**Participants:** ${participants.join(', ')}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_add_conversation_turn',
+  {
+    description: 'Add a turn to a pragmatic conversation',
+    inputSchema: z.object({
+      sessionId: z.string().describe('Conversation session ID'),
+      agentId: z.string().describe('Agent contributing'),
+      content: z.string().describe('Message content'),
+      role: z
+        .enum(['system', 'user', 'agent', 'expert'])
+        .optional()
+        .describe('Role of the contributor'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Add Turn' },
+  },
+  async ({ sessionId, agentId, content, role = 'agent' }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getPragmaticConversation();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Pragmatic conversation engine not initialized' }],
+          isError: true,
+        };
+      const result = engine.addTurn(sessionId, agentId, content, role);
+      if (!result.success) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }], isError: true };
+      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Turn added by ${agentId}\n\n**Content:** ${content.slice(0, 100)}${content.length > 100 ? '...' : ''}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_resolve_conversation',
+  {
+    description: 'Resolve a conversation with solution and lessons learned',
+    inputSchema: z.object({
+      sessionId: z.string().describe('Conversation session ID'),
+      solution: z.string().describe('Solution found'),
+      lessonsLearned: z.array(z.string()).describe('Lessons to persist'),
+      resolvedBy: z.string().describe('Agent who resolved'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Resolve Conversation' },
+  },
+  async ({ sessionId, solution, lessonsLearned, resolvedBy }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getPragmaticConversation();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Pragmatic conversation engine not initialized' }],
+          isError: true,
+        };
+      const result = engine.resolveConversation(sessionId, solution, lessonsLearned, resolvedBy);
+      if (!result.success) {
+        return { content: [{ type: 'text', text: `Error: ${result.error}` }], isError: true };
+      }
+      // Record as learning (DRY: reuse the facade's governed recordLearning).
+      bos.recordLearning({
+        type: 'fix',
+        source: 'pragmatic-conversation',
+        content: `Solved: ${solution}`,
+        impact: 'high',
+        relatedMission: sessionId,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Conversation resolved!\n\n**Solution:** ${solution}\n**Lessons:** ${lessonsLearned.length} recorded`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_conversation_report',
+  {
+    description: 'Generate full report for a pragmatic conversation',
+    inputSchema: z.object({
+      sessionId: z.string().describe('Conversation session ID'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Conversation Report' },
+  },
+  async ({ sessionId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getPragmaticConversation();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Pragmatic conversation engine not initialized' }],
+          isError: true,
+        };
+      const report = engine.generateReport(sessionId);
+      if (!report) {
+        return {
+          content: [{ type: 'text', text: `Session "${sessionId}" not found` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: 'text', text: report }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_conversations',
+  {
+    description: 'List all pragmatic conversations',
+    inputSchema: z.object({}).passthrough().optional(),
+    annotations: { readOnlyHint: true, title: 'List Conversations' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getPragmaticConversation();
+      if (!engine)
+        return {
+          content: [{ type: 'text', text: 'Pragmatic conversation engine not initialized' }],
+          isError: true,
+        };
+      const sessions = engine.listSessions();
+      return { content: [{ type: 'text', text: JSON.stringify(sessions, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// ROLE & POLICY GOVERNANCE TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_register_role',
+  {
+    description: 'Register a role with attached policy-rule ids for role-based governance',
+    inputSchema: z.object({
+      id: z.string().describe('Role id (how actors resolve to this role)'),
+      name: z.string().describe('Role name'),
+      displayName: z.string().describe('Human-readable display name'),
+      responsibilities: z.array(z.string()).describe('Responsibility list'),
+      policies: z.array(z.string()).optional().describe('Policy-rule ids attached to this role'),
+      canAudit: z.boolean().optional().describe('Whether the role may audit'),
+      canEnforce: z.boolean().optional().describe('Whether the role may enforce'),
+      canTeach: z.boolean().optional().describe('Whether the role may teach behaviors'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Register Role' },
+  },
+  async ({ id, name, displayName, responsibilities, policies, canAudit, canEnforce, canTeach }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.registerRole({
+        id,
+        name,
+        displayName,
+        responsibilities,
+        policies,
+        canAudit: canAudit ?? false,
+        canEnforce: canEnforce ?? false,
+        canTeach: canTeach ?? false,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_define_policy',
+  {
+    description:
+      'Define a policy rule (condition/action/severity/applies-to) used by registered roles',
+    inputSchema: z.object({
+      id: z.string().describe('Policy-rule id'),
+      name: z.string().describe('Policy name'),
+      description: z.string().describe('What the policy demands and why'),
+      condition: z
+        .string()
+        .describe(
+          "Action matcher: '*' for any action, or an action prefix (e.g. 'deploy', 'git push')",
+        ),
+      action: z
+        .enum(['require', 'warn', 'block', 'auto-fix'])
+        .describe('Deterministic enforcement action'),
+      severity: z
+        .enum(['critical', 'high', 'medium', 'low', 'info'])
+        .describe('Severity of a violation'),
+      appliesTo: z
+        .array(z.enum(['persona', 'role', 'agent', 'project']))
+        .describe('Which actor facets the rule governs'),
+      effectiveFrom: z.string().describe('ISO date from which the rule is effective'),
+      effectiveUntil: z.string().optional().describe('Optional ISO expiry date'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Define Policy' },
+  },
+  async ({
+    id,
+    name,
+    description,
+    condition,
+    action,
+    severity,
+    appliesTo,
+    effectiveFrom,
+    effectiveUntil,
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.defineRolePolicy({
+        id,
+        name,
+        description,
+        condition,
+        action,
+        severity,
+        appliesTo,
+        effectiveFrom,
+        effectiveUntil,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_evaluate_role_action',
+  {
+    description:
+      'Evaluate an action against the role/policy registry — returns the deterministic decision',
+    inputSchema: z.object({
+      role: z.string().optional().describe('Actor role id or persona'),
+      agentId: z.string().optional().describe('Actor agent id'),
+      action: z.string().describe('The action about to be performed (e.g. deploy, git push)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Evaluate Role Action' },
+  },
+  async ({ role, agentId, action }) => {
+    try {
+      const bos = getBehaviorOS();
+      const decision = bos.evaluateRoleAction({ role, agentId }, action);
+      return { content: [{ type: 'text', text: JSON.stringify(decision, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_role_policy_report',
+  {
+    description:
+      'Per-role audit report: decision counts by action and by role, plus the last decision',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'Role Policy Report' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const report = bos.getRolePolicyEngine().getReport();
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_list_roles',
+  {
+    description: 'List registered roles and policy rules of the role/policy engine',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'List Roles' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getRolePolicyEngine();
+      const result = { roles: engine.listRoles(), policies: engine.listPolicies() };
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
 
 // ============================================================
 // START SERVER

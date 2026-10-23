@@ -15,8 +15,8 @@ const toolNames = [...serverSource.matchAll(/server\.registerTool\(\s*\n?\s*'([a
 );
 
 describe('MCP server structure', () => {
-  it('registers exactly 30 tools', () => {
-    expect(toolNames).toHaveLength(30);
+  it('registers exactly 57 tools', () => {
+    expect(toolNames).toHaveLength(57);
   });
 
   it('registers exactly 2 resources', () => {

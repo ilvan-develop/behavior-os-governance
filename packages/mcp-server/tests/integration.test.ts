@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -84,6 +84,11 @@ describe('MCP Server Integration', () => {
     expect(serverSource).toContain('expectedVersion');
     expect(serverSource).toMatch(/evidence: z\s*\.array/);
     expect(serverSource).toMatch(/simulate: z\s*\.boolean\(\)/);
-    expect(serverSource).toContain('stages, simulate');
+    // The audit call must forward the real stages AND the project root: a
+    // client can launch the stdio server from any cwd, and without a root the
+    // real stages run outside the project and report a false red (R19).
+    expect(serverSource).toContain('stages,');
+    expect(serverSource).toContain('simulate,');
+    expect(serverSource).toContain('root: resolveAuditRoot(process.env, SERVER_DIR)');
   });
 });
