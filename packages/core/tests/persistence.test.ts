@@ -202,6 +202,34 @@ describe('RolePolicyEngine persistence', () => {
     expect(second.getRolePolicyEngine().getAuditTrail()).toHaveLength(2);
   });
 
+  it('skips the per-call meta write for benign decisions (hot-path cost control)', () => {
+    const first =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    expect(first.defineRolePolicy(policy).success).toBe(true);
+    expect(first.registerRole(role).success).toBe(true);
+    // A meaningful decision persists the snapshot...
+    first.evaluateRoleAction({ role: 'developer' }, 'deploy production');
+    const probeStore = new SqliteStore({ path: dbPath });
+    const persisted = probeStore.getMeta('role-policy-state');
+    expect(typeof persisted).toBe('string');
+    const snapshot = JSON.parse(persisted as string) as { trail: unknown[] };
+    const persistedDecisions = snapshot.trail.length;
+
+    // ...while benign calls (no policy matched) do not: the permission hook
+    // evaluates every mutating tool call through this exact method.
+    for (let i = 0; i < 10; i++) {
+      const benign = first.evaluateRoleAction({ role: 'developer' }, 'grep files');
+      expect(benign.action).toBe('allow');
+    }
+    const persistedAfter = JSON.parse(probeStore.getMeta('role-policy-state') as string) as {
+      trail: unknown[];
+    };
+    expect(persistedAfter.trail.length).toBe(persistedDecisions);
+    probeStore.close();
+    // The in-memory trail still records every benign decision.
+    expect(first.getRolePolicyEngine().getAuditTrail().length).toBeGreaterThan(persistedDecisions);
+  });
+
   it('an expired policy comes back from the store but no longer fires', () => {
     const first =
       bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
@@ -230,5 +258,53 @@ describe('RolePolicyEngine persistence', () => {
     expect(bos.defineRolePolicy(policy).success).toBe(true);
     expect(bos.registerRole(role).success).toBe(true);
     expect(bos.evaluateRoleAction({ role: 'developer' }, 'deploy').action).toBe('block');
+  });
+
+  it('learning lifecycle records survive a restart through the store', async () => {
+    const first =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    await first.loadDNA(testDna);
+    const record = first.createLearningRecord({
+      title: 'Self-review finds it, guardrails keep it',
+      content: 'A fix went in without a failing test; require tracer bullets first.',
+      source: 'pragmatic-pipeline',
+      impact: 'high',
+    });
+    expect(record.stage).toBe('observation');
+
+    const promoted = first.advanceLearningRecord(record.id, 'lesson', {
+      evidence: ['verify:all 879/879'],
+      reason: 'Landed green',
+    });
+    expect(promoted.ok).toBe(true);
+    // A refused promotion must not persist anything: go one stage too far.
+    expect(first.advanceLearningRecord(record.id, 'policy', {}).ok).toBe(false);
+
+    const second =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    const restored = second.getLearningRecords();
+    expect(restored).toHaveLength(1);
+    expect(restored[0].id).toBe(record.id);
+    expect(restored[0].stage).toBe('lesson');
+    expect(restored[0].transitions).toHaveLength(1);
+    expect(restored[0].evidence).toEqual(['verify:all 879/879']);
+  });
+
+  it('a corrupt learning-records snapshot never blocks startup', () => {
+    const store = new SqliteStore({ path: dbPath });
+    store.setMeta('learning-records', 'not json at all');
+    store.close();
+
+    bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } }));
+    const bos = bornInstances[bornInstances.length - 1];
+    expect(bos.getLearningRecords()).toEqual([]);
+    // And the facade keeps working: the next mutation re-persists clean state.
+    const record = bos.createLearningRecord({
+      title: 't',
+      content: 'c',
+      source: 's',
+      impact: 'low',
+    });
+    expect(record.stage).toBe('observation');
   });
 });

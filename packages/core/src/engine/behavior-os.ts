@@ -1,3 +1,5 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
   Agent,
   AgentState,
@@ -30,6 +32,8 @@ import type {
   RankedRecommendation,
   Vote,
 } from '@behavior-os/schemas';
+import { load as yamlLoad } from 'js-yaml';
+import { isControlPlaneAction, isMutatingAction } from '../action-classification.js';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
 import { CodeEditEngine, type CodeEditPreview } from './code-edit-engine.js';
@@ -537,6 +541,7 @@ export class BehaviorOS {
       throw new Error('No DNA loaded. Call loadDNA() first.');
     }
 
+    const startedAt = Date.now();
     const govEngine = this.registry.createGovernanceEngine(this.currentDNA);
     const decision = govEngine.evaluate({
       action,
@@ -546,14 +551,41 @@ export class BehaviorOS {
 
     // Governance-level policy: in lenient mode, soften hard denials into
     // escalations so autonomous agents can proceed with awareness of the risk.
-    if (decision.verdict === 'deny' && this.config.governance?.level === 'lenient') {
-      return {
-        ...decision,
-        verdict: 'escalate',
-        reason: `${decision.reason} (softened by lenient governance level)`,
-      };
-    }
-    return decision;
+    const finalDecision =
+      decision.verdict === 'deny' && this.config.governance?.level === 'lenient'
+        ? {
+            ...decision,
+            verdict: 'escalate' as const,
+            reason: `${decision.reason} (softened by lenient governance level)`,
+          }
+        : decision;
+
+    // Self-measurement: every evaluation through any host (plugin, MCP, CLI,
+    // orchestrator) is counted here, once, at the single facade choke point.
+    // `warn` only collides at the bucket level when the verdict is still
+    // allow: the governance engine never emits a `warn` verdict — warnings
+    // coexist with allow — so "warned" means "allowed but warned".
+    const warned = finalDecision.verdict === 'allow' && (finalDecision.warnings?.length ?? 0) > 0;
+    this.getMetricsEngine().recordGovernance(
+      warned ? 'warn' : finalDecision.verdict,
+      finalDecision.rulesEvaluated.length,
+      Date.now() - startedAt,
+      this.firedRuleActions(finalDecision),
+    );
+    return finalDecision;
+  }
+
+  /**
+   * Map the decision's fired rule ids to their configured actions so metrics
+   * can report per-rule impact. Falls back to `unknown` only if a fired rule
+   * is missing from the active DNA (which can also not happen, because rules
+   * only fire from the active DNA).
+   */
+  private firedRuleActions(decision: GovernanceDecision): Array<{ id: string; action: string }> {
+    return (decision.firedRules ?? []).map((id) => ({
+      id,
+      action: this.currentDNA?.governance.find((rule) => rule.id === id)?.action ?? 'unknown',
+    }));
   }
 
   // Quality Gates
@@ -929,6 +961,7 @@ export class BehaviorOS {
       type: options.type as LearningType,
       impact: options.impact as LearningImpact,
     });
+    this.getMetricsEngine().recordLearningEvent(event.type);
     if (options.advanceProtocol !== false) {
       this.advanceProtocolStep('bos_record_learning');
     }
@@ -951,7 +984,12 @@ export class BehaviorOS {
    * and evidence-backed; see {@link advanceLearningRecord}.
    */
   createLearningRecord(options: CreateLearningRecordOptions): LearningRecord {
-    return this.getLearningEngine().createRecord(options);
+    const record = this.getLearningEngine().createRecord(options);
+    // Lifecycle records (G-014) must survive a restart like every other
+    // governed entity; the learning EVENTS already persist via entity rows,
+    // the records ride the same meta channel as role/policy state.
+    this.persistLearningRecords();
+    return record;
   }
 
   /** Promote a learning record exactly one lifecycle stage forward. */
@@ -960,7 +998,20 @@ export class BehaviorOS {
     to: LearningStage,
     options: AdvanceLearningRecordOptions = {},
   ): LearningAdvanceResult {
-    return this.getLearningEngine().advanceRecord(id, to, options);
+    const result = this.getLearningEngine().advanceRecord(id, to, options);
+    // A refused promotion leaves the record untouched — persisting then would
+    // just rewrite identical state, so only successful transitions store.
+    if (result.ok) this.persistLearningRecords();
+    return result;
+  }
+
+  /** Write the learning-record lifecycle (G-014) to the store's metadata. */
+  private persistLearningRecords(): void {
+    if (!this.store) return;
+    this.store.setMeta(
+      'learning-records',
+      JSON.stringify(this.getLearningEngine().snapshotRecords()),
+    );
   }
 
   getLearningRecords(): LearningRecord[] {
@@ -1020,11 +1071,16 @@ export class BehaviorOS {
     const applied: EvolutionProposal[] = [];
     for (const proposal of proposals) {
       if (governance.some((rule) => rule.id === proposal.ruleId)) continue;
+      // Guard against the inert rule regression: a proposal whose condition no
+      // real host context key can match would never fire. The learning engine
+      // only emits matchable conditions (context key `tool`); anything without
+      // one is skipped here by construction.
+      if (!proposal.condition) continue;
       governance.push({
         id: proposal.ruleId,
         level: 'medium',
         action: 'warn',
-        conditions: [{ type: 'pattern', value: proposal.pattern }],
+        conditions: [proposal.condition],
         description: proposal.description,
       });
       applied.push(proposal);
@@ -1355,6 +1411,11 @@ export class BehaviorOS {
       missionId: rest.missionId ?? this.agentState.activeMission ?? undefined,
     });
     this.store?.saveDecision(decision);
+    this.getMetricsEngine().recordConsensus(
+      decision.outcome,
+      options.votes.length,
+      options.votes.reduce((sum, vote) => sum + (vote.weight ?? 1), 0),
+    );
     return decision;
   }
 
@@ -1435,9 +1496,19 @@ export class BehaviorOS {
   // Metrics & Observability -------------------------------------------------
   /** Get current system-wide metrics snapshot. */
   getMetrics() {
+    return this.getMetricsEngine().metrics;
+  }
+
+  /** Lazily-created metrics engine shared by all instrumentation points. */
+  private getMetricsEngine(): import('./metrics-engine.js').MetricsEngine {
     let engine = this.registry.get<import('./metrics-engine.js').MetricsEngine>('metrics');
     if (!engine) engine = this.registry.createMetricsEngine();
-    return engine.metrics;
+    return engine;
+  }
+
+  /** Reset all governance metrics. */
+  resetMetrics(): void {
+    this.getMetricsEngine().reset();
   }
 
   /** Record a governance evaluation for metrics tracking. */
@@ -1445,10 +1516,9 @@ export class BehaviorOS {
     verdict: 'allow' | 'deny' | 'escalate' | 'warn' | 'log',
     rulesEvaluated: number,
     latencyMs: number,
+    firedRules?: Array<{ id: string; action: string }>,
   ): void {
-    let engine = this.registry.get<import('./metrics-engine.js').MetricsEngine>('metrics');
-    if (!engine) engine = this.registry.createMetricsEngine();
-    engine.recordGovernance(verdict, rulesEvaluated, latencyMs);
+    this.getMetricsEngine().recordGovernance(verdict, rulesEvaluated, latencyMs, firedRules);
   }
 
   // Brainstorming & Collaboration ------------------------------------------
@@ -1551,7 +1621,15 @@ export class BehaviorOS {
     action: string,
   ): import('./role-policy-engine.js').RoleDecision {
     const decision = this.getRolePolicyEngine().evaluate(actor, action);
-    this.persistRolePolicyState();
+    // Hot path: the permission hook evaluates every mutating tool call.
+    // A benign decision (no policy matched, actor already known) does not
+    // change the durable registry — persisting it would pay a store write
+    // per tool call. The in-memory trail still records every decision; the
+    // snapshot is persisted when the decision is meaningful: a policy
+    // actually matched, or the fail-safe fired (unknown role → require).
+    if (decision.matchedPolicy || decision.action === 'require') {
+      this.persistRolePolicyState();
+    }
     return decision;
   }
 
@@ -1588,12 +1666,72 @@ export class BehaviorOS {
   }
 
   // Mission Management
-  listMissions(limit = 50): Mission[] {
-    return this.getMissionEngine().list().slice(0, limit);
+  /**
+   * List missions with optional filters applied BEFORE the limit. The filters
+   * were once documented but applied by two hosts, which is how implementations
+   * diverged; the facade owns these semantics now.
+   */
+  listMissions(
+    limit = 50,
+    filters: { status?: MissionStatus; type?: MissionType; priority?: MissionPriority } = {},
+  ): Mission[] {
+    return this.getMissionEngine()
+      .list()
+      .filter((mission) => !filters.status || mission.status === filters.status)
+      .filter((mission) => !filters.type || mission.type === filters.type)
+      .filter((mission) => !filters.priority || mission.priority === filters.priority)
+      .slice(0, limit);
   }
 
   getMission(missionId: string): Mission | null {
     return this.getMissionEngine().get(missionId);
+  }
+
+  /**
+   * The single source of truth for how a DNA deny becomes an enforcement
+   * effect. A restrictive DNA must stay escapable: denies never apply to the
+   * governance control plane (reading/acting on governance is not an
+   * *operation* on the governed environment) or to read-only inspection
+   * tools, otherwise a bootstrap deadlock would be inescapable. The verdict
+   * is still recorded by the enforcement host, never silently lost.
+   */
+  bootstrapDenyOverride(action: string, decision: GovernanceDecision): boolean {
+    return (
+      decision.verdict === 'deny' && (isControlPlaneAction(action) || !isMutatingAction(action))
+    );
+  }
+
+  /**
+   * Read every YAML pattern in a directory through the registry's validating
+   * DNA loader, keyed by file basename. Loading without validation let an
+   * invalid `dna as DNA` cast propagate half-shaped patterns into loadDNA();
+   * validation failures instead become reported errors a host can surface.
+   */
+  async loadDNAFromDirectory(
+    directory: string,
+  ): Promise<{ patterns: Map<string, DNA>; errors: string[] }> {
+    const patterns = new Map<string, DNA>();
+    const errors: string[] = [];
+    const files = (await readdir(directory)).filter((file) => /\.(yaml|yml)$/.test(file));
+    for (const file of files) {
+      const name = file.replace(/\.(yaml|yml)$/, '');
+      try {
+        const content = await readFile(join(directory, file), 'utf-8');
+        const parsed: unknown = yamlLoad(content);
+        const dna =
+          parsed !== null && typeof parsed === 'object'
+            ? this.registry.getDNALoader().load(parsed)
+            : null;
+        if (dna) {
+          patterns.set(name, dna);
+        } else {
+          errors.push(`${file}: empty document`);
+        }
+      } catch (error) {
+        errors.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { patterns, errors };
   }
 
   getAgentState(): AgentState {
@@ -1676,6 +1814,16 @@ export class BehaviorOS {
         // starts empty and the next facade mutation re-persists clean state.
       }
     }
+    // Learning lifecycle record (G-014) hydrates from its meta snapshot.
+    const learningRecordsRaw = this.store.getMeta('learning-records');
+    if (learningRecordsRaw) {
+      try {
+        this.getLearningEngine().restoreRecords(JSON.parse(learningRecordsRaw));
+      } catch {
+        // Corrupt snapshot: start with the event restore above and let the
+        // next record mutation re-persist a clean lifecycle.
+      }
+    }
   }
 
   /**
@@ -1690,6 +1838,7 @@ export class BehaviorOS {
     await store.withTransaction(async () => {
       for (const mission of this.getMissionEngine().snapshot()) store.saveMission(mission);
       for (const event of this.getLearningEngine().snapshot()) store.saveLearning(event);
+      this.persistLearningRecords();
       for (const agent of this.agents.values()) store.saveAgent(agent);
       this.persistRolePolicyState();
     });
