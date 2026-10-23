@@ -29,6 +29,7 @@ import {
   verifyGovernanceLog,
   verifyGovernanceLogFile,
 } from './governance-log.js';
+import { NotificationCoalescer, type NotificationIdentity } from './notifications.js';
 import {
   detectOvertake,
   mergeSnapshots,
@@ -45,6 +46,13 @@ let storageRevision = 0;
 
 /** Storage key under which the engine snapshot is persisted. */
 const STORAGE_KEY = 'behavioros:state';
+
+/** Coalescing window for synthetic notices: one minute. */
+const NOTIFICATION_WINDOW_MS = 60_000;
+/** At most three synthetic notices per session per window. */
+const NOTIFICATION_MAX_PER_WINDOW = 3;
+/** Storage key for the persisted coalescer snapshot. */
+const NOTIFICATION_STORAGE_KEY = 'behavioros:notifications:v1';
 
 function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
@@ -449,18 +457,86 @@ export default Plugin.define({
       });
     }
 
+    // --- Notification coalescing -------------------------------------------
+    // `delivery: 'queue'` is retained: notices must not interrupt a turn. The
+    // coalescer bounds the producer side only; it never acknowledges host
+    // inbox records and never claims that a notice was delivered.
+    const notifications = new NotificationCoalescer({
+      windowMs: NOTIFICATION_WINDOW_MS,
+      maxPerWindow: NOTIFICATION_MAX_PER_WINDOW,
+    });
+    const notificationStorage = ctx.storage;
+    const storedNotifications =
+      notificationStorage && typeof notificationStorage.get === 'function'
+        ? await notificationStorage.get(NOTIFICATION_STORAGE_KEY).catch(() => undefined)
+        : undefined;
+    if (storedNotifications !== undefined && !notifications.restore(storedNotifications)) {
+      console.warn('[Behavior-OS] Ignoring invalid notification coalescer state');
+    }
+
+    // Serialize snapshot writes so an older snapshot cannot overwrite a newer
+    // one when several notices are admitted in the same turn.
+    let notificationPersist: Promise<void> = Promise.resolve();
+    const persistNotifications = (): Promise<void> => {
+      const storage = ctx.storage;
+      if (!storage || typeof storage.set !== 'function') return Promise.resolve();
+      const snapshot = notifications.snapshot();
+      notificationPersist = notificationPersist
+        .then(() => storage.set(NOTIFICATION_STORAGE_KEY, toStorageJson(snapshot)))
+        .then(() => undefined)
+        .catch((error) => {
+          console.warn(
+            `[Behavior-OS] Could not persist notification state: ${describeError(error)}`,
+          );
+        });
+      return notificationPersist;
+    };
+
     // Post a short user-visible message into the session TUI for significant
     // governance events (DNA selection, mission creation, deny/escalate).
+    // Repeated decisions inside one window are collapsed, and a session may
+    // enqueue at most NOTIFICATION_MAX_PER_WINDOW notices per window.
     // Never throws: notifications are observability, not enforcement.
-    const notify = async (sessionID: string | undefined, text: string): Promise<void> => {
+    const notify = async (
+      sessionID: string | undefined,
+      text: string,
+      identity: Omit<NotificationIdentity, 'sessionID'>,
+    ): Promise<void> => {
       if (!sessionID) return;
       const send = ctx.session?.synthetic;
       if (typeof send !== 'function') return;
+
+      const decision = notifications.take({ ...identity, sessionID });
+      const stats = notifications.stats(sessionID);
+      if (!decision.send) {
+        // One aggregated log line per suppression; never another synthetic
+        // message, so suppression stays quieter than the event it suppresses.
+        recordLog(
+          'advisory',
+          'info',
+          identity.action,
+          `Suppressed ${decision.suppressed} notification (${identity.kind}); duplicate=${stats.suppressedDuplicate} cap=${stats.suppressedCap} sent=${stats.sent}`,
+        );
+        return;
+      }
+
       try {
-        await send({ sessionID, text, delivery: 'queue' });
+        await send({
+          sessionID,
+          text,
+          delivery: 'queue',
+          metadata: {
+            bosKind: identity.kind,
+            bosKey: decision.key,
+            bosAt: decision.at,
+            bosSuppressedDuplicate: stats.suppressedDuplicate,
+            bosSuppressedCap: stats.suppressedCap,
+          },
+        });
       } catch {
         // ignore: best-effort on-screen notification
       }
+      await persistNotifications();
     };
 
     await ctx.tool.transform((editor) => {
@@ -1066,11 +1142,15 @@ export default Plugin.define({
             stages?: string[];
             simulate?: boolean;
           };
-          const report = bos.runAudit({
+          const report = await bos.runAudit({
             missionId: params.missionId,
             agentId: params.agentId,
             stages: params.stages,
             simulate: params.simulate,
+            // The host process cwd is not guaranteed to be the project; the
+            // plugin knows the workspace, so the real audit stages must run
+            // there (otherwise typecheck/security fail with "no script").
+            root: ctx.location.directory,
           });
           await persistState(ctx);
           const label = report.simulated
@@ -1868,6 +1948,7 @@ export default Plugin.define({
           await notify(
             event.sessionID,
             `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}\n${BLOCK_HINT}`,
+            { kind: 'deny', action: event.action, reason: decision.reason },
           );
         } else if (effectiveVerdict === 'escalate' && event.effect !== 'deny') {
           event.effect = 'ask';
@@ -1875,6 +1956,7 @@ export default Plugin.define({
           await notify(
             event.sessionID,
             `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}\n${ASK_HINT}`,
+            { kind: 'escalate', action: event.action, reason: decision.reason },
           );
         }
       } catch (error) {
@@ -1945,6 +2027,20 @@ export default Plugin.define({
       const text = event.prompt?.text?.trim() ?? '';
       if (!text) return;
 
+      // A real user prompt starts a new notification window. OpenCode does not
+      // run this hook for synthetic messages, so a notice can never reset the
+      // window that suppressed it.
+      const previousWindow = notifications.reset(event.sessionID);
+      if (previousWindow) {
+        recordLog(
+          'advisory',
+          'info',
+          'session.prompt',
+          `Notification window reset; sent=${previousWindow.sent} duplicate=${previousWindow.suppressedDuplicate} cap=${previousWindow.suppressedCap}`,
+        );
+        await persistNotifications();
+      }
+
       const behavioros: Record<string, unknown> = {};
 
       // 1) Auto-select a DNA pattern when none is active yet.
@@ -1963,6 +2059,7 @@ export default Plugin.define({
           await notify(
             event.sessionID,
             `[Behavior-OS] 🧬 Auto-selected DNA "${match}" — governance rules are now active.`,
+            { kind: 'dna', action: 'session.prompt', reason: `Auto-selected DNA "${match}"` },
           );
         }
       }
@@ -1993,6 +2090,7 @@ export default Plugin.define({
           await notify(
             event.sessionID,
             `[Behavior-OS] 🎯 Opened mission "${mission.id}" for this request.`,
+            { kind: 'mission', action: 'session.prompt', reason: `Opened mission "${mission.id}"` },
           );
         }
       }

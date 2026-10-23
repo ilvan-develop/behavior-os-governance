@@ -23,9 +23,12 @@
     "effect": "4.0.0-rc.112",
     "js-yaml": "^5.4.3"
   },
+  "files": [
+    "dist/"
+  ],
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "~5.9.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   }
 }

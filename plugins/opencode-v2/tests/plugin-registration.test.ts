@@ -32,6 +32,7 @@ interface FakeContext {
       sessionID: string;
       text: string;
       delivery?: 'steer' | 'queue' | null;
+      metadata?: Record<string, unknown>;
     }) => Promise<unknown>;
   };
   permission: {
@@ -55,13 +56,19 @@ interface FakePermissionEvent {
   message?: string;
 }
 
-function createFakeContext(locationDirectory: string) {
+interface CapturedSynthetic {
+  sessionID: string;
+  text: string;
+  delivery?: 'steer' | 'queue' | null;
+  metadata?: Record<string, unknown>;
+}
+
+function createFakeContext(locationDirectory: string, storageData = new Map<string, unknown>()) {
   const addedTools: CapturedTool[] = [];
   const toolHooks: Record<string, unknown> = {};
   const sessionHooks: Record<string, unknown> = {};
   const permissionHooks: Record<string, unknown> = {};
-  const storageData = new Map<string, unknown>();
-  const syntheticCalls: Array<{ sessionID: string; text: string }> = [];
+  const syntheticCalls: CapturedSynthetic[] = [];
   const agents: FakeAgentInfo[] = [
     { id: 'build', name: 'Build', system: 'You are the build agent.' },
     { id: 'review', name: 'Review' },
@@ -107,7 +114,12 @@ function createFakeContext(locationDirectory: string) {
         return { dispose: async () => {} };
       },
       synthetic: async (input) => {
-        syntheticCalls.push({ sessionID: input.sessionID, text: input.text });
+        syntheticCalls.push({
+          sessionID: input.sessionID,
+          text: input.text,
+          delivery: input.delivery,
+          metadata: input.metadata,
+        });
       },
     },
     permission: {
@@ -625,6 +637,198 @@ describe('behavior-os governance log', () => {
     const denyNote = syntheticCalls.find((call) => call.text.includes('⛔'));
     expect(denyNote, 'deny should produce a synthetic on-screen message').toBeDefined();
     expect(denyNote?.sessionID).toBe('ses-test-123');
+  });
+
+  it('coalesces a repeated denial and carries suppression counters', async () => {
+    const { ctx, addedTools, permissionHooks, syntheticCalls } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const before = JSON.parse(
+      (await runTool(addedTools, 'bos_get_log', { limit: 1000 })).content,
+    ) as { entries: Array<Record<string, unknown>> };
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const first: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-coalesce',
+      agent: 'test',
+      effect: 'allow',
+    };
+    const second: FakePermissionEvent = { ...first };
+    const distinct: FakePermissionEvent = { ...first, action: 'edit' };
+
+    await permission(first);
+    await permission(second);
+    await permission(distinct);
+
+    expect(first.effect).toBe('deny');
+    expect(second.effect).toBe('deny');
+    expect(distinct.effect).toBe('deny');
+
+    const denyNotes = syntheticCalls.filter((call) => call.text.includes('⛔'));
+    expect(denyNotes).toHaveLength(2);
+    expect(denyNotes[0]?.delivery).toBe('queue');
+    expect(denyNotes[0]?.metadata?.bosKind).toBe('deny');
+    expect(typeof denyNotes[0]?.metadata?.bosKey).toBe('string');
+    expect(denyNotes[0]?.metadata?.bosSuppressedDuplicate).toBe(0);
+    // The next admitted notice reports the counter from the suppressed one.
+    expect(denyNotes[1]?.metadata?.bosSuppressedDuplicate).toBe(1);
+
+    const after = JSON.parse(
+      (await runTool(addedTools, 'bos_get_log', { limit: 1000 })).content,
+    ) as { entries: Array<{ kind: string; outcome: string; detail: string }> };
+
+    // The log is append-only: every earlier entry is still present unchanged.
+    expect(after.entries.slice(0, before.entries.length)).toEqual(before.entries);
+    const denials = after.entries.filter(
+      (entry) => entry.kind === 'permission' && entry.outcome === 'deny',
+    );
+    expect(denials.length).toBeGreaterThanOrEqual(2);
+    expect(after.entries.some((entry) => entry.detail.includes('Suppressed duplicate'))).toBe(true);
+    expect(after.entries.some((entry) => entry.detail.includes('duplicate=1'))).toBe(true);
+  });
+
+  it('does not crash or retry when the notice transport rejects', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    let attempts = 0;
+    ctx.session.synthetic = async () => {
+      attempts += 1;
+      throw new Error('transport unavailable');
+    };
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-transport',
+      agent: 'test',
+      effect: 'allow',
+    };
+
+    await expect(permission(event)).resolves.toBeUndefined();
+    await expect(permission({ ...event })).resolves.toBeUndefined();
+
+    expect(event.effect).toBe('deny');
+    // The first notice was attempted once and failed; the repeated decision was
+    // coalesced, so the transport was not called again and the action was not
+    // re-executed.
+    expect(attempts).toBe(1);
+  });
+
+  it('caps notices per session and reopens only on a real prompt', async () => {
+    const { ctx, addedTools, permissionHooks, sessionHooks, syntheticCalls } =
+      createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    for (const action of ['bash', 'edit', 'write', 'patch']) {
+      await permission({
+        action,
+        resources: ['deploy to production'],
+        sessionID: 'ses-cap',
+        agent: 'test',
+        effect: 'allow',
+      });
+    }
+    expect(syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(3);
+
+    const prompt = sessionHooks.prompt as (event: unknown) => Promise<void>;
+    await prompt({ sessionID: 'ses-cap', prompt: { text: 'hello' } });
+
+    await permission({
+      action: 'patch',
+      resources: ['deploy to production'],
+      sessionID: 'ses-cap',
+      agent: 'test',
+      effect: 'allow',
+    });
+    expect(syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(4);
+  });
+
+  it('restores the coalescer window across a simulated restart', async () => {
+    const storageData = new Map<string, unknown>();
+    const first = createFakeContext(repoRoot, storageData);
+    await plugin.setup(first.ctx as never);
+    await runTool(first.addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const firstPermission = first.permissionHooks.evaluate as (
+      event: FakePermissionEvent,
+    ) => Promise<void>;
+    await firstPermission({
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-restart',
+      agent: 'test',
+      effect: 'allow',
+    });
+    expect(first.syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(1);
+
+    const second = createFakeContext(repoRoot, storageData);
+    await plugin.setup(second.ctx as never);
+    const secondPermission = second.permissionHooks.evaluate as (
+      event: FakePermissionEvent,
+    ) => Promise<void>;
+    await secondPermission({
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-restart',
+      agent: 'test',
+      effect: 'allow',
+    });
+
+    expect(second.syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(0);
+
+    // The restored window is the one wired to the hook: a real prompt clears
+    // it, so the same decision is admitted again.
+    const prompt = second.sessionHooks.prompt as (event: unknown) => Promise<void>;
+    await prompt({ sessionID: 'ses-restart', prompt: { text: 'hello' } });
+    await secondPermission({
+      action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-restart',
+      agent: 'test',
+      effect: 'allow',
+    });
+    expect(second.syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(1);
+  });
+
+  it('leaves mission state untouched when a notice is coalesced', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'Coalescer state preservation',
+      type: 'refactor',
+      priority: 'low',
+    });
+    const missionId = created.content.replace('Mission created: ', '').trim();
+
+    const list = async () =>
+      JSON.parse(
+        (await runTool(addedTools, 'bos_list_missions', { limit: 1000 })).content,
+      ) as Array<Record<string, unknown> & { id: string }>;
+    const before = (await list()).find((mission) => mission.id === missionId);
+    expect(before).toBeDefined();
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    for (let index = 0; index < 2; index += 1) {
+      await permission({
+        action: 'bash',
+        resources: ['deploy to production'],
+        sessionID: 'ses-mission',
+        agent: 'test',
+        effect: 'allow',
+      });
+    }
+
+    const after = (await list()).find((mission) => mission.id === missionId);
+    expect(after).toEqual(before);
   });
 
   it('bos_drift compares two DNA patterns and reports a real drift', async () => {

@@ -469,13 +469,26 @@ check('control-plane files are not git-ignored', () => {
     '.opencode/plugins/behavioros.ts',
   ];
   if (files.length === 0) fail('no control-plane files found to check');
-  for (const file of files) {
-    const ignored =
-      spawnSync('git', ['check-ignore', '--quiet', file], {
-        cwd: repoRoot,
-        stdio: 'ignore',
-      }).status === 0;
-    if (ignored) fail(`${file} is git-ignored and would never reach another machine`);
+  // Batch all checks into a single `git check-ignore` call: one hidden spawn
+  // instead of one per file. git exits 0 when at least one listed path is
+  // ignored, and 1 when none are — so exit 1 is the expected green result.
+  const batch = spawnSync('git', ['check-ignore', '--quiet', ...files], {
+    cwd: repoRoot,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  if (batch.status === 0) {
+    // At least one file is (wrongly) ignored — identify which with per-file calls.
+    for (const file of files) {
+      const ignored =
+        spawnSync('git', ['check-ignore', '--quiet', file], {
+          cwd: repoRoot,
+          stdio: 'ignore',
+          windowsHide: true,
+        }).status === 0;
+      if (ignored) fail(`${file} is git-ignored and would never reach another machine`);
+    }
+    fail('git check-ignore reported an ignored file but no per-file call matched');
   }
   return `${files.length} files trackable`;
 });
