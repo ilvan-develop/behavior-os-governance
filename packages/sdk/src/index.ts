@@ -48,12 +48,12 @@ export class BehaviorOSSDK {
   }
 
   // Audit
-  runAudit(options: {
+  async runAudit(options: {
     missionId: string;
     agentId: string;
     stages?: string[];
     simulate?: boolean;
-  }): AuditReport {
+  }): Promise<AuditReport> {
     return this.bos.runAudit(options);
   }
 

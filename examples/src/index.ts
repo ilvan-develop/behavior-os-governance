@@ -89,7 +89,7 @@ async function main() {
 
   // Run audit
   console.log('\n🔍 Running audit...');
-  const report = bos.runAudit({ missionId: mission.id, agentId: 'system' });
+  const report = await bos.runAudit({ missionId: mission.id, agentId: 'system' });
   console.log('  Audit overall:', report.overall);
   console.log('  Stages:', report.stages.length);
 

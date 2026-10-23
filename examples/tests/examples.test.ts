@@ -151,7 +151,7 @@ describe('Examples - Real World Usage', () => {
       type: 'deployment',
       priority: 'critical',
     });
-    const report = bos.runAudit({ missionId: mission.id, agentId: 'ci-bot' });
+    const report = await bos.runAudit({ missionId: mission.id, agentId: 'ci-bot' });
     expect(report.overall).toBeDefined();
   });
 
