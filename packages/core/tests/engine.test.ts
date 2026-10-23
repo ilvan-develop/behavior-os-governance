@@ -82,8 +82,8 @@ describe('QualityEngine', () => {
 describe('AuditEngine', () => {
   const engine = new AuditEngine();
 
-  it('should record audit stages', () => {
-    const report = engine.run({
+  it('should record audit stages', async () => {
+    const report = await engine.run({
       missionId: 'm1',
       agentId: 'a1',
       stages: ['lint', 'typecheck', 'security'],

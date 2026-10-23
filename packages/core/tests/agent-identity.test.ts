@@ -62,6 +62,55 @@ describe('Governed agent identity', () => {
     expect(identity.source).toBe('persona');
   });
 
+  it('auto-registers the active persona as a configurable-free role on loadDNA', async () => {
+    await bos.loadDNA(makeDna());
+
+    const engine = bos.getRolePolicyEngine();
+    const role = engine.getRole('developer');
+    expect(role).toBeDefined();
+    // Fail-safe posture: identity and attribution only; policies empty and no
+    // capabilities granted until an explicit registration adds them.
+    expect(role?.policies).toEqual([]);
+    expect(role?.canAudit).toBe(false);
+    expect(role?.canEnforce).toBe(false);
+    expect(role?.canTeach).toBe(false);
+    expect(role?.responsibilities).toEqual(['coding']);
+
+    // Out-of-the-box evaluation now works and lands in the audit trail.
+    const decision = engine.evaluate({ persona: 'developer' }, 'write code');
+    expect(decision.action).toBe('allow');
+    expect(decision.role?.id).toBe('developer');
+    expect(engine.getAuditTrail()).toHaveLength(1);
+  });
+
+  it('auto-registers the role for an explicitly activated persona too', async () => {
+    await bos.loadDNA(makeDna());
+    // The first persona ('developer') is auto-registered by loadDNA; activate
+    // the other one through the setAgent path.
+    expect(bos.setActiveAgent({ persona: 'reviewer' })?.persona).toBe('reviewer');
+    expect(bos.getRolePolicyEngine().getRole('reviewer')).toBeDefined();
+  });
+
+  it('never overwrites an explicitly registered role with the auto one', async () => {
+    const engine = bos.getRolePolicyEngine();
+    engine.registerRole({
+      id: 'developer',
+      name: 'Hand-rolled Dev',
+      displayName: 'Hand-rolled Dev',
+      responsibilities: [],
+      policies: ['explicit-policy'],
+      canAudit: true,
+      canEnforce: true,
+      canTeach: true,
+    });
+
+    await bos.loadDNA(makeDna());
+    const role = bos.getRolePolicyEngine().getRole('developer');
+    expect(role?.name).toBe('Hand-rolled Dev');
+    expect(role?.policies).toEqual(['explicit-policy']);
+    expect(role?.canEnforce).toBe(true);
+  });
+
   it('leaves the persona unset when the DNA defines none', async () => {
     await bos.loadDNA(makeDna({ personas: [] }));
 
@@ -75,22 +124,22 @@ describe('Governed agent identity', () => {
   it('attributes audits to the DNA persona when agentId is omitted', async () => {
     await bos.loadDNA(makeDna());
 
-    const report = bos.runAudit({ missionId: 'mission-1' });
+    const report = await bos.runAudit({ missionId: 'mission-1' });
 
     expect(report.agentId).toBe(personaIdentity('developer'));
     expect(report.persona).toBe('developer');
     expect(report.dnaPattern).toBe('Test DNA');
   });
 
-  it('reports "unassigned" for audits run without a DNA selection', () => {
-    const report = bos.runAudit({ missionId: 'mission-1' });
+  it('reports "unassigned" for audits run without a DNA selection', async () => {
+    const report = await bos.runAudit({ missionId: 'mission-1' });
     expect(report.agentId).toBe(UNASSIGNED_AGENT_ID);
   });
 
   it('honours an explicit agentId but still stamps DNA and persona', async () => {
     await bos.loadDNA(makeDna());
 
-    const report = bos.runAudit({ missionId: 'mission-1', agentId: 'auditor-7' });
+    const report = await bos.runAudit({ missionId: 'mission-1', agentId: 'auditor-7' });
 
     expect(report.agentId).toBe('auditor-7');
     expect(report.persona).toBe('developer');

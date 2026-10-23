@@ -424,13 +424,16 @@ describe('control-plane verification gates', () => {
     expect(files.length).toBeGreaterThanOrEqual(10);
     // Batch all checks into a single `git check-ignore` call to avoid per-file
     // spawn overhead on Windows, which causes this test to exceed the 5s timeout.
+    // git exits 0 when at least one listed path is ignored; here all paths must
+    // be trackable, so any exit 0 fails the check.
     const result = spawnSync('git', ['check-ignore', '--quiet', ...files], {
       cwd: repoRoot,
       stdio: 'ignore',
+      windowsHide: true,
     });
-    // git exits 0 only when ALL files are ignored. Any non-zero exit means at
-    // least one file is NOT ignored (which is what we want). Since no files
-    // should be ignored, a non-zero exit code is the passing condition.
+    // A non-zero exit means none of the listed files is ignored, which is the
+    // passing condition. An exit of 0 would mean at least one control-plane
+    // file is git-ignored and would never reach another machine.
     expect(result.status).not.toBe(0);
   });
 });

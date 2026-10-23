@@ -124,8 +124,8 @@ describe('BehaviorOS Core', () => {
   });
 
   describe('Audit', () => {
-    it('should run audit pipeline', () => {
-      const report = bos.runAudit({
+    it('should run audit pipeline', async () => {
+      const report = await bos.runAudit({
         missionId: 'mission-1',
         agentId: 'agent-1',
       });

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -99,6 +99,16 @@ describe('SqliteStore', () => {
     expect(store.getMeta('missing')).toBeNull();
     store.close();
   });
+
+  it('closes the database handle when migration fails', () => {
+    writeFileSync(dbPath, 'not a sqlite database');
+
+    expect(() => new SqliteStore({ path: dbPath })).toThrow();
+
+    // Windows refuses to remove a file while a handle is still open, so this
+    // assertion fails if the failed constructor leaked the connection.
+    expect(() => rmSync(dbPath, { force: true })).not.toThrow();
+  });
 });
 
 describe('BehaviorOS SQLite persistence', () => {
@@ -114,7 +124,7 @@ describe('BehaviorOS SQLite persistence', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('persists and hydrates state across engine instances (restart)', () => {
+  it('persists and hydrates state across engine instances (restart)', async () => {
     const first = new BehaviorOS({ persistence: { path: dbPath } });
     const mission = first.createMission({
       title: 'Persist me',
@@ -132,7 +142,7 @@ describe('BehaviorOS SQLite persistence', () => {
       currentMission: null,
       metrics: { tasksCompleted: 0, tasksFailed: 0, avgResponseTime: 0, governanceViolations: 0 },
     });
-    first.runAudit({ missionId: mission.id, agentId: 'agent-1' });
+    await first.runAudit({ missionId: mission.id, agentId: 'agent-1' });
 
     expect(first.hasPersistence()).toBe(true);
     expect(first.listAuditReports()).toHaveLength(1);

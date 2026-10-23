@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 30 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 32 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_apply_code_fixes',
   'bos_cancel_mission',
@@ -394,6 +394,171 @@ describe('documentation consistency', () => {
           source.includes(name) || WITHDRAWN_ENV_VARS.includes(name),
           `${rel(file)} references unused env var ${name}`,
         ).toBe(true);
+      }
+    }
+  });
+});
+
+/**
+ * Quantitative claims are the class of documentation bug this repository hit
+ * most often: `27` MCP tools when the server registers `30`, `53` orchestrator
+ * tests when there are `64`, `534` cases when the suite runs `777`.
+ *
+ * Every value below is *derived from the file that defines it*, so a document
+ * cannot drift from the code without failing a test. Two things stay out on
+ * purpose and are named here rather than silently skipped: `CHANGELOG.md` and
+ * the dated `*_REPORT.md` files in the root, which record what older releases
+ * claimed ("45+ tools", "9 resources") and carry a snapshot banner.
+ */
+const CURRENT_DOCS = [
+  'README.md',
+  'AGENTS.md',
+  'CONTRIBUTING.md',
+  'GUIDE.md',
+  'QUICKSTART.md',
+  'PITCH.md',
+  'docs/ARCHITECTURE.md',
+  'docs/ARCHITECTURE_DEEP_DIVE.md',
+  'docs/API_REFERENCE.md',
+  'docs/CLI.md',
+  'docs/COMMANDS.md',
+  'docs/OPENCODE_V2.md',
+  'docs/SDK.md',
+  'docs/CLAIMS.md',
+  '.opencode/skills/verification-first/SKILL.md',
+];
+
+function readRepoFile(relativePath: string): string {
+  return readFileSync(join(repoRoot, relativePath), 'utf-8');
+}
+
+function countIn(relativePath: string, pattern: RegExp): number {
+  return [...readRepoFile(relativePath).matchAll(pattern)].length;
+}
+
+/** What the code actually implements, measured — never typed by hand. */
+function measuredCounts() {
+  const engineFiles = readdirSync(join(repoRoot, 'packages', 'core', 'src', 'engine')).filter(
+    (file) => file.endsWith('.ts'),
+  );
+  // engineFiles = engines + the BehaviorOS facade + the engine registry.
+  return {
+    mcpTools: countIn('packages/mcp-server/src/server.ts', /server\.registerTool\(/g),
+    mcpResources: countIn('packages/mcp-server/src/server.ts', /server\.registerResource\(/g),
+    pluginTools: countIn('plugins/opencode-v2/src/index.ts', /name: 'bos_/g),
+    dnas: readdirSync(join(repoRoot, 'dnas')).filter((file) => file.endsWith('.yaml')).length,
+    tables: countIn('packages/core/src/persistence/sqlite-store.ts', /CREATE TABLE/g),
+    engines: engineFiles.length - 2,
+  };
+}
+
+/**
+ * Every place a document states a count, with the line that states it.
+ *
+ * Lines inside a "retracted claims" section are skipped: `docs/CLAIMS.md`
+ * quotes retired figures ("22 engines", "45+ tools") on purpose, and the quote
+ * is the evidence that they were retired. The skip is section-scoped, not
+ * file-wide, so the live claims in the same document are still checked.
+ */
+function countClaims(
+  relativePath: string,
+  pattern: RegExp,
+): Array<{ line: number; text: string; values: number[] }> {
+  const claims: Array<{ line: number; text: string; values: number[] }> = [];
+  let skipLevel = 0;
+  let inFence = false;
+  readRepoFile(relativePath)
+    .split(/\r?\n/)
+    .forEach((text, index) => {
+      if (/^\s*(```|~~~)/.test(text)) {
+        inFence = !inFence;
+        return;
+      }
+      if (inFence) return;
+
+      const heading = /^(#{1,6})\s+(.*)$/.exec(text);
+      if (heading) {
+        const level = heading[1].length;
+        if (/retirad|withdrawn/i.test(heading[2])) skipLevel = level;
+        else if (skipLevel !== 0 && level <= skipLevel) skipLevel = 0;
+        return;
+      }
+      if (skipLevel !== 0) return;
+
+      for (const match of text.matchAll(pattern)) {
+        claims.push({
+          line: index + 1,
+          text: text.trim(),
+          values: match.slice(1).flatMap((value) => (value === undefined ? [] : [Number(value)])),
+        });
+      }
+    });
+  return claims;
+}
+
+describe('documented counts match the code', () => {
+  const measured = measuredCounts();
+  const currentDocs = CURRENT_DOCS.filter((file) => existsSync(join(repoRoot, file)));
+
+  it('derives the counts it is supposed to guard', () => {
+    // A broken derivation would silently compare wrong numbers with wrong
+    // numbers, so the derivation itself is pinned to the measured reality.
+    expect(measured.mcpTools).toBe(57);
+    expect(measured.mcpResources).toBe(2);
+    expect(measured.pluginTools).toBe(32);
+    expect(measured.dnas).toBe(21);
+    expect(measured.tables).toBe(9);
+    expect(measured.engines).toBe(21);
+  });
+
+  it('states the tool, resource, engine, DNA and table counts the code has', () => {
+    const rules: Array<{ pattern: RegExp; expected: number[]; label: string }> = [
+      { pattern: /(\d+)\s+MCP tools/g, expected: [measured.mcpTools], label: 'MCP tools' },
+      {
+        pattern: /(\d+)\s+MCP tools \+ (\d+) resources/g,
+        expected: [measured.mcpTools, measured.mcpResources],
+        label: 'MCP tools/resources',
+      },
+      {
+        pattern: /(\d+)\s+registered tools \+ (\d+) resources/g,
+        expected: [measured.mcpTools, measured.mcpResources],
+        label: 'MCP tools/resources',
+      },
+      {
+        pattern: /(\d+)\s+tools \+ (\d+) resources/g,
+        expected: [measured.mcpTools, measured.mcpResources],
+        label: 'MCP tools/resources',
+      },
+      {
+        pattern: /MCP Server\D{0,6}(\d+)\s+Tools/g,
+        expected: [measured.mcpTools],
+        label: 'MCP tools',
+      },
+      {
+        pattern: /(\d+)\s+bos_\*?\s*tools/g,
+        expected: [measured.pluginTools],
+        label: 'plugin tools',
+      },
+      {
+        pattern: /(\d+)\s+tools in total/g,
+        expected: [measured.pluginTools],
+        label: 'plugin tools',
+      },
+      { pattern: /(\d+)\s+(?:core )?engines/g, expected: [measured.engines], label: 'engines' },
+      { pattern: /(\d+)\s+DNA pattern/g, expected: [measured.dnas], label: 'DNA patterns' },
+      { pattern: /(\d+)\s+tables\b/g, expected: [measured.tables], label: 'SQLite tables' },
+    ];
+
+    for (const file of currentDocs) {
+      for (const rule of rules) {
+        for (const claim of countClaims(file, rule.pattern)) {
+          expect(
+            claim.values,
+            `${rel(join(repoRoot, file))}:${claim.line} claims ${rule.label} ` +
+              `${claim.values.join('/')} but the code has ${rule.expected.join('/')} — ` +
+              `"${claim.text}"`,
+          ).toEqual(rule.expected);
+        }
       }
     }
   });

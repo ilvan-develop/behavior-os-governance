@@ -137,7 +137,7 @@ describe('Real-World Scenarios', () => {
         priority: 'critical',
       });
 
-      const report = bos.runAudit({ missionId: mission.id, agentId: 'auditor-1' });
+      const report = await bos.runAudit({ missionId: mission.id, agentId: 'auditor-1' });
       expect(report.overall).toBeDefined();
       expect(report.stages.length).toBeGreaterThanOrEqual(4);
 

@@ -40,7 +40,7 @@ describe('BehaviorOS Full Integration', () => {
     expect(decision.action).toBe('task');
 
     // Run audit
-    const audit = bos.runAudit({
+    const audit = await bos.runAudit({
       missionId: mission.id,
       agentId: 'test-agent',
     });

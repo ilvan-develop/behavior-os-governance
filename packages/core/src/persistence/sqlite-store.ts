@@ -76,8 +76,20 @@ export class SqliteStore implements Store {
     this.db = new DatabaseSync(config.path);
     // WAL keeps readers non-blocking while a writer persists; harmless for
     // in-memory databases.
-    this.db.exec('PRAGMA journal_mode = WAL;');
-    this.migrate();
+    try {
+      this.db.exec('PRAGMA journal_mode = WAL;');
+      this.migrate();
+    } catch (error) {
+      // A constructor that throws must not leak an open SQLite handle: on
+      // Windows the open handle prevents the caller from removing or replacing
+      // the file (and a corrupt database is exactly the case we must report).
+      try {
+        this.db.close();
+      } catch {
+        // Preserve the original migration error.
+      }
+      throw error;
+    }
   }
 
   private migrate(): void {

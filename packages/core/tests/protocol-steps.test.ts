@@ -58,7 +58,7 @@ describe('BehaviorOS protocol step progression', () => {
     expect(started).not.toBeNull();
     expect(bos.getState().currentStep).toBe(5);
 
-    bos.runAudit({ missionId: mission.id, agentId: 'agent-1' }); // step 6
+    await bos.runAudit({ missionId: mission.id, agentId: 'agent-1' }); // step 6
     expect(bos.getState().currentStep).toBe(6);
 
     bos.recordLearning({
@@ -103,7 +103,7 @@ describe('BehaviorOS protocol step progression', () => {
     await bos.loadDNA(testDna);
     const mission = bos.createMission({ title: 't', type: 'deployment', priority: 'critical' });
     bos.startMission(mission.id);
-    bos.runAudit({ missionId: mission.id, agentId: 'agent-1' });
+    await bos.runAudit({ missionId: mission.id, agentId: 'agent-1' });
     bos.recordLearning({ type: 'fix', source: 'protocol-test', content: 'done', impact: 'high' });
 
     expect(bos.getState().currentStep).toBe(7);

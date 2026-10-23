@@ -1,6 +1,10 @@
-import type { DNA } from '@behavior-os/schemas';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { DNA, PolicyRule, Role } from '@behavior-os/schemas';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BehaviorOS } from '../src/engine/behavior-os.js';
+import { SqliteStore } from '../src/persistence/sqlite-store.js';
 
 const testDna: DNA = {
   name: 'Test DNA',
@@ -134,5 +138,97 @@ describe('BehaviorOS governance engine reuse (cache)', () => {
     // Same engine + same cache key → the cached decision object is returned.
     expect(second.id).toBe(first.id);
     expect(second.verdict).toBe('deny');
+  });
+});
+
+describe('RolePolicyEngine persistence', () => {
+  let dir: string;
+  let dbPath: string;
+  const bornInstances: Array<BehaviorOS> = [];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'bos-role-policy-'));
+    dbPath = join(dir, 'state.db');
+  });
+
+  afterEach(() => {
+    // Windows refuses to delete a directory holding an open SQLite file.
+    for (const bos of bornInstances.splice(0)) bos.closeStore();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const policy: PolicyRule = {
+    id: 'no-direct-deploy',
+    name: 'No direct deploy',
+    description: 'Developers cannot deploy to production',
+    condition: 'deploy',
+    action: 'block',
+    severity: 'high',
+    appliesTo: ['role'],
+    effectiveFrom: '2026-01-01T00:00:00.000Z',
+  };
+
+  const role: Role = {
+    id: 'developer',
+    name: 'Developer',
+    displayName: 'Developer',
+    responsibilities: ['implement features'],
+    policies: ['no-direct-deploy'],
+    canAudit: false,
+    canEnforce: false,
+    canTeach: true,
+  };
+
+  it('survives a restart through the store (roles, policies and decisions)', () => {
+    const first =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    expect(first.defineRolePolicy(policy).success).toBe(true);
+    expect(first.registerRole(role).success).toBe(true);
+    const before = first.evaluateRoleAction({ role: 'developer' }, 'deploy production');
+    expect(before.action).toBe('block');
+
+    // A fresh instance over the same DB hydrates the full role/policy state:
+    // registry, rules and the attribution history made it to disk.
+    const second =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    expect(second.hasPersistence()).toBe(true);
+    expect(second.getRolePolicyEngine().getRole('developer')).toBeDefined();
+    expect(second.getRolePolicyEngine().listPolicies()).toHaveLength(1);
+    expect(second.getRolePolicyEngine().getAuditTrail()).toHaveLength(1);
+
+    const after = second.evaluateRoleAction({ role: 'developer' }, 'deploy production');
+    expect(after.action).toBe('block');
+    expect(after.matchedPolicy?.id).toBe('no-direct-deploy');
+    expect(second.getRolePolicyEngine().getAuditTrail()).toHaveLength(2);
+  });
+
+  it('an expired policy comes back from the store but no longer fires', () => {
+    const first =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    first.defineRolePolicy({ ...policy, effectiveUntil: '2026-01-02T00:00:00.000Z' });
+    first.registerRole(role);
+
+    const second =
+      bornInstances[bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } })) - 1];
+    expect(second.getRolePolicyEngine().listPolicies()).toHaveLength(1);
+    expect(second.evaluateRoleAction({ role: 'developer' }, 'deploy').action).toBe('allow');
+  });
+
+  it('an invalid persisted snapshot never blocks startup', () => {
+    const store = new SqliteStore({ path: dbPath });
+    store.setMeta('role-policy-state', 'not json at all');
+    store.close();
+
+    bornInstances.push(new BehaviorOS({ persistence: { path: dbPath } }));
+    const bos = bornInstances[bornInstances.length - 1];
+    expect(bos.getRolePolicyEngine().listRoles()).toHaveLength(0);
+  });
+
+  it('facade mutations without a store still work (memory-only)', () => {
+    const bos = new BehaviorOS();
+    expect(bos.hasPersistence()).toBe(false);
+    expect(bos.defineRolePolicy(policy).success).toBe(true);
+    expect(bos.registerRole(role).success).toBe(true);
+    expect(bos.evaluateRoleAction({ role: 'developer' }, 'deploy').action).toBe('block');
   });
 });

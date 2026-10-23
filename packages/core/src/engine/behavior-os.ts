@@ -6,6 +6,7 @@ import type {
   CodeEditRecord,
   CodeFixProposal,
   CodeFixResult,
+  ConsensusVote,
   Decision,
   DecisionOutcome,
   DecisionPolicy,
@@ -22,7 +23,9 @@ import type {
   MissionPriority,
   MissionStatus,
   MissionType,
+  Persona,
   PipelineRun,
+  Prediction,
   ProtocolStep,
   RankedRecommendation,
   Vote,
@@ -32,10 +35,13 @@ import type { Store } from '../persistence/store.js';
 import { CodeEditEngine, type CodeEditPreview } from './code-edit-engine.js';
 import type { DecideOptions } from './decision-engine.js';
 import {
+  type ConsensusEngine,
+  type CrossDnaLearningEngine,
   type DecisionEngine,
   type DriftEngine,
   EngineRegistry,
   type LearningEngine,
+  type PredictionEngine,
   type RecommendationEngine,
 } from './index.js';
 import type {
@@ -349,6 +355,7 @@ export class BehaviorOS {
       const first = dna.personas[0];
       this.agentState.agentId = null;
       this.agentState.persona = first ? first.role || first.name : null;
+      this.ensurePersonaRole(first ?? null);
     }
     this.agentState.updatedAt = new Date().toISOString();
     this.advanceProtocolStep('bos_select_dna');
@@ -456,10 +463,41 @@ export class BehaviorOS {
       this.agentState.agentId = null;
       this.agentState.persona = match.role || match.name;
       this.agentState.updatedAt = new Date().toISOString();
+      this.ensurePersonaRole(match);
       return this.resolveAgentIdentity();
     }
 
     return null;
+  }
+
+  /**
+   * Makes a DNA persona resolvable as a role, **only** when no such role is
+   * registered yet — an explicit registration always wins.
+   *
+   * WHY: role/policy evaluation then works out of the box for every DNA, with
+   * zero configuration: the persona becomes attributable in the role engine's
+   * audit trail and hosts can attach policies to it without registering a role
+   * first. The auto-created role carries no policies and no privileges
+   * (canAudit/canEnforce/canTeach all false) — the fail-safe posture: identity
+   * and attribution, nothing more. Capabilities are opt-in per registration.
+   */
+  private ensurePersonaRole(persona: Persona | null): void {
+    if (!persona) return;
+    const roleId = persona.role.trim() ? persona.role : persona.name;
+    if (roleId.trim() === '') return;
+    const engine = this.getRolePolicyEngine();
+    if (engine.getRole(roleId)) return;
+    engine.registerRole({
+      id: roleId,
+      name: persona.name,
+      displayName: persona.name,
+      responsibilities: [...persona.skills],
+      policies: [],
+      canAudit: false,
+      canEnforce: false,
+      canTeach: false,
+    });
+    this.persistRolePolicyState();
   }
 
   // Protocol state machine --------------------------------------------------
@@ -642,12 +680,14 @@ export class BehaviorOS {
    * id is honoured as-is, but the DNA pattern and persona are always stamped on
    * the report so the entry stays traceable.
    */
-  runAudit(options: {
+  async runAudit(options: {
     missionId: string;
     agentId?: string;
     stages?: string[];
     simulate?: boolean;
-  }): AuditReport {
+    /** Workspace root for the real stages; see AuditOptions.root. */
+    root?: string;
+  }): Promise<AuditReport> {
     const auditEngine = this.registry.createAuditEngine();
     const stages = options.stages?.length
       ? options.stages
@@ -658,7 +698,7 @@ export class BehaviorOS {
     // verification or authorize completion.
     const simulate = options.simulate !== false;
 
-    const report = auditEngine.run({
+    const report = await auditEngine.run({
       ...options,
       simulate,
       agentId: options.agentId ?? identity.agentId,
@@ -898,6 +938,11 @@ export class BehaviorOS {
 
   getInsights(limit = 10): LearningEvent[] {
     return this.getLearningEngine().getInsights(limit);
+  }
+
+  /** All recorded learning events, in the order the engine keeps them. */
+  getLearningEvents(): LearningEvent[] {
+    return this.getLearningEngine().getEvents();
   }
 
   // Governed learning lifecycle (G-014) --------------------------------------
@@ -1335,9 +1380,188 @@ export class BehaviorOS {
    * A drift is significant when `totalChanges >= 2`.
    */
   compareDNADrift(dnaA: DNA, dnaB: DNA): DriftInfo {
+    return this.getDriftEngine().compare(dnaA, dnaB);
+  }
+
+  // Drift (public accessor for host tools) ----------------------------------
+  /** Get the drift engine, creating it on first use. */
+  getDriftEngine(): DriftEngine {
     let engine = this.registry.get<DriftEngine>('drift');
     if (!engine) engine = this.registry.createDriftEngine();
-    return engine.compare(dnaA, dnaB);
+    return engine;
+  }
+
+  // Consensus ----------------------------------------------------------------
+  /**
+   * Resolve a multi-agent consensus round. Votes are weighted; ties and
+   * all-abstain resolve to `rejected` (fail-safe).
+   */
+  resolveConsensus(options: {
+    subject: string;
+    votes: ConsensusVote[];
+    policy?: 'unanimous' | 'supermajority' | 'majority';
+    quorum?: number;
+  }): import('./consensus-engine.js').ConsensusOutcome {
+    let engine = this.registry.get<ConsensusEngine>('consensus');
+    if (!engine) engine = this.registry.createConsensusEngine();
+    return engine.resolve(options);
+  }
+
+  // Prediction ---------------------------------------------------------------
+  /**
+   * Predict likely future governance events from learning history.
+   */
+  predict(limit = 5): Prediction[] {
+    let engine = this.registry.get<PredictionEngine>('prediction');
+    if (!engine) engine = this.registry.createPredictionEngine();
+    return engine.predict(this.getLearningEngine().getEvents(), limit);
+  }
+
+  // Cross-DNA Learning -------------------------------------------------------
+  /**
+   * Suggest learning transfers from one DNA to another based on shared patterns.
+   */
+  suggestCrossDnaTransfer(sourceDna: DNA, targetDna: DNA, minConfidence = 0.5) {
+    let engine = this.registry.get<CrossDnaLearningEngine>('cross-dna-learning');
+    if (!engine) engine = this.registry.createCrossDnaLearningEngine();
+    return engine.suggestTransfers(
+      sourceDna,
+      targetDna,
+      this.getLearningEngine().getEvents(),
+      minConfidence,
+    );
+  }
+
+  // Metrics & Observability -------------------------------------------------
+  /** Get current system-wide metrics snapshot. */
+  getMetrics() {
+    let engine = this.registry.get<import('./metrics-engine.js').MetricsEngine>('metrics');
+    if (!engine) engine = this.registry.createMetricsEngine();
+    return engine.metrics;
+  }
+
+  /** Record a governance evaluation for metrics tracking. */
+  recordGovernanceEvent(
+    verdict: 'allow' | 'deny' | 'escalate' | 'warn' | 'log',
+    rulesEvaluated: number,
+    latencyMs: number,
+  ): void {
+    let engine = this.registry.get<import('./metrics-engine.js').MetricsEngine>('metrics');
+    if (!engine) engine = this.registry.createMetricsEngine();
+    engine.recordGovernance(verdict, rulesEvaluated, latencyMs);
+  }
+
+  // Brainstorming & Collaboration ------------------------------------------
+  /** Get the brainstorm engine, creating it on first use. */
+  getBrainstorm(): import('./brainstorm-engine.js').BrainstormEngine {
+    let engine = this.registry.get<import('./brainstorm-engine.js').BrainstormEngine>('brainstorm');
+    if (!engine) engine = this.registry.createBrainstormEngine();
+    return engine;
+  }
+
+  /** Create a new brainstorming session. */
+  createBrainstormSession(title: string, participants: string[], dnaPattern: string) {
+    return this.getBrainstorm().createSession(title, participants, dnaPattern);
+  }
+
+  /** Get a brainstorming session. */
+  getBrainstormSession(sessionId: string) {
+    return this.getBrainstorm().getSession(sessionId);
+  }
+
+  /** List all brainstorming sessions. */
+  listBrainstormSessions() {
+    return this.getBrainstorm().listSessions();
+  }
+
+  // Dynamic DNA ------------------------------------------------------------
+  /** Get the dynamic DNA manager. */
+  getDynamicDNAManager() {
+    let manager = this.registry.get<import('./dynamic-dna.js').DynamicDNAManager>('dynamic-dna');
+    if (!manager) manager = this.registry.createDynamicDNAManager();
+    return manager;
+  }
+
+  // Behavioral UX ----------------------------------------------------------
+  /** Get the behavioral UX engine. */
+  getBehavioralUX() {
+    let engine =
+      this.registry.get<import('./behavioral-ux.js').BehavioralUXEngine>('behavioral-ux');
+    if (!engine) engine = this.registry.createBehavioralUXEngine();
+    return engine;
+  }
+
+  // Anti-Pattern Engine ----------------------------------------------------
+  /** Get the anti-pattern detection engine. */
+  getAntipatternEngine() {
+    let engine =
+      this.registry.get<import('./antipattern-engine.js').AntipatternEngine>('antipattern');
+    if (!engine) engine = this.registry.createAntipatternEngine();
+    return engine;
+  }
+
+  // Pragmatic Conversation Engine ------------------------------------------
+  /** Get the pragmatic conversation engine. */
+  getPragmaticConversation() {
+    let engine =
+      this.registry.get<import('./pragmatic-conversation.js').PragmaticConversationEngine>(
+        'pragmatic-conversation',
+      );
+    if (!engine) engine = this.registry.createPragmaticConversationEngine();
+    return engine;
+  }
+
+  // Role & Policy Engine ----------------------------------------------------
+  /** Get the role/policy enforcement engine. */
+  getRolePolicyEngine(): import('./role-policy-engine.js').RolePolicyEngine {
+    let engine =
+      this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
+    if (!engine) engine = this.registry.createRolePolicyEngine();
+    return engine;
+  }
+
+  /**
+   * Register a role through the facade so the change is persisted when a store
+   * is attached. The engine itself stays store-free: hosts call the facade,
+   * the facade writes the snapshot, the engine owns the decision logic.
+   */
+  registerRole(
+    role: import('@behavior-os/schemas').Role,
+  ): import('./role-policy-engine.js').RolePolicyRegistration {
+    const result = this.getRolePolicyEngine().registerRole(role);
+    if (result.success) this.persistRolePolicyState();
+    return result;
+  }
+
+  /** Define a policy rule through the facade (persisted like registerRole). */
+  defineRolePolicy(
+    policy: import('@behavior-os/schemas').PolicyRule,
+  ): import('./role-policy-engine.js').RolePolicyRegistration {
+    const result = this.getRolePolicyEngine().definePolicy(policy);
+    if (result.success) this.persistRolePolicyState();
+    return result;
+  }
+
+  /**
+   * Evaluate an action against the role/policy registry through the facade, and
+   * persist the (bounded) audit trail so decisions survive a restart.
+   */
+  evaluateRoleAction(
+    actor: import('./role-policy-engine.js').RoleActorContext,
+    action: string,
+  ): import('./role-policy-engine.js').RoleDecision {
+    const decision = this.getRolePolicyEngine().evaluate(actor, action);
+    this.persistRolePolicyState();
+    return decision;
+  }
+
+  /** Write the role/policy engine state to the store's metadata (no-op unsaved). */
+  private persistRolePolicyState(): void {
+    if (!this.store) return;
+    const engine =
+      this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
+    if (!engine) return;
+    this.store.setMeta('role-policy-state', JSON.stringify(engine.snapshot()));
   }
 
   // Agent Management
@@ -1441,6 +1665,17 @@ export class BehaviorOS {
     for (const agent of this.store.listAgents()) {
       this.agents.set(agent.id, agent);
     }
+    // Role/policy state hydrates lazily: an engine with no persisted state
+    // (no meta key yet) is not instantiated just to store nothing.
+    const roleStateRaw = this.store.getMeta('role-policy-state');
+    if (roleStateRaw) {
+      try {
+        this.getRolePolicyEngine().restore(JSON.parse(roleStateRaw));
+      } catch {
+        // A corrupt snapshot must not block startup; the engine simply
+        // starts empty and the next facade mutation re-persists clean state.
+      }
+    }
   }
 
   /**
@@ -1456,6 +1691,7 @@ export class BehaviorOS {
       for (const mission of this.getMissionEngine().snapshot()) store.saveMission(mission);
       for (const event of this.getLearningEngine().snapshot()) store.saveLearning(event);
       for (const agent of this.agents.values()) store.saveAgent(agent);
+      this.persistRolePolicyState();
     });
   }
 

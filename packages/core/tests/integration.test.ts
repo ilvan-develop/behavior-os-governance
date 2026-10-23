@@ -55,7 +55,7 @@ describe('BehaviorOS Integration', () => {
     expect(started?.status).toBe('active');
 
     // Step 5: Run audit
-    const report = bos.runAudit({
+    const report = await bos.runAudit({
       missionId: mission.id,
       agentId: 'devops-agent',
     });
