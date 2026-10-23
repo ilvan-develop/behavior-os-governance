@@ -5,10 +5,11 @@
  * tested in isolation and reused by the CLI or MCP server.
  */
 
+import { isMutatingAction } from '@behavior-os/core';
 import type { MissionPriority, MissionType } from '@behavior-os/schemas';
 
-/** Tools whose execution mutates state and therefore counts as a `change`. */
-const MUTATING_TOOL = /write|edit|patch|bash|shell|apply|create|delete|move/i;
+/** Alias of the core action classifier: one mutation vocabulary for all hosts. */
+export const isMutating = isMutatingAction;
 
 /**
  * Actions able to *perform* an operation on an environment: they run a command or
@@ -80,10 +81,6 @@ function withoutDerivedDependencySignal(
   const filtered = { ...context };
   delete filtered['new-dependency'];
   return filtered;
-}
-
-export function isMutating(value: string | undefined): boolean {
-  return typeof value === 'string' && MUTATING_TOOL.test(value);
 }
 
 /**

@@ -1,11 +1,21 @@
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { BehaviorOS, type BehaviorOSSnapshot, PROTOCOL_STEPS } from '@behavior-os/core';
-import type { DNA, LearningStage, ProtocolStep } from '@behavior-os/schemas';
+import {
+  BehaviorOS,
+  type BehaviorOSSnapshot,
+  isControlPlaneAction,
+  PROTOCOL_STEPS,
+} from '@behavior-os/core';
+import type {
+  DNA,
+  LearningStage,
+  MissionPriority,
+  MissionStatus,
+  MissionType,
+  ProtocolStep,
+} from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
-import { load as yamlLoad } from 'js-yaml';
 import {
   buildGovernanceContext,
   buildGovernedPreamble,
@@ -63,6 +73,20 @@ function getBehaviorOS(): BehaviorOS {
         enabled: process.env.BEHAVIOR_OS_CODE_EDIT === 'true',
         root: process.env.BEHAVIOR_OS_CODE_EDIT_ROOT,
       },
+      // Opt-in DNA evolution: with BEHAVIOROS_EVOLUTION=true the learning loop
+      // can actually *apply* tool-scoped warn rules derived from recorded
+      // failure events (still requires the caller to pass apply:true). Without
+      // the flag, proposals remain read-only suggestions.
+      evolution: process.env.BEHAVIOROS_EVOLUTION === 'true' ? { enabled: true } : undefined,
+      // Durable state joins the MCP host's storage: with BEHAVIOROS_DB_PATH
+      // set, missions/learning events AND learning lifecycle records, agents,
+      // decisions, roles and policies persist through the facade across
+      // restarts. ctx.storage still holds the plugin-local UX state (the
+      // notification coalescer and the per-session governance snapshot); the
+      // facade-level store is the cross-host source of truth.
+      persistence: process.env.BEHAVIOROS_DB_PATH
+        ? { path: process.env.BEHAVIOROS_DB_PATH }
+        : undefined,
     });
   }
   return behaviorOS;
@@ -309,44 +333,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
-// Load DNA patterns from YAML files
-async function loadDNAFromDirectory(dirPath: string): Promise<Map<string, DNA>> {
-  const patterns = new Map<string, DNA>();
-  try {
-    const files = await fs.readdir(dirPath);
-    for (const file of files) {
-      if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-        try {
-          const content = await fs.readFile(path.join(dirPath, file), 'utf-8');
-          const dna = parseYAML(content);
-          const name = file.replace(/\.(yaml|yml)$/, '');
-          if (dna && typeof dna === 'object') {
-            patterns.set(name, dna as DNA);
-          }
-        } catch (error) {
-          console.warn(`Warning: Failed to parse ${file}: ${error}`);
-        }
-      }
-    }
-  } catch (error) {
-    console.warn(`Warning: Could not read DNA directory: ${dirPath}`);
-  }
-  return patterns;
-}
-
 // YAML parser using js-yaml (same parser as the MCP server and CLI)
-function parseYAML(content: string): Record<string, unknown> | null {
-  try {
-    const parsed = yamlLoad(content);
-    if (parsed && typeof parsed === 'object') {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 // Predefined DNA patterns (fallback)
 const DNA_PATTERNS: Readonly<Record<string, DNA>> = {
   'surgical-team': {
@@ -395,12 +382,18 @@ export default Plugin.define({
 
     const bos = getBehaviorOS();
 
-    // Load DNA patterns from directory
+    // Load DNA patterns from directory through the facade: the validating
+    // DNALoader owns the schema, so an invalid `dna as DNA` cast can no
+    // longer sneak a half-shaped pattern into loadDNA().
     try {
       const dnasDir = process.env.BEHAVIOROS_DNA_PATH
         ? path.resolve(process.env.BEHAVIOROS_DNA_PATH)
         : path.join(ctx.location.directory, 'dnas');
-      loadedDnaPatterns = await loadDNAFromDirectory(dnasDir);
+      const { patterns, errors } = await bos.loadDNAFromDirectory(dnasDir);
+      loadedDnaPatterns = patterns;
+      for (const error of errors) {
+        console.warn(`DNA pattern skipped: ${error}`);
+      }
 
       // Merge with built-in patterns
       for (const [key, pattern] of Object.entries(DNA_PATTERNS)) {
@@ -1102,14 +1095,13 @@ export default Plugin.define({
             priority?: string;
             limit?: number;
           };
-          // Apply the advertised filters before the limit, matching the MCP
-          // tool. The engine itself only supports a limit.
-          const missions = bos
-            .listMissions(1000)
-            .filter((mission) => !params.status || mission.status === params.status)
-            .filter((mission) => !params.type || mission.type === params.type)
-            .filter((mission) => !params.priority || mission.priority === params.priority)
-            .slice(0, params.limit ?? 50);
+          // The facade owns the filter semantics (applied BEFORE the limit) so
+          // this tool and its MCP twin cannot drift apart.
+          const missions = bos.listMissions(params.limit ?? 50, {
+            status: params.status as MissionStatus | undefined,
+            type: params.type as MissionType | undefined,
+            priority: params.priority as MissionPriority | undefined,
+          });
           return {
             content: JSON.stringify(missions, null, 2),
           };
@@ -1880,6 +1872,162 @@ export default Plugin.define({
           return { content: JSON.stringify(records, null, 2) };
         },
       });
+
+      // Tools 30-34: role/policy registry — same contract as their MCP
+      // counterparts. The permission hook ENFORCES these policies on every
+      // mutating, non-control-plane action, so being able to define them from
+      // inside the governed session is what closes the enforcement loop.
+      tools.add({
+        name: 'bos_register_role',
+        description: 'Register a role with attached policy-rule ids for role-based governance',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Role id (how actors resolve to this role)' },
+            name: { type: 'string' },
+            displayName: { type: 'string' },
+            responsibilities: { type: 'array', items: { type: 'string' } },
+            policies: { type: 'array', items: { type: 'string' } },
+            canAudit: { type: 'boolean' },
+            canEnforce: { type: 'boolean' },
+            canTeach: { type: 'boolean' },
+          },
+          required: ['id', 'name', 'displayName', 'responsibilities'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id: string;
+            name: string;
+            displayName: string;
+            responsibilities: string[];
+            policies?: string[];
+            canAudit?: boolean;
+            canEnforce?: boolean;
+            canTeach?: boolean;
+          };
+          const result = bos.registerRole({
+            id: params.id,
+            name: params.name,
+            displayName: params.displayName,
+            responsibilities: params.responsibilities,
+            policies: params.policies,
+            canAudit: params.canAudit ?? false,
+            canEnforce: params.canEnforce ?? false,
+            canTeach: params.canTeach ?? false,
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      tools.add({
+        name: 'bos_define_policy',
+        description:
+          'Define a policy rule (condition/action/severity/applies-to) used by registered roles',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string' },
+            condition: {
+              type: 'string',
+              description:
+                "Action matcher: '*' for any action, or an action prefix (e.g. 'deploy', 'git push')",
+            },
+            action: { type: 'string', enum: ['require', 'warn', 'block', 'auto-fix'] },
+            severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', 'info'] },
+            appliesTo: {
+              type: 'array',
+              items: { type: 'string', enum: ['persona', 'role', 'agent', 'project'] },
+            },
+            effectiveFrom: {
+              type: 'string',
+              description: 'ISO date from which the rule is effective',
+            },
+            effectiveUntil: { type: 'string', description: 'Optional ISO expiry date' },
+          },
+          required: [
+            'id',
+            'name',
+            'description',
+            'condition',
+            'action',
+            'severity',
+            'appliesTo',
+            'effectiveFrom',
+          ],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id: string;
+            name: string;
+            description: string;
+            condition: string;
+            action: 'require' | 'warn' | 'block' | 'auto-fix';
+            severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+            appliesTo: Array<'persona' | 'role' | 'agent' | 'project'>;
+            effectiveFrom: string;
+            effectiveUntil?: string;
+          };
+          const result = bos.defineRolePolicy({
+            id: params.id,
+            name: params.name,
+            description: params.description,
+            condition: params.condition,
+            action: params.action,
+            severity: params.severity,
+            appliesTo: params.appliesTo,
+            effectiveFrom: params.effectiveFrom,
+            ...(params.effectiveUntil ? { effectiveUntil: params.effectiveUntil } : {}),
+          });
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      tools.add({
+        name: 'bos_evaluate_role_action',
+        description:
+          'Evaluate an action against the role/policy registry — returns the deterministic decision',
+        input: {
+          type: 'object',
+          properties: {
+            role: { type: 'string', description: 'Actor role id or persona' },
+            agentId: { type: 'string', description: 'Actor agent id' },
+            action: { type: 'string', description: 'The action about to be performed' },
+          },
+          required: ['action'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { role?: string; agentId?: string; action: string };
+          const decision = bos.evaluateRoleAction(
+            { role: params.role, agentId: params.agentId },
+            params.action,
+          );
+          return { content: JSON.stringify(decision, null, 2) };
+        },
+      });
+
+      tools.add({
+        name: 'bos_role_policy_report',
+        description:
+          'Per-role audit report: decision counts by action and by role, plus the last decision',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          const report = bos.getRolePolicyEngine().getReport();
+          return { content: JSON.stringify(report, null, 2) };
+        },
+      });
+
+      tools.add({
+        name: 'bos_list_roles',
+        description: 'List registered roles and policy rules of the role/policy engine',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          const engine = bos.getRolePolicyEngine();
+          const result = { roles: engine.listRoles(), policies: engine.listPolicies() };
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
     });
     // Bake a short, static Behavior-OS reminder into every agent's system prompt
     // so governance is present in the agent definition itself, not only in the
@@ -1919,13 +2067,14 @@ export default Plugin.define({
         });
 
         // Denies only ever apply to state-changing actions, and never to the
-        // governance control plane (bos_*): reading PII is not an *operation* on
-        // it, and a restrictive DNA must stay escapable (a bootstrap deadlock
-        // would otherwise be inescapable). Either way the verdict is recorded,
-        // never silently lost.
-        const isControlPlane = /^bos_/i.test(event.action);
+        // governance control plane: reading PII is not an *operation* on it,
+        // and a restrictive DNA must stay escapable (a bootstrap deadlock
+        // would otherwise be inescapable). The policy lives in the facade
+        // (`bootstrapDenyOverride`) so every enforcement host applies the
+        // same rule; either way the verdict is recorded, never silently lost.
+        const isControlPlane = isControlPlaneAction(event.action);
         const readOnly = !isMutating(event.action);
-        const overridden = decision.verdict === 'deny' && (isControlPlane || readOnly);
+        const overridden = bos.bootstrapDenyOverride(event.action, decision);
         const effectiveVerdict = overridden ? 'allow' : decision.verdict;
 
         // Record the decision in the governance log: always for deny/escalate;
@@ -1958,6 +2107,58 @@ export default Plugin.define({
             `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}\n${ASK_HINT}`,
             { kind: 'escalate', action: event.action, reason: decision.reason },
           );
+        }
+
+        // Second deterministic authority: operator-defined role/policy rules,
+        // evaluated AFTER the DNA so the DNA verdict is already applied and no
+        // role decision can ever downgrade it (a role can only block or
+        // escalate further). Same bootstrap carve-out as the DNA override
+        // above: governance control-plane and read-only actions stay
+        // escapable — role policies govern what agents DO, not their ability
+        // to govern. The auto-registered persona role carries no policies, so
+        // this evaluates as a deterministic no-op ("no policy matched") until
+        // an operator defines one; a named-but-unknown role fails safe to
+        // require. auto-fix is escalated rather than silently applied: the
+        // permission hook has no rewrite channel.
+        if (!isControlPlane && !readOnly) {
+          const roleDecision = bos.evaluateRoleAction(
+            { agentId: bos.resolveAgentIdentity().agentId },
+            event.action,
+          );
+          if (roleDecision.action === 'block') {
+            const reason = `role-policy: ${roleDecision.reason}`;
+            recordLog('permission', 'deny', event.action, reason);
+            if (event.effect !== 'deny') {
+              event.effect = 'deny';
+              event.message = `[Behavior-OS:role-policy] ${roleDecision.reason}`;
+              await notify(
+                event.sessionID,
+                `[Behavior-OS] ⛔ Role policy blocked "${event.action}" — ${roleDecision.reason}`,
+                { kind: 'deny', action: event.action, reason },
+              );
+            }
+          } else if (
+            (roleDecision.action === 'require' || roleDecision.action === 'auto-fix') &&
+            event.effect !== 'deny' &&
+            event.effect !== 'ask'
+          ) {
+            const reason = `role-policy: ${roleDecision.reason}`;
+            recordLog('permission', 'escalate', event.action, reason);
+            event.effect = 'ask';
+            event.message = `[Behavior-OS:role-policy] ${roleDecision.reason}`;
+            await notify(
+              event.sessionID,
+              `[Behavior-OS] ⚠️ Role policy: "${event.action}" needs approval — ${roleDecision.reason}`,
+              { kind: 'escalate', action: event.action, reason },
+            );
+          } else if (roleDecision.action === 'warn') {
+            recordLog(
+              'permission',
+              'info',
+              event.action,
+              `role-policy warn: ${roleDecision.reason}`,
+            );
+          }
         }
       } catch (error) {
         // A governance failure must never be invisible: record it as well.

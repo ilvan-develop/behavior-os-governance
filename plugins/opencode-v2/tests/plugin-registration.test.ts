@@ -174,8 +174,10 @@ const EXPECTED_TOOLS = [
   'bos_complete_mission',
   'bos_create_mission',
   'bos_decide',
+  'bos_define_policy',
   'bos_drift',
   'bos_evaluate_governance',
+  'bos_evaluate_role_action',
   'bos_evolution',
   'bos_fail_mission',
   'bos_get_insights',
@@ -189,9 +191,12 @@ const EXPECTED_TOOLS = [
   'bos_list_dna',
   'bos_list_missions',
   'bos_list_pipeline_runs',
+  'bos_list_roles',
   'bos_preflight',
   'bos_recommendations',
   'bos_record_learning',
+  'bos_register_role',
+  'bos_role_policy_report',
   'bos_run_audit',
   'bos_select_dna',
   'bos_set_agent',
@@ -210,7 +215,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 32 bos_* tools', async () => {
+  it('registers exactly the 37 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -222,7 +227,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(32);
+    expect(addedTools).toHaveLength(37);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -249,7 +254,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(emptyDir);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(32);
+    expect(addedTools).toHaveLength(37);
     const select = addedTools.find((t) => t.name === 'bos_select_dna');
     const enumValues = (
       select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -424,6 +429,93 @@ describe('behavior-os plugin registration', () => {
     await permission(event);
 
     expect(event.effect).not.toBe('deny');
+  });
+
+  it('blocks a mutating action via an operator-defined role policy (post-DNA authority)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    // The actor's governed id comes from the identity the plugin itself
+    // enforces against — closing the loop "who am I" → "what may I do".
+    const whoami = await runTool(addedTools, 'bos_whoami', {});
+    const agentId = (JSON.parse(whoami.content) as { agentId: string }).agentId;
+
+    await runTool(addedTools, 'bos_define_policy', {
+      id: 'p-no-shell',
+      name: 'No shell for the governed persona',
+      description: 'The persona may not run shell commands in this deployment',
+      condition: 'bash',
+      action: 'block',
+      severity: 'high',
+      appliesTo: ['role'],
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+    });
+    await runTool(addedTools, 'bos_register_role', {
+      id: agentId,
+      name: 'Governed persona role',
+      displayName: 'Governed persona role',
+      responsibilities: ['enforced in the session'],
+      policies: ['p-no-shell'],
+    });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+    const event: FakePermissionEvent = {
+      action: 'bash',
+      resources: ['ls'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(event);
+
+    expect(event.effect).toBe('deny');
+    expect(event.message).toContain('role-policy');
+  });
+
+  it('role policies never gate control-plane or read-only actions (same bootstrap carve-out)', async () => {
+    const { ctx, addedTools, permissionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+
+    const whoami = await runTool(addedTools, 'bos_whoami', {});
+    const agentId = (JSON.parse(whoami.content) as { agentId: string }).agentId;
+
+    await runTool(addedTools, 'bos_define_policy', {
+      id: 'p-block-all',
+      name: 'Block everything for the governed persona',
+      description: "Catch-all '*' to prove control-plane and read-only stay escapable",
+      condition: '*',
+      action: 'block',
+      severity: 'critical',
+      appliesTo: ['role'],
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+    });
+    await runTool(addedTools, 'bos_register_role', {
+      id: agentId,
+      name: 'Governed persona role',
+      displayName: 'Governed persona role',
+      responsibilities: ['enforced in the session'],
+      policies: ['p-block-all'],
+    });
+
+    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+
+    const reading: FakePermissionEvent = {
+      action: 'grep',
+      resources: ['dnas/surgical-team.yaml'],
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(reading);
+    expect(reading.effect).toBe('allow'); // read-only → no role gate
+
+    const controlPlane: FakePermissionEvent = {
+      action: 'bos_list_dna',
+      agent: 'test',
+      effect: 'allow',
+    };
+    await permission(controlPlane);
+    expect(controlPlane.effect).toBe('allow'); // control-plane must stay escapable
   });
 
   it('escalates (ask) a deployment through the permission hook under devops-pipeline', async () => {
@@ -1201,5 +1293,29 @@ describe('behavior-os governance log', () => {
     expect(registered.agentId).toBe('agent-audit');
     expect(registered.source).toBe('registered');
     expect(registered.agent?.name).toBe('Nightly Auditor');
+  });
+
+  it('wires the BEHAVIOROS_EVOLUTION opt-in flag into the BehaviorOS config', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const src = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts'),
+      'utf-8',
+    );
+    // The learning→governance loop only closes when the host can actually pass
+    // evolution.enabled; keep the env flag wiring from silently disappearing.
+    expect(src).toContain("process.env.BEHAVIOROS_EVOLUTION === 'true'");
+    expect(src).toContain('evolution: process.env');
+  });
+
+  it('joins durable persistence via the shared BEHAVIOROS_DB_PATH', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const src = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.ts'),
+      'utf-8',
+    );
+    // The plugin host is the other half of the architecture audit finding:
+    // without a store, plugin sessions never persist records/roles/decisions.
+    expect(src).toContain('process.env.BEHAVIOROS_DB_PATH');
+    expect(src).toContain('persistence:');
   });
 });
