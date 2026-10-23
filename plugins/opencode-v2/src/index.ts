@@ -1,3 +1,4 @@
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   BehaviorOS,
@@ -84,9 +85,19 @@ function getBehaviorOS(): BehaviorOS {
       // restarts. ctx.storage still holds the plugin-local UX state (the
       // notification coalescer and the per-session governance snapshot); the
       // facade-level store is the cross-host source of truth.
+      //
+      // When running as a global plugin (no project-local BEHAVIOROS_DB_PATH),
+      // fall back to a user-scoped SQLite path so persona roles survive server
+      // restarts. The role registry is otherwise in-memory-only.
+      //
+      // In test mode we do NOT create a persistent SQLite store: the tests
+      // exercise Map-based snapshot persistence, and a shared file-path store
+      // would bleed state between test cases that call `vi.resetModules()`.
       persistence: process.env.BEHAVIOROS_DB_PATH
         ? { path: process.env.BEHAVIOROS_DB_PATH }
-        : undefined,
+        : typeof process.env.VITEST !== 'undefined'
+          ? undefined
+          : { path: path.join(os.homedir(), '.config', 'opencode', 'behavioros.db') },
     });
   }
   return behaviorOS;

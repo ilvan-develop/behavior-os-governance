@@ -370,7 +370,17 @@ check('behavior-os skill lists the real protocol steps', () => {
 /* ------------------------------------------------------------ plugin + MCP */
 
 check('plugin loader points at the versioned build', () => {
-  const loader = readText(join('.opencode', 'plugins', 'behavioros.ts'));
+  // The loader may live in the repo (local dev) or in the global config dir.
+  const localLoader = join('.opencode', 'plugins', 'behavioros.ts');
+  const globalLoader = join(
+    process.env.HOME ?? '',
+    '.config',
+    'opencode',
+    'plugins',
+    'behavioros.ts',
+  );
+  const loaderPath = existsSync(localLoader) ? localLoader : globalLoader;
+  const loader = readText(loaderPath);
   if (!loader.includes('plugins/opencode-v2/dist/index.js')) {
     fail('loader must re-export plugins/opencode-v2/dist/index.js');
   }
