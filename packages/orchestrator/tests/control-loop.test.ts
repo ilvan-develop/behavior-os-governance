@@ -971,25 +971,21 @@ describe('Persistent engineering control loop', () => {
       ).toThrow(/requires an adapter/);
     });
 
-    it('rejects persisted state with invalid numeric ranges', () => {
+    it('rejects persisted state with invalid numeric ranges', async () => {
       const base = setup([task('t')]);
       const state = createInitialControlState(base.plan, 'agent-1');
       // maxAttempts below 1 is invalid in persisted state.
       state.tasks[0].maxAttempts = 0;
       writeFileSync(base.statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-      expect(async () => base.loop.run()).rejects.toThrow(
-        /does not match the persisted state contract/,
-      );
+      await expect(base.loop.run()).rejects.toThrow(/does not match the persisted state contract/);
     });
 
-    it('rejects persisted state with empty required strings', () => {
+    it('rejects persisted state with empty required strings', async () => {
       const base = setup([task('t')]);
       const state = createInitialControlState(base.plan, 'agent-1');
       (state.tasks[0] as unknown as Record<string, unknown>).idempotencyKey = '';
       writeFileSync(base.statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-      expect(async () => base.loop.run()).rejects.toThrow(
-        /does not match the persisted state contract/,
-      );
+      await expect(base.loop.run()).rejects.toThrow(/does not match the persisted state contract/);
     });
   });
 
