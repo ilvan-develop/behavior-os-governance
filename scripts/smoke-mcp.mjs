@@ -53,10 +53,13 @@ child.stdout.on('data', (chunk) => {
 function request(method, params) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
+    // Cold start imports the built server and loads the 21 DNA patterns. On this
+    // machine a full smoke run measured 22.2s end-to-end (2026-10-21), so the
+    // first response can sit near the old 15s ceiling and fail under load.
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Timeout waiting for ${method}`));
-    }, 15000);
+    }, 30_000);
     pending.set(id, (message) => {
       clearTimeout(timer);
       if (message.error) reject(new Error(`${method}: ${JSON.stringify(message.error)}`));
@@ -81,6 +84,13 @@ try {
 
   const { tools } = await request('tools/list', {});
   const names = (tools ?? []).map((tool) => tool.name);
+
+  // R7: the server advertises 30 tools *and* 2 resources. Listing tools alone
+  // never exercised the resource leg, so a broken resource handler could pass.
+  const { resources } = await request('resources/list', {});
+  const resourceUris = (resources ?? []).map((resource) => resource.uri);
+  const protocolSteps = await request('resources/read', { uri: 'behavioros://protocol/steps' });
+  const dnaCatalog = await request('resources/read', { uri: 'behavioros://dna/catalog' });
 
   const status = await request('tools/call', { name: 'bos_get_status', arguments: {} });
   const missions = await request('tools/call', { name: 'bos_list_missions', arguments: {} });
@@ -125,6 +135,7 @@ try {
 
   console.log('MCP server   :', init?.serverInfo?.name, init?.serverInfo?.version);
   console.log('Tools (%d)   : %s', names.length, names.join(', '));
+  console.log('Resources (%d): %s', resourceUris.length, resourceUris.join(', '));
   console.log(
     'bos_get_status:',
     JSON.stringify(status?.content?.[0]?.text ?? status).slice(0, 160),
@@ -139,6 +150,29 @@ try {
   if (!names.includes('bos_evaluate_governance')) throw new Error('Missing governance tool');
   if (!names.includes('bos_run_audit')) throw new Error('Missing audit tool');
   if (!names.includes('bos_list_dna')) throw new Error('Missing bos_list_dna tool');
+  if (resourceUris.length !== 2) {
+    throw new Error(`Expected 2 resources, got ${resourceUris.length}: ${resourceUris.join(', ')}`);
+  }
+  if (!resourceUris.includes('behavioros://protocol/steps')) {
+    throw new Error(`Missing protocol resource: ${resourceUris.join(', ')}`);
+  }
+  const stepsText = protocolSteps?.contents?.[0]?.text ?? '';
+  if (!stepsText.includes('bos_select_dna') || !stepsText.includes('bos_run_audit')) {
+    throw new Error(`protocol/steps resource does not render the real protocol: ${stepsText}`);
+  }
+  const catalogText = dnaCatalog?.contents?.[0]?.text ?? '';
+  const catalog = JSON.parse(catalogText);
+  if (!Array.isArray(catalog.available) || catalog.available.length !== 21) {
+    throw new Error(`dna/catalog resource is not the real catalog: ${catalogText.slice(0, 200)}`);
+  }
+
+  // Print what the resource assertions actually saw: the gate's own log must
+  // show the resource leg ran, not just the URI list (independent audit, #4).
+  console.log(
+    'resource protocol/steps: renders real steps =',
+    stepsText.includes('bos_select_dna') && stepsText.includes('bos_run_audit'),
+  );
+  console.log('resource dna/catalog: patterns =', catalog.available.length);
   if (dnaText.toLowerCase().includes('not found')) {
     throw new Error(`DNA patterns were not loaded from disk: ${dnaText}`);
   }
