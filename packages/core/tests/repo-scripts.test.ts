@@ -18,6 +18,13 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '.
 interface Manifest {
   name?: string;
   scripts?: Record<string, string>;
+  pnpm?: {
+    overrides?: Record<string, string>;
+    auditConfig?: {
+      ignoreCves?: string[];
+      ignoreGhsas?: string[];
+    };
+  };
 }
 
 interface TurboConfig {
@@ -154,5 +161,70 @@ describe('repository script wiring', () => {
         `.husky/${hook} is empty — the git hook would silently stop running`,
       ).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('zero-visible-windows gate', () => {
+  const gateSource = () => readFileSync(join(repoRoot, 'scripts', 'verify-windows.mjs'), 'utf-8');
+
+  it('wires verify:windows into the ladder, verify:all and the agents contract (h)', () => {
+    expect(
+      rootManifest.scripts?.['verify:windows'],
+      'verify:windows is the single definition of the window gate',
+    ).toBe('node scripts/verify-windows.mjs');
+
+    expect(
+      rootManifest.scripts?.['verify:all'] ?? '',
+      'the whole ladder must re-measure zero-visible-windows continuously',
+    ).toContain('pnpm verify:windows');
+
+    const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf-8');
+    expect(
+      agents,
+      'AGENTS.md documents the verification ladder; the window gate must be listed',
+    ).toContain('pnpm verify:windows');
+  });
+
+  it('skips on non-Windows instead of failing the ladder (i)', () => {
+    expect(
+      gateSource(),
+      'the window failure mode is win32-specific; other platforms must skip with exit 0',
+    ).toContain("process.platform !== 'win32'");
+  });
+
+  it('runs the probe hidden and delegates attribution to the probe (j)', () => {
+    const source = gateSource();
+    expect(source, 'the gate itself must never open a window').toContain('windowsHide: true');
+    expect(source, 'the gate delegates measurement to the probe').toContain('win-window-probe.mjs');
+  });
+});
+
+describe('dependency security gate', () => {
+  it('runs the high-severity audit from verify:all and CI (f)', () => {
+    expect(
+      rootManifest.scripts?.['security:audit'],
+      'security:audit is the single definition of the dependency-audit gate',
+    ).toBe('pnpm audit --audit-level=high');
+
+    expect(
+      rootManifest.scripts?.['verify:all'],
+      'verify:all must run the audit gate: a clean local ladder that omits it can ship a red CI security job',
+    ).toContain('pnpm run security:audit');
+
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf-8');
+    expect(ci, 'CI must call the same audit gate as the local ladder').toContain(
+      'pnpm run security:audit',
+    );
+  });
+
+  it('never hides advisories behind an audit ignore list (g)', () => {
+    expect(
+      rootManifest.pnpm?.auditConfig?.ignoreCves ?? [],
+      'audit ignores must be empty: fix, upgrade or document the risk explicitly instead',
+    ).toEqual([]);
+    expect(
+      rootManifest.pnpm?.auditConfig?.ignoreGhsas ?? [],
+      'audit ignores must be empty: fix, upgrade or document the risk explicitly instead',
+    ).toEqual([]);
   });
 });

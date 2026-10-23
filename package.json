@@ -28,26 +28,28 @@
     "verify:plugin": "node scripts/verify-plugin.mjs",
     "verify:governance": "node scripts/governance-conformance.mjs",
     "verify:opencode": "node scripts/verify-opencode.mjs",
-    "verify:all": "pnpm typecheck && pnpm lint:check && pnpm test && pnpm build && pnpm verify:governance && pnpm verify:plugin && pnpm smoke:mcp && pnpm verify:opencode",
+    "security:audit": "pnpm audit --audit-level=high",
+    "verify:all": "pnpm typecheck && pnpm lint:check && pnpm test && pnpm build && pnpm verify:governance && pnpm verify:plugin && pnpm smoke:mcp && pnpm verify:opencode && pnpm verify:windows && pnpm run security:audit",
     "analyze:flow": "node scripts/analyze-governance-flow.mjs",
     "cli:init": "node packages/cli/dist/cli.js init",
-    "docs:build": "typedoc"
+    "docs:build": "typedoc",
+    "verify:windows": "node scripts/verify-windows.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
-    "@changesets/cli": "^2.29.0",
+    "@changesets/cli": "^3.0.3",
     "@commitlint/cli": "^19.8.0",
     "@commitlint/config-conventional": "^19.8.0",
     "@opencode/plugin": "^2.0.0-beta.10",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-v8": "^3.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "husky": "^9.1.0",
-    "lint-staged": "^15.4.0",
+    "lint-staged": "^16.4.0",
     "turbo": "^2.4.0",
     "typedoc": "^0.28.0",
     "typedoc-plugin-markdown": "^4.0.0",
     "typescript": "~5.9.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "peerDependencyRules": {
@@ -57,7 +59,8 @@
     },
     "overrides": {
       "@behavior-os/core": "workspace:*",
-      "@behavior-os/schemas": "workspace:*"
+      "@behavior-os/schemas": "workspace:*",
+      "markdown-it": "14.3.3"
     }
   },
   "lint-staged": {
