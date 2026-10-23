@@ -486,6 +486,65 @@ export const DecisionSchema = z.object({
 });
 
 // ============================================================
+// Consensus (multi-agent voting) Schemas
+// ============================================================
+
+export const ConsensusPolicySchema = z.enum(['unanimous', 'supermajority', 'majority']);
+
+export const ConsensusVoteSchema = z.object({
+  agentId: z.string(),
+  weight: z.number().optional(),
+  choice: VoteChoiceSchema,
+  reason: z.string().optional(),
+});
+
+export const ConsensusTallySchema = z.object({
+  approveWeight: z.number(),
+  rejectWeight: z.number(),
+  abstainWeight: z.number(),
+  totalParticipating: z.number(),
+  approveRatio: z.number(),
+  rejectRatio: z.number(),
+});
+
+export const ConsensusOutcomeSchema = z.enum(['approved', 'rejected', 'inconclusive']);
+
+export const ConsensusRoundSchema = z.object({
+  id: z.string(),
+  subject: z.string(),
+  policy: ConsensusPolicySchema,
+  quorum: z.number(),
+  votes: z.array(ConsensusVoteSchema),
+  tally: ConsensusTallySchema,
+  outcome: ConsensusOutcomeSchema,
+  reason: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// Prediction Schemas
+// ============================================================
+
+export const PredictionTypeSchema = z.enum([
+  'governance-block',
+  'mission-failure',
+  'quality-fall',
+  'drift-significant',
+  'pattern-repeated',
+]);
+
+export const PredictionSchema = z.object({
+  id: z.string(),
+  type: PredictionTypeSchema,
+  subject: z.string(),
+  confidence: z.number(),
+  horizonHours: z.number(),
+  evidence: z.array(z.string()),
+  recommendation: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
 // DNA Evolution (learning-driven) Schemas
 // ============================================================
 
@@ -751,6 +810,13 @@ export const DriftInfoSchema = z.object({
   timestamp: z.string(),
 });
 export type DriftInfo = z.infer<typeof DriftInfoSchema>;
+export type ConsensusPolicy = z.infer<typeof ConsensusPolicySchema>;
+export type ConsensusVote = z.infer<typeof ConsensusVoteSchema>;
+export type ConsensusTally = z.infer<typeof ConsensusTallySchema>;
+export type ConsensusOutcome = z.infer<typeof ConsensusOutcomeSchema>;
+export type ConsensusRound = z.infer<typeof ConsensusRoundSchema>;
+export type PredictionType = z.infer<typeof PredictionTypeSchema>;
+export type Prediction = z.infer<typeof PredictionSchema>;
 export type LearningType = z.infer<typeof LearningTypeSchema>;
 export type LearningImpact = z.infer<typeof LearningImpactSchema>;
 export type LearningEvent = z.infer<typeof LearningEventSchema>;
@@ -761,3 +827,93 @@ export type ProtocolStep = z.infer<typeof ProtocolStepSchema>;
 export type AgentState = z.infer<typeof AgentStateSchema>;
 export type McpTool = z.infer<typeof McpToolSchema>;
 export type McpResource = z.infer<typeof McpResourceSchema>;
+
+// ============================================================
+// Anti-Pattern Schemas
+// ============================================================
+
+export const AntiPatternTypeSchema = z.enum([
+  'typescript-error',
+  'lint-violation',
+  'security-vulnerability',
+  'performance-issue',
+  'architecture-violation',
+  'code-smell',
+  'test-gap',
+  'documentation-gap',
+  'governance-bypass',
+  'pattern-debt',
+]);
+
+export const SeveritySchema = z.enum(['critical', 'high', 'medium', 'low', 'info']);
+
+export const AntiPatternSchema = z.object({
+  id: z.string(),
+  type: AntiPatternTypeSchema,
+  severity: SeveritySchema,
+  pattern: z.string(),
+  description: z.string(),
+  location: z.string().optional(),
+  file: z.string().optional(),
+  line: z.number().optional(),
+  evidence: z.array(z.string()),
+  recommendation: z.string(),
+  detectedAt: z.string(),
+  resolved: z.boolean().default(false),
+  resolvedAt: z.string().optional(),
+  resolvedBy: z.string().optional(),
+});
+
+export const ConversationTurnSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  role: z.enum(['system', 'user', 'agent', 'expert']),
+  content: z.string(),
+  timestamp: z.string(),
+});
+
+export const PragmaticConversationSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  problem: z.string(),
+  status: z.enum(['open', 'in-progress', 'resolved', 'closed', 'cancelled']),
+  participants: z.array(z.string()),
+  turns: z.array(ConversationTurnSchema),
+  antiPatterns: z.array(z.string()),
+  solution: z.string().optional(),
+  resolvedBy: z.string().optional(),
+  lessonsLearned: z.array(z.string()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const PolicyRuleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  condition: z.string(),
+  action: z.enum(['require', 'warn', 'block', 'auto-fix']),
+  severity: SeveritySchema,
+  appliesTo: z.array(z.enum(['persona', 'role', 'agent', 'project'])).optional(),
+  effectiveFrom: z.string(),
+  effectiveUntil: z.string().optional(),
+});
+
+export const RoleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  displayName: z.string(),
+  responsibilities: z.array(z.string()),
+  policies: z.array(z.string()).optional(),
+  canAudit: z.boolean().default(false),
+  canEnforce: z.boolean().default(false),
+  canTeach: z.boolean().default(false),
+});
+
+export type AntiPatternType = z.infer<typeof AntiPatternTypeSchema>;
+export type Severity = z.infer<typeof SeveritySchema>;
+export type AntiPattern = z.infer<typeof AntiPatternSchema>;
+export type ConversationTurn = z.infer<typeof ConversationTurnSchema>;
+export type PragmaticConversation = z.infer<typeof PragmaticConversationSchema>;
+export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
+export type Role = z.infer<typeof RoleSchema>;
