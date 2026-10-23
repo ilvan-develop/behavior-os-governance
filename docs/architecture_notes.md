@@ -79,6 +79,93 @@ themselves (`windowsHide`, DEP0190-safe single-string commands) — a window gat
 that flashes windows to prove there are none would be lying with its own
 instrument. Non-Windows runners skip with exit 0 so the ladder stays portable.
 
+### Host logic belongs in the facade, not in one host's pocket
+
+Three pieces of *policy* lived in host code where only one enforcement surface
+could benefit. The deny-override rule — "a DNA deny never locks the control
+plane or read-only tools" — was a comment next to one implementation in the
+plugin; it is now `BehaviorOS.bootstrapDenyOverride()` with its
+classification helper (`isMutatingAction`, `isControlPlaneAction`) exported
+from core, and the plugin's `governance.ts` keeps only a one-line alias.
+Mission filters were applied in two hosts with a "matching the MCP tool"
+comment as their only coordination mechanism; the facade signature
+`listMissions(limit, filters)` owns the filtered-then-limited semantics and
+both handlers became a single call. DNA-directory loading in the plugin
+parsed YAML and cast `dna as DNA` with no schema validation — a half-shaped
+pattern could reach `loadDNA()`; the facade method now routes every file
+through the validating `DNALoader` and returns per-file errors instead of
+casting. The rule of thumb: **if both hosts would want the same behaviour,
+it is not host logic — it is facade logic.** Tests: `facade-host-logic.test.ts`.
+
+### Learning records ride the meta channel, not a new table
+
+G-014 records were durable only inside the plugin's ctx.storage snapshot
+(`exportState` already carried `learningRecords`) while the SQLite/Postgres
+store — the cross-host source of truth — never saw them. Rather than minting
+a 10th entity table (table-count ripples in upkeep, and `Store` stays
+generic), the records follow the precedent set by `role-policy-state`: a
+plain-JSON meta key (`learning-records`), written by the facade on record
+creation and on every *successful* promotion (a refused promotion rewrites
+identical state, so it must not store), restored at construction with the
+same corrupt-snapshot fail-safe. Bounded by design: lifecycle records end at
+`monitored`; if they ever outgrow a meta value, the documented upgrade path
+is an entity table — but volume, not ideology, triggers it. MCP's
+`bos_record_learning` then gained the same `learningId`/`stage`/`evidence`
+promotion verb the plugin already had, so the two hosts agree on one
+lifecycle, spelled `actor: 'mcp'` vs the plugin's `session` in the
+transition trail. The plugin host now also accepts the shared
+`BEHAVIOROS_DB_PATH`, giving its facade the store the MCP server already
+uses — sessions persist records, roles, decisions and missions through the
+facade instead of only through ctx.storage.
+
+### Role policies are a second authority, evaluated after the DNA
+
+The audit found the 21st engine enforcing nothing: zero callers outside its
+own tools. Closing that loop means the plugin's permission hook consults the
+role/policy registry for every mutating, non-control-plane action **after**
+the DNA verdict is already applied — a role decision can only block or
+escalate further, never downgrade a DNA verdict — and the enforcement path
+reuses the same bootstrap escape (control-plane and read-only stay
+unreachable by role policies). The plugin also gained the five role tools that already existed in
+the MCP server: being able to define policies from inside the governed
+session is what makes the enforcement loop actually usable. Cost control
+matters here: the hook runs per tool call, so benign "no policy matched"
+decisions skip the store meta write (the bounded trail still records them in
+memory; persistence happens when a policy matches or the fail-safe fires).
+
+### Metrics are instrumented at the facade, not at hosts
+
+The audit found `bos_get_metrics` permanently zero: `recordGovernanceEvent`
+existed on the facade but no host ever called it. Asking every host to remember
+to record metrics is a blame-distribution anti-pattern, so the instrumentation
+lives at the facade: `evaluateGovernance()`, `decide()` and `recordLearning()`
+record into the shared `MetricsEngine` themselves — every host (plugin, MCP,
+CLI, orchestrator) is measured with zero host changes. A second dead report —
+`topRules` returning a constant `[]` — was fixed by adding a structured
+`firedRules` field to `GovernanceDecision` (in contrast to `rulesEvaluated`,
+which lists rules *examined*, not fired), so the engine reports what matched
+without the facade string-parsing the reason text. Bucket semantics worth
+knowing: the governance engine never emits a `warn` verdict (warnings coexist
+with allow), so `warned` counts allow-with-warning, and `denied`/`escalated`
+count the effective verdict (lenient softening included). `bos_reset_metrics`
+now calls `resetMetrics()` on the facade instead of reaching into the engine
+registry with a cast.
+
+### Evolution only proposes rules that can actually fire
+
+The learning→governance loop was dead twice over: no host ever passed
+`evolution.enabled`, and even when enabled the applied rule's condition key
+(`pattern`) had no producer in any real context bag, so the rule could never
+match. Both halves are now closed by construction. The learning engine buckets
+actionable events by their tool token (`source: "tool:<name>"`, the shape the
+plugin records on tool errors) and emits a condition on the `tool` context key
+that real hosts actually send; events without a tool token produce **no
+proposal at all** — in a governance system, a rule that cannot match is not a
+warning, it is dead code. `applyEvolution` skips any proposal without one as a
+second guard. Hosts opt in via `BEHAVIOROS_EVOLUTION=true` (both MCP and
+plugin); evolution can still only add `warn` rules and still needs an explicit
+`apply: true` per call.
+
 ### Persona activation auto-registers an unprivileged role
 
 `loadDNA` and `setActiveAgent` auto-register the active persona as a role —

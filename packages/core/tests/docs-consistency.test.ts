@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 32 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 57 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_apply_code_fixes',
   'bos_cancel_mission',
@@ -23,23 +23,31 @@ const MCP_TOOLS = [
   'bos_complete_mission',
   'bos_create_mission',
   'bos_decide',
+  'bos_define_policy',
   'bos_drift',
   'bos_evaluate_governance',
+  'bos_evaluate_role_action',
   'bos_evolution',
   'bos_fail_mission',
   'bos_get_insights',
+  'bos_get_metrics',
   'bos_get_state',
   'bos_get_status',
   'bos_list_audit_reports',
   'bos_list_code_edits',
+  'bos_override_rule',
+  'bos_reset_metrics',
   'bos_list_code_fixes',
   'bos_list_decisions',
   'bos_list_dna',
   'bos_list_missions',
   'bos_list_pipeline_runs',
+  'bos_list_roles',
   'bos_preflight',
   'bos_recommendations',
   'bos_record_learning',
+  'bos_register_role',
+  'bos_role_policy_report',
   'bos_run_audit',
   'bos_select_dna',
   'bos_set_agent',
@@ -505,7 +513,7 @@ describe('documented counts match the code', () => {
     // numbers, so the derivation itself is pinned to the measured reality.
     expect(measured.mcpTools).toBe(57);
     expect(measured.mcpResources).toBe(2);
-    expect(measured.pluginTools).toBe(32);
+    expect(measured.pluginTools).toBe(37);
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
     expect(measured.engines).toBe(21);

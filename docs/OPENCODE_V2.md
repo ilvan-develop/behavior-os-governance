@@ -18,7 +18,7 @@ plugins and MCP servers.
 | Agents | `.opencode/agents/<id>.md` | Research, planning, review and audit roles |
 | Commands | `.opencode/commands/<id>.md` | Repeatable `/govern`, `/verify`, `/audit` workflows |
 | Skills | `.opencode/skills/<id>/SKILL.md` | Procedures loaded only when the task matches |
-| Plugin | `.opencode/plugins/behavioros.ts` | Native Behavior-OS enforcement and 32 `bos_*` tools |
+| Plugin | `.opencode/plugins/behavioros.ts` | Native Behavior-OS enforcement and 37 `bos_*` tools |
 | External MCP | `packages/mcp-server` (+ local `.mcp.json`) | Integration for MCP clients outside OpenCode |
 
 `AGENTS.md` is discovered automatically. `docs/PROTOCOL.md`,
@@ -100,7 +100,7 @@ directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
 
 The native integration is the plugin. `.opencode/plugins/behavioros.ts` is a
 thin auto-discovered loader that re-exports
-`plugins/opencode-v2/dist/index.js`. The plugin registers 32 `bos_*` tools and
+`plugins/opencode-v2/dist/index.js`. The plugin registers 37 `bos_*` tools and
 the hooks that make governance visible:
 
 - `permission.evaluate`: the only typed denial surface; applies DNA `deny` and
@@ -131,7 +131,7 @@ pnpm verify:opencode
 
 It checks the config schema, instruction files, permission ordering, required
 agents and their least-privilege rules, command templates and agent references,
-skill discovery, the 32-tool plugin surface, the loader target, the
+skill discovery, the 37-tool plugin surface, the loader target, the
 separation between the plugin and any local `.mcp.json`, and that no
 control-plane file is git-ignored. It exits non-zero on the first failed check.
 

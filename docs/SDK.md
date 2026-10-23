@@ -237,7 +237,7 @@ Add to `.mcp.json`:
 
 Inside this repository OpenCode discovers `.opencode/plugins/behavioros.ts`, which
 re-exports the built package. The MCP server is deliberately **not** registered in
-OpenCode, so a session sees one tool catalog (the plugin's 32 `bos_*` tools):
+OpenCode, so a session sees one tool catalog (the plugin's 37 `bos_*` tools):
 
 ```json
 // opencode.json
