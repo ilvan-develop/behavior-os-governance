@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { BehaviorOS, DNALoader } from '@behavior-os/core';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { listRegisteredAgents } from './agents.js';
+import { runDriftCheck } from './drift.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -472,8 +474,12 @@ program
 // AGENT command
 program
   .command('agent')
-  .description('Show the local state summary and how to register agents')
+  .description('Show the local state summary and agents from the SQLite registry')
   .option('-d, --directory <path>', 'Project directory', '.')
+  .option(
+    '--db <path>',
+    'Agent registry SQLite path (default: <dir>/behavioros.db or <dir>/.behavioros/behavioros.db)',
+  )
   .action((options) => {
     const dir = options.directory;
     const statePath = join(dir, '.behavioros', 'state.json');
@@ -499,13 +505,42 @@ program
       );
     }
 
-    console.log(chalk.gray('\n  Use the SDK to register and manage agents:'));
-    console.log(chalk.gray('    const bos = new BehaviorOS();'));
-    console.log(
-      chalk.gray(
-        "    bos.registerAgent({ id: 'agent-1', name: 'DevBot', type: 'developer', ... });",
-      ),
-    );
+    const registry = listRegisteredAgents(dir, options.db);
+    console.log(chalk.cyan(`\n  Agent registry: ${registry.path}`));
+
+    if (!registry.found) {
+      console.log(chalk.yellow('  No agent registry found.'));
+      console.log(chalk.gray('  Register agents with the SDK and persistence enabled:'));
+      console.log(
+        chalk.gray("    const bos = new BehaviorOS({ persistence: { path: 'behavioros.db' } });"),
+      );
+      console.log(
+        chalk.gray(
+          "    bos.registerAgent({ id: 'agent-1', name: 'DevBot', type: 'developer', ... });",
+        ),
+      );
+      return;
+    }
+
+    if (registry.error) {
+      console.log(chalk.red(`  Could not read the registry: ${registry.error}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    if (registry.agents.length === 0) {
+      console.log(chalk.yellow('  Registry is empty.'));
+      return;
+    }
+
+    console.log(chalk.green(`  ${registry.agents.length} registered agent(s):`));
+    for (const agent of registry.agents) {
+      console.log(
+        chalk.gray(
+          `    ${agent.id}  ${agent.name}  [${agent.type}/${agent.status}]  DNA=${agent.dnaPattern}  mission=${agent.currentMission ?? 'none'}`,
+        ),
+      );
+    }
   });
 
 // AUTONOMOUS command
@@ -574,7 +609,7 @@ program
 
     // Protocol step 6 — run audit (simulated).
     console.log(chalk.cyan('\n[Step 6/7] Run audit (simulated)'));
-    const report = bos.runAudit({
+    const report = await bos.runAudit({
       missionId: mission.id,
       agentId: identity.agentId,
       simulate: true,
@@ -663,50 +698,65 @@ program
 // DRIFT-CHECK command
 program
   .command('drift-check')
-  .description('Compare selectedDna/currentStep in state.json against .behavioros/baseline.json')
+  .description('Compare dnas/*.yaml with .behavioros/baseline.json using DriftEngine')
   .option('-d, --directory <path>', 'Project directory', '.')
   .action(async (options) => {
     const dir = options.directory;
-    const statePath = join(dir, '.behavioros', 'state.json');
-    const baselinePath = join(dir, '.behavioros', 'baseline.json');
 
     console.log(chalk.blue('Checking for behavioral drift...'));
 
-    if (!existsSync(baselinePath)) {
+    let report: Awaited<ReturnType<typeof runDriftCheck>>;
+    try {
+      report = await runDriftCheck(dir);
+    } catch (error) {
+      console.log(
+        chalk.red(
+          `  Error comparing DNA snapshots: ${error instanceof Error ? error.message : error}`,
+        ),
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!report.baselineFound) {
       console.log(chalk.yellow('  No baseline found. Create one with: behavioros diff'));
       return;
     }
 
-    if (!existsSync(statePath)) {
-      console.log(chalk.yellow("  No current state found. Run 'behavioros init' first."));
+    if (report.findings.length === 0 && report.stateDrifts.length === 0) {
+      if (!report.dnasFound && report.compared === 0 && report.stateDrifts.length === 0) {
+        console.log(chalk.yellow('  No dnas/ directory found.'));
+        return;
+      }
+      if (!report.stateFound && report.compared === 0) {
+        console.log(chalk.yellow("  No current state found. Run 'behavioros init' first."));
+        return;
+      }
+      console.log(
+        chalk.green(`  No drift detected. ${report.compared} DNA pattern(s) match the baseline.`),
+      );
       return;
     }
 
-    try {
-      const state = JSON.parse(readFileSync(statePath, 'utf-8'));
-      const baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
-
-      // Compare key behavioral attributes
-      const drifts: string[] = [];
-      if (state.selectedDna !== baseline.selectedDna) {
-        drifts.push(`DNA pattern changed: ${baseline.selectedDna} → ${state.selectedDna}`);
-      }
-      if (state.currentStep !== baseline.currentStep) {
-        drifts.push(`Protocol step changed: ${baseline.currentStep} → ${state.currentStep}`);
-      }
-
-      if (drifts.length === 0) {
-        console.log(chalk.green('  No drift detected. Behavior matches baseline.'));
-      } else {
-        for (const d of drifts) {
-          console.log(chalk.yellow(`  ⚠ ${d}`));
-        }
-      }
-    } catch {
-      console.log(
-        chalk.red('  Error comparing state. Check format of state.json and baseline.json.'),
-      );
+    if (report.compared > 0) {
+      console.log(chalk.gray(`  Compared ${report.compared} DNA pattern(s) against the baseline.`));
     }
+    for (const finding of report.findings) {
+      const message =
+        finding.kind === 'changed'
+          ? `Drift in ${finding.pattern}: ${finding.summary.replace(/^Drift detected: /, '')}`
+          : finding.summary;
+      console.log(chalk.yellow(`  ⚠ ${message}`));
+    }
+    for (const drift of report.stateDrifts) {
+      console.log(chalk.yellow(`  ⚠ ${drift}`));
+    }
+    console.log(
+      chalk.red(
+        `\n  Drift detected: ${report.findings.length + report.stateDrifts.length} change(s).`,
+      ),
+    );
+    process.exitCode = 1;
   });
 
 program.parse();

@@ -21,10 +21,10 @@ pnpm cli:init
 | `simulate` | Evaluate one action against the loaded DNA rules |
 | `deploy` | Print the deployment gate plan (does not run the gates) |
 | `ecosystem` | Report what can be read from disk (DNA patterns, verdicts) |
-| `agent` | Show the local `.behavioros/state.json` summary |
+| `agent` | Show the state summary and registered agents from the SQLite registry |
 | `autonomous` | Dry-run the 7-step protocol on a task (no work executed) |
 | `protocol` | Check the 7 steps against the local state file |
-| `drift-check` | Compare `selectedDna`/`currentStep` with the baseline |
+| `drift-check` | Compare every DNA rule/gate with the baseline using `DriftEngine` (exits 1 on drift) |
 
 ### init
 
@@ -131,9 +131,16 @@ npx @behavior-os/cli agent [options]
 ```
 
 - `-d, --directory <path>` — project directory (default `.`)
+- `--db <path>` — agent registry SQLite path
 
-Shows the DNA pattern, active mission and step from `.behavioros/state.json`.
-Agent registration lives in the SDK/engine (`registerAgent`), not in the CLI.
+Shows the DNA pattern, active mission and step from `.behavioros/state.json`,
+then reads the SQLite registry (the engine's `agents` table) and lists every
+registered agent with id, name, type/status, DNA pattern and current mission.
+The registry path is, in order: `--db`, `<dir>/behavioros.db`,
+`<dir>/.behavioros/behavioros.db`. A missing registry is reported as such
+(exit 0); an existing but unreadable/corrupt database exits 1 instead of being
+shown as an empty registry. Registration itself stays in the SDK/engine
+(`registerAgent`).
 
 ### autonomous
 
@@ -170,16 +177,19 @@ npx @behavior-os/cli drift-check [options]
 
 - `-d, --directory <path>` — project directory (default `.`)
 
-Compares `selectedDna` and `currentStep` in `.behavioros/state.json` against
-`.behavioros/baseline.json` (created by `diff`). It is a subset of the
-`DriftEngine` (rules/gates comparison) exposed by `bos_drift`.
+Compares every `dnas/*.yaml` snapshot against `.behavioros/baseline.json`
+(created by `diff`) using `DriftEngine`: governance rules and quality gates
+added, removed or changed, plus patterns added or removed since the baseline.
+The legacy state baseline (`selectedDna`/`currentStep`) is still accepted and
+compared field by field. Exits 1 when drift is detected, 0 when the snapshots
+match.
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
-| `1` | `dnas/` missing, invalid DNA, failed validation, blocked `deploy` pre-flight, or `autonomous` without `--task` |
+| `1` | `dnas/` missing, invalid DNA, failed validation, blocked `deploy` pre-flight, drift detected by `drift-check`, unreadable agent registry, or `autonomous` without `--task` |
 
 ## Environment variables
 
