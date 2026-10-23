@@ -8,6 +8,7 @@ import type {
   LearningImpact,
   LearningType,
   MissionPriority,
+  MissionStatus,
   MissionType,
   Vote,
 } from '@behavior-os/schemas';
@@ -38,6 +39,10 @@ function getBehaviorOS(): BehaviorOS {
         enabled: process.env.BEHAVIOROS_CODE_EDIT === 'true',
         root: process.env.BEHAVIOROS_CODE_EDIT_ROOT,
       },
+      // DNA evolution is opt-in; with BEHAVIOROS_EVOLUTION=true, bos_evolution
+      // / bos_apply_code_fixes with apply:true can write tool-scoped warn
+      // rules derived from recorded failure events.
+      evolution: process.env.BEHAVIOROS_EVOLUTION === 'true' ? { enabled: true } : undefined,
     });
   }
   return behaviorOS;
@@ -626,15 +631,13 @@ server.registerTool(
   }) => {
     try {
       const bos = getBehaviorOS();
-      // The advertised filters are applied here over the engine's mission list
-      // (the engine itself only supports a limit), then the limit is applied to
-      // the filtered result.
-      const all = bos.listMissions?.(1000) ?? [];
-      const missions = all
-        .filter((mission) => !status || mission.status === status)
-        .filter((mission) => !type || mission.type === type)
-        .filter((mission) => !priority || mission.priority === priority)
-        .slice(0, limit);
+      // The facade owns the filter semantics (applied BEFORE the limit) so the
+      // MCP tool and the plugin tool cannot drift apart.
+      const missions = bos.listMissions(limit, {
+        status: status as MissionStatus | undefined,
+        type: type as MissionType | undefined,
+        priority: priority as MissionPriority | undefined,
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify(missions, null, 2) }],
       };
@@ -1280,7 +1283,8 @@ server.registerTool(
 server.registerTool(
   'bos_record_learning',
   {
-    description: 'Record a learning event for pattern detection',
+    description:
+      'Record a learning event, or promote an existing learning record one lifecycle stage (observation → lesson → candidate → validated → policy → monitored). Promotion to validated requires evidence.',
     inputSchema: z.object({
       type: z
         .enum(['insight', 'pattern', 'fix', 'failure', 'optimization'])
@@ -1289,6 +1293,19 @@ server.registerTool(
       content: z.string().describe('Learning content'),
       impact: z.enum(['low', 'medium', 'high', 'critical']).describe('Impact level'),
       relatedMission: z.string().optional().describe('Related mission ID'),
+      learningId: z
+        .string()
+        .optional()
+        .describe('Existing learning record to promote (instead of recording a new event)'),
+      stage: z
+        .enum(['observation', 'lesson', 'candidate', 'validated', 'policy', 'monitored'])
+        .optional()
+        .describe('Target stage; must be exactly one step after the current stage'),
+      evidence: z
+        .array(z.string())
+        .optional()
+        .describe('Evidence for the promotion; required to reach validated'),
+      reason: z.string().optional(),
     }),
     annotations: {
       title: 'Record Learning',
@@ -1300,15 +1317,47 @@ server.registerTool(
     content,
     impact,
     relatedMission,
+    learningId,
+    stage,
+    evidence,
+    reason,
   }: {
     type: string;
     source: string;
     content: string;
     impact: string;
     relatedMission?: string;
+    learningId?: string;
+    stage?: 'observation' | 'lesson' | 'candidate' | 'validated' | 'policy' | 'monitored';
+    evidence?: string[];
+    reason?: string;
   }) => {
     try {
       const bos = getBehaviorOS();
+      // Promotion path: move an existing record exactly one stage forward.
+      // Same contract as the plugin's tool handler — hosts must agree on the
+      // lifecycle or cross-host records would drift.
+      if (learningId) {
+        if (!stage) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Learning promotion refused [INVALID_INPUT]: provide the target `stage` for `learningId`.',
+              },
+            ],
+            isError: true,
+          };
+        }
+        const result = bos.advanceLearningRecord(learningId, stage, {
+          actor: 'mcp',
+          ...(evidence ? { evidence } : {}),
+          ...(reason ? { reason } : {}),
+        });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        };
+      }
       const event = bos.recordLearning({
         type: type as LearningType,
         source,
@@ -1744,12 +1793,7 @@ server.registerTool(
   async () => {
     try {
       const bos = getBehaviorOS();
-      // Metrics are in-memory only; reset by creating a new engine
-      const bosAny = bos as unknown as { registry?: { engines?: Map<string, unknown> } };
-      const registry = bosAny.registry;
-      if (registry?.engines) {
-        registry.engines.delete('metrics');
-      }
+      bos.resetMetrics();
       return { content: [{ type: 'text', text: 'Metrics reset successfully' }] };
     } catch (error) {
       return {

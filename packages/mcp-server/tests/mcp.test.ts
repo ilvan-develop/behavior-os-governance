@@ -15,6 +15,22 @@ const toolNames = [...serverSource.matchAll(/server\.registerTool\(\s*\n?\s*'([a
 );
 
 describe('MCP server structure', () => {
+  it('wires the BEHAVIOROS_EVOLUTION opt-in flag into the BehaviorOS config', () => {
+    // The learning→governance loop only closes when a host can pass
+    // evolution.enabled; this keeps the env flag from silently disappearing.
+    expect(serverSource).toContain("process.env.BEHAVIOROS_EVOLUTION === 'true'");
+    expect(serverSource).toContain('evolution:');
+  });
+
+  it('promotes learning records through the same contract as the plugin host', () => {
+    // Cross-host lifecycle parity: MCP bos_record_learning must accept
+    // learningId/stage/evidence and route to advanceLearningRecord, exactly
+    // like the plugin tool handler does.
+    expect(serverSource).toContain('learningId');
+    expect(serverSource).toContain('advanceLearningRecord');
+    expect(serverSource).toContain("actor: 'mcp'");
+  });
+
   it('registers exactly 57 tools', () => {
     expect(toolNames).toHaveLength(57);
   });
