@@ -1,0 +1,35 @@
+# @behavior-os/schemas
+
+## 2.0.1
+
+### Patch Changes
+
+- c95526d: Role/policy governance, now with a persistent and automatic surface:
+  
+  - New `RolePolicyEngine` (21st engine): deterministic per-role decisions
+    (actor resolved by role → persona → agentId, condition prefix/wildcard
+    matching, `effectiveUntil` window, strictest-match-wins, fail-safe
+    `require` escalation for unknown roles, bounded 200-entry audit trail).
+  - Facade mutations (`registerRole`, `defineRolePolicy`, `evaluateRoleAction`)
+    persist the engine snapshot through the store's meta so roles, policies and
+    audit decisions survive restarts; a corrupt or missing snapshot never
+    blocks startup.
+  - 5 new MCP tools: `bos_register_role`, `bos_define_policy`,
+    `bos_evaluate_role_action`, `bos_role_policy_report`, `bos_list_roles`
+    (57 total, protected by the `registers exactly 57 tools` test).
+  - `loadDNA` and `setActiveAgent` auto-register the active persona as an
+    unprivileged role (no policies, no capabilities) so role attribution works
+    out of the box for every DNA; an explicit registration always wins.
+  - Attribute-value hygiene from the pragmatic refactor: `resolvedBy` is
+    persisted on pragmatic conversations and 13 `as any` casts were replaced by
+    typed facade getters.
+- 2fe6d18: Evolution loop closed end to end:
+  
+  - `EvolutionProposalSchema` gains `condition`; the learning engine buckets
+    events by `source: tool:<x>` so proposals only exist for a real host tool
+    (`{type:'tool', value:<x>}` matches the real context bags). Proposals
+    without a tool token are inert, and `applyEvolution` skips condition-less
+    proposals as a second guard — no more dead-code rules.
+  - Hosts opt in via `BEHAVIOROS_EVOLUTION=true` (MCP + OpenCode plugin).
+  - e2e proof: propose → apply → `evaluateGovernance` warns when
+    `context.tool` matches the evolved condition.

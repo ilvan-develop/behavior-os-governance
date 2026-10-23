@@ -1,0 +1,87 @@
+# @behavior-os/mcp-server
+
+## 2.0.1
+
+### Patch Changes
+
+- c95526d: Throttle all 30 MCP tools with a per-tool in-process token bucket at the
+  registration boundary. Defaults: 300 calls per tool per 60 s, configurable with
+  `BEHAVIOROS_MCP_RATE_LIMIT_MAX` and `BEHAVIOROS_MCP_RATE_LIMIT_WINDOW_MS`;
+  `BEHAVIOROS_MCP_RATE_LIMIT_DISABLED=true` disables it. A throttled call performs
+  no engine work and returns `isError: true` with the retry delay.
+- 2fe6d18: Governance metrics become real:
+  
+  - The `MetricsEngine` is fed at the facade choke point
+    (`evaluateGovernance`/`decide`/`recordLearning`), not at hosts, so every
+    host counts identically.
+  - `GovernanceDecision` gains a structured `firedRules` field.
+  - `getTopRules()` is real by construction, `warned` means allow-with-warning
+    (the engine never emits a warn verdict), and `resetMetrics()` on the
+    facade replaced the MCP tool's registry cast.
+- 2fe6d18: Role policies are enforced, not just reported:
+  
+  - The plugin permission hook consults the RolePolicyEngine after DNA, on
+    mutating non-control-plane actions only: `block` → deny, `require`/
+    `auto-fix` → ask, never downgrading a DNA verdict; benign allow decisions
+    skip the store meta write on the hot path.
+  - The plugin exposes the 5 role tools for MCP parity (37 plugin tools,
+    asserted by `scripts/verify-opencode.mjs`).
+- 2fe6d18: Learning records survive restarts without a tenth table:
+  
+  - Learning records persist through the store meta key `learning-records`
+    (same pattern as role-policy state), only on successful promotion; a
+    corrupt snapshot fail-safes to in-memory.
+  - The OpenCode plugin joins the durable store via a shared
+    `BEHAVIOROS_DB_PATH` (plugin-local storage stays UX state; the store is
+    the cross-host source of truth).
+  - MCP `bos_record_learning` gains `learningId`/`stage`/`evidence`
+    promotion parity with the plugin.
+- 2fe6d18: The facade absorbs duplicated host logic (audit repair #5):
+  
+  - `listMissions(limit, filters)` owns the filtered-then-limited semantics
+    both `bos_list_missions` hosts used to copy by hand.
+  - `loadDNAFromDirectory(dir)` routes every YAML pattern through the
+    validating `DNALoader` and returns per-file errors — the plugin's
+    unvalidated `dna as DNA` cast is gone.
+  - `bootstrapDenyOverride(action, decision)` centralises the policy that a
+    DNA deny never locks the control plane or read-only tools; the mutation
+    vocabulary moved to core as `isMutatingAction`/`isControlPlaneAction`
+    and the plugin keeps a one-line alias.
+- c95526d: Role/policy governance, now with a persistent and automatic surface:
+  
+  - New `RolePolicyEngine` (21st engine): deterministic per-role decisions
+    (actor resolved by role → persona → agentId, condition prefix/wildcard
+    matching, `effectiveUntil` window, strictest-match-wins, fail-safe
+    `require` escalation for unknown roles, bounded 200-entry audit trail).
+  - Facade mutations (`registerRole`, `defineRolePolicy`, `evaluateRoleAction`)
+    persist the engine snapshot through the store's meta so roles, policies and
+    audit decisions survive restarts; a corrupt or missing snapshot never
+    blocks startup.
+  - 5 new MCP tools: `bos_register_role`, `bos_define_policy`,
+    `bos_evaluate_role_action`, `bos_role_policy_report`, `bos_list_roles`
+    (57 total, protected by the `registers exactly 57 tools` test).
+  - `loadDNA` and `setActiveAgent` auto-register the active persona as an
+    unprivileged role (no policies, no capabilities) so role attribution works
+    out of the box for every DNA; an explicit registration always wins.
+  - Attribute-value hygiene from the pragmatic refactor: `resolvedBy` is
+    persisted on pragmatic conversations and 13 `as any` casts were replaced by
+    typed facade getters.
+- 2fe6d18: Evolution loop closed end to end:
+  
+  - `EvolutionProposalSchema` gains `condition`; the learning engine buckets
+    events by `source: tool:<x>` so proposals only exist for a real host tool
+    (`{type:'tool', value:<x>}` matches the real context bags). Proposals
+    without a tool token are inert, and `applyEvolution` skips condition-less
+    proposals as a second guard — no more dead-code rules.
+  - Hosts opt in via `BEHAVIOROS_EVOLUTION=true` (MCP + OpenCode plugin).
+  - e2e proof: propose → apply → `evaluateGovernance` warns when
+    `context.tool` matches the evolved condition.
+- Updated dependencies [2fe6d18]
+- Updated dependencies [2fe6d18]
+- Updated dependencies [2fe6d18]
+- Updated dependencies [c95526d]
+- Updated dependencies [c95526d]
+- Updated dependencies [c95526d]
+- Updated dependencies [2fe6d18]
+  - @behavior-os/core@2.1.0
+  - @behavior-os/schemas@2.0.1
