@@ -351,11 +351,11 @@ describe('plugin and MCP separation', () => {
     expect(readJson<Manifest>('plugins/opencode-v2/package.json').scripts?.build).toBeTruthy();
   });
 
-  it('exposes exactly 32 unique bos_* tools', () => {
+  it('exposes exactly 37 unique bos_* tools', () => {
     const source = readText('plugins/opencode-v2/src/index.ts');
     const names = [...source.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map((match) => match[1]);
-    expect(names).toHaveLength(32);
-    expect(new Set(names).size).toBe(32);
+    expect(names).toHaveLength(37);
+    expect(new Set(names).size).toBe(37);
   });
 
   it('keeps .mcp.json for external clients only', () => {
