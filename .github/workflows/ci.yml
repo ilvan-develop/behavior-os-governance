@@ -45,5 +45,5 @@ jobs:
         with:
           node-version: '22'
           cache: 'pnpm'
-      - run: pnpm install
-      - run: pnpm audit --audit-level=high
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run security:audit

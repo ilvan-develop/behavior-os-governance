@@ -42,6 +42,10 @@ coverage/
 .behavioros/baseline.json
 # Session logs are local evidence, not source.
 .behavioros/*.log
+# Pipeline-loop artefacts (SPEC/DOD/TRACE/STATE, evidence logs and captures) are
+# produced by an audit session, not by the product. Biome reads .gitignore, so
+# ignoring them keeps another session's evidence out of the lint gate.
+.pipeline/
 # Local SQLite persistence files must never be committed.
 *.db
 *.db-wal
