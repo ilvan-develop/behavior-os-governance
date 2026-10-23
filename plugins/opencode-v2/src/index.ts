@@ -67,6 +67,14 @@ const NOTIFICATION_STORAGE_KEY = 'behavioros:notifications:v1';
 
 function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
+    const persistenceConfig = process.env.BEHAVIOROS_DB_PATH
+      ? { path: process.env.BEHAVIOROS_DB_PATH }
+      : typeof process.env.VITEST !== 'undefined'
+        ? undefined
+        : { path: path.join(os.homedir(), '.config', 'opencode', 'behavioros.db') };
+    console.log(
+      `[Behavior-OS] Creating new instance, persistence: ${JSON.stringify(persistenceConfig)}`,
+    );
     behaviorOS = new BehaviorOS({
       // Opt-in governed code editing: off unless explicitly enabled, and even
       // then a write requires `apply: true` on the individual call.
@@ -79,26 +87,13 @@ function getBehaviorOS(): BehaviorOS {
       // failure events (still requires the caller to pass apply:true). Without
       // the flag, proposals remain read-only suggestions.
       evolution: process.env.BEHAVIOROS_EVOLUTION === 'true' ? { enabled: true } : undefined,
-      // Durable state joins the MCP host's storage: with BEHAVIOROS_DB_PATH
-      // set, missions/learning events AND learning lifecycle records, agents,
-      // decisions, roles and policies persist through the facade across
-      // restarts. ctx.storage still holds the plugin-local UX state (the
-      // notification coalescer and the per-session governance snapshot); the
-      // facade-level store is the cross-host source of truth.
-      //
-      // When running as a global plugin (no project-local BEHAVIOROS_DB_PATH),
-      // fall back to a user-scoped SQLite path so persona roles survive server
-      // restarts. The role registry is otherwise in-memory-only.
-      //
-      // In test mode we do NOT create a persistent SQLite store: the tests
-      // exercise Map-based snapshot persistence, and a shared file-path store
-      // would bleed state between test cases that call `vi.resetModules()`.
-      persistence: process.env.BEHAVIOROS_DB_PATH
-        ? { path: process.env.BEHAVIOROS_DB_PATH }
-        : typeof process.env.VITEST !== 'undefined'
-          ? undefined
-          : { path: path.join(os.homedir(), '.config', 'opencode', 'behavioros.db') },
+      persistence: persistenceConfig,
     });
+    console.log(`[Behavior-OS] Instance created, hasStore: ${behaviorOS.hasPersistence()}`);
+  } else {
+    console.log(
+      `[Behavior-OS] Reusing existing instance, hasStore: ${behaviorOS.hasPersistence()}`,
+    );
   }
   return behaviorOS;
 }

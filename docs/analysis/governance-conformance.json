@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-23T17:48:21.629Z",
+  "generatedAt": "2026-10-23T18:54:17.674Z",
   "plugin": "behavior-os",
   "total": 24,
   "proven": 24,
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1792776347684-dwxbayz2c status=pending"
+      "evidence": "activeMission=mission-1792776390190-e8awn0d98t6 status=pending"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1792777700402-kgyn98kawd == activeMission"
+      "evidence": "autoMission=mission-1792781656903-x548azmynl == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p5144-1c4f8 across 14 entries"
+      "evidence": "instance=p18264-ryms2 across 14 entries"
     },
     {
       "id": "C15",
@@ -122,7 +122,7 @@
       "category": "CONSISTENCY",
       "promise": "Concurrent persists in one instance are serialized (single-flight): monotonic revisions, no lost write",
       "status": "PASS",
-      "evidence": "revs=[10,11,12] missions=[Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Conformance mission,Conformance mission,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Persist me,Persist me,Persist me,Persist me,Persist me,Persist me,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,Update the patient record handling for HIPAA,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,after-restart,after-restart,after-restart,after-restart,after-restart,g010-doomed,g010-doomed,g010-doomed,g010-doomed,g010-doomed,g010-victim,g010-victim,g010-victim,g010-victim,g010-victim,log-carrier,log-carrier,log-carrier,log-carrier,log-carrier,log-carrier,merge-a1,merge-a1,merge-a1,merge-a1,merge-a1,merge-a1,merge-a2,merge-a2,merge-a2,merge-a2,merge-a2,merge-a2,merge-b1,merge-b1,merge-b1,merge-b1,merge-b1,merge-b1,merge-b2,merge-b2,merge-b2,merge-b2,merge-b2,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,race-a,race-a,race-a,race-a,race-a,race-a,race-a,race-a,race-b,race-b,race-b,race-b,race-b,race-b,race-b,race-b]"
+      "evidence": "revs=[10,11,12] missions=[Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Coalescer state preservation,Conformance mission,Conformance mission,Conformance mission,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Fix the crash in the payment service,Persist me,Persist me,Persist me,Persist me,Persist me,Persist me,Persist persona roles across server restarts — auto-restore from manifest,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 cancel contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 evidence contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 fail contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 persistence contract,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,S1 unpersisted mission,Update the patient record handling for HIPAA,Update the patient record handling for HIPAA,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,Update the patient record handling for HIPAA compliance,after-restart,after-restart,after-restart,after-restart,after-restart,after-restart,g010-doomed,g010-doomed,g010-doomed,g010-doomed,g010-doomed,g010-victim,g010-victim,g010-victim,g010-victim,g010-victim,log-carrier,log-carrier,log-carrier,log-carrier,log-carrier,log-carrier,log-carrier,merge-a1,merge-a1,merge-a1,merge-a1,merge-a1,merge-a1,merge-a2,merge-a2,merge-a2,merge-a2,merge-a2,merge-a2,merge-b1,merge-b1,merge-b1,merge-b1,merge-b1,merge-b1,merge-b2,merge-b2,merge-b2,merge-b2,merge-b2,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,mine-1,race-a,race-a,race-a,race-a,race-a,race-a,race-a,race-a,race-a,race-b,race-b,race-b,race-b,race-b,race-b,race-b,race-b,race-b]"
     },
     {
       "id": "C18",
