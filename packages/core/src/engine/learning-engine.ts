@@ -163,32 +163,41 @@ export class LearningEngine {
   }
 
   /**
-   * Derive DNA-change proposals from repeated `failure`/`fix` events. This is a
-   * pure computation: nothing is mutated here. Proposals below `minConfidence`
-   * (default 0.8) are discarded.
+   * Derive DNA-change proposals from repeated `failure`/`fix` events that are
+   * attributable to a concrete tool (`source: "tool:<name>"`, the shape the
+   * plugin records on tool errors). Proposals apply as governance warn rules
+   * whose condition matches the *real* context key hosts send (`tool`), so the
+   * rule can actually fire. Events without a tool token produce no proposal:
+   * a rule we cannot match would be an inert condition, and inert conditions
+   * are dead code in a governance system. Pure computation — nothing mutated.
+   * Proposals below `minConfidence` (default 0.8) are discarded.
    */
   proposeEvolution(dnaName: string, minConfidence = 0.8): EvolutionProposal[] {
-    const byType = new Map<string, LearningEvent[]>();
+    const byTool = new Map<string, LearningEvent[]>();
     for (const event of this.events) {
       if (!ACTIONABLE_TYPES.includes(event.type)) continue;
-      const bucket = byType.get(event.type) ?? [];
+      const token = event.source.startsWith('tool:') ? event.source.slice('tool:'.length) : null;
+      if (!token) continue;
+      const bucket = byTool.get(token) ?? [];
       bucket.push(event);
-      byType.set(event.type, bucket);
+      byTool.set(token, bucket);
     }
 
     const proposals: EvolutionProposal[] = [];
-    for (const [pattern, events] of byType) {
+    for (const [token, events] of byTool) {
       const totalImpact = events.reduce((sum, e) => sum + IMPACT_WEIGHT[e.impact], 0);
       const confidence = this.confidenceFor(events.length, totalImpact / events.length);
       if (confidence < minConfidence) continue;
 
+      const type = events[0]?.type ?? 'failure';
       proposals.push({
         id: `evo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         dnaName,
         kind: 'governance-warn',
-        pattern,
-        ruleId: `evo-warn-${pattern}`,
-        description: `Add a warning rule for recurring "${pattern}" events (confidence ${confidence})`,
+        pattern: `${type}@${token}`,
+        condition: { type: 'tool', value: token },
+        ruleId: `evo-warn-${type}-${token}`,
+        description: `Add a warning rule for recurring "${type}" events from tool "${token}" (confidence ${confidence})`,
         confidence,
         occurrences: events.length,
         evidence: events.slice(-5).map((e) => e.content),

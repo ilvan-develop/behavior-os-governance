@@ -19,11 +19,12 @@ function makeDNA(): DNA {
 
 async function bosWithFailures(
   config: ConstructorParameters<typeof BehaviorOS>[0] = {},
+  source = 'tool:write',
 ): Promise<BehaviorOS> {
   const bos = new BehaviorOS(config);
   await bos.loadDNA(makeDNA());
   for (let i = 0; i < 5; i++) {
-    bos.recordLearning({ type: 'failure', source: 'ci', content: `fail ${i}`, impact: 'high' });
+    bos.recordLearning({ type: 'failure', source, content: `fail ${i}`, impact: 'high' });
   }
   return bos;
 }
@@ -40,26 +41,48 @@ describe('LearningEngine confidence', () => {
   it('proposes nothing below the confidence bar', () => {
     const engine = new LearningEngine();
     for (let i = 0; i < 3; i++) {
-      engine.record({ type: 'failure', source: 'a', content: `f${i}`, impact: 'medium' });
+      engine.record({ type: 'failure', source: 'tool:ci', content: `f${i}`, impact: 'medium' });
     }
     expect(engine.proposeEvolution('dna')).toEqual([]);
   });
 
-  it('proposes a warn rule for repeated high-impact failures', () => {
+  it('proposes a tool-scoped warn rule for repeated high-impact tool failures', () => {
     const engine = new LearningEngine();
     for (let i = 0; i < 5; i++) {
-      engine.record({ type: 'failure', source: 'a', content: `f${i}`, impact: 'high' });
+      engine.record({ type: 'failure', source: 'tool:write', content: `f${i}`, impact: 'high' });
     }
     const proposals = engine.proposeEvolution('my-dna');
     expect(proposals).toHaveLength(1);
     const proposal = proposals[0];
-    expect(proposal.pattern).toBe('failure');
+    // The condition key must be one real hosts actually send in the context
+    // bag (`tool`), so the applied rule can fire instead of being inert.
+    expect(proposal.pattern).toBe('failure@write');
+    expect(proposal.condition).toEqual({ type: 'tool', value: 'write' });
     expect(proposal.kind).toBe('governance-warn');
-    expect(proposal.ruleId).toBe('evo-warn-failure');
+    expect(proposal.ruleId).toBe('evo-warn-failure-write');
     expect(proposal.confidence).toBe(0.9);
     expect(proposal.occurrences).toBe(5);
     expect(proposal.dnaName).toBe('my-dna');
     expect(proposal.evidence).toHaveLength(5);
+  });
+
+  it('never proposes for events without a tool token (inert rules are dead code)', () => {
+    const engine = new LearningEngine();
+    for (let i = 0; i < 5; i++) {
+      engine.record({ type: 'failure', source: 'self-review', content: `f${i}`, impact: 'high' });
+    }
+    expect(engine.proposeEvolution('dna')).toEqual([]);
+  });
+
+  it('scopes proposals per failing tool', () => {
+    const engine = new LearningEngine();
+    for (let i = 0; i < 5; i++) {
+      engine.record({ type: 'failure', source: 'tool:write', content: `w${i}`, impact: 'high' });
+      engine.record({ type: 'failure', source: 'tool:shell', content: `s${i}`, impact: 'high' });
+    }
+    const proposals = engine.proposeEvolution('dna');
+    expect(proposals).toHaveLength(2);
+    expect(proposals.map((p) => p.condition?.value).sort()).toEqual(['shell', 'write']);
   });
 
   it('ignores non-actionable event types', () => {
@@ -73,7 +96,7 @@ describe('LearningEngine confidence', () => {
   it('respects a custom threshold', () => {
     const engine = new LearningEngine();
     for (let i = 0; i < 3; i++) {
-      engine.record({ type: 'fix', source: 'a', content: `x${i}`, impact: 'critical' });
+      engine.record({ type: 'fix', source: 'tool:ci', content: `x${i}`, impact: 'critical' });
     }
     // 3 occurrences, critical impact -> 0.6 * 0.6 + 1 * 0.4 = 0.76
     expect(engine.proposeEvolution('dna', 0.8)).toHaveLength(0);
@@ -105,26 +128,29 @@ describe('BehaviorOS DNA evolution', () => {
     const rules = bos.getDNA()?.governance ?? [];
     expect(rules).toHaveLength(1);
     expect(rules[0]).toEqual({
-      id: 'evo-warn-failure',
+      id: 'evo-warn-failure-write',
       level: 'medium',
       action: 'warn',
-      conditions: [{ type: 'pattern', value: 'failure' }],
-      description: expect.stringContaining('failure'),
+      conditions: [{ type: 'tool', value: 'write' }],
+      description: expect.stringContaining('write'),
     });
   });
 
-  it('warns on a matching pattern but never denies', async () => {
+  it('warns on a matching tool context but never denies', async () => {
     const bos = await bosWithFailures({ evolution: { enabled: true } });
     bos.applyEvolution({ apply: true });
 
     const decision = bos.evaluateGovernance('deploy', {
       agent: 'a',
-      context: { pattern: 'failure' },
+      context: { tool: 'write' },
     });
     expect(decision.verdict).toBe('allow');
-    expect(decision.warnings).toEqual(['Warning from rule: evo-warn-failure']);
+    expect(decision.warnings).toEqual(['Warning from rule: evo-warn-failure-write']);
 
-    const unrelated = bos.evaluateGovernance('deploy', { agent: 'a', context: {} });
+    const unrelated = bos.evaluateGovernance('deploy', {
+      agent: 'a',
+      context: { tool: 'shell' },
+    });
     expect(unrelated.verdict).toBe('allow');
     expect(unrelated.warnings).toBeUndefined();
   });

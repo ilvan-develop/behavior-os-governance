@@ -119,6 +119,34 @@ describe('MetricsEngine', () => {
     expect(metrics.learningEventsByType.insight).toBe(1);
   });
 
+  it('tracks which rules actually fired and ranks them', () => {
+    const engine = new MetricsEngine();
+
+    engine.recordGovernance('warn', 2, 5, [
+      { id: 'r-warn', action: 'warn' },
+      { id: 'r-warn', action: 'warn' },
+    ]);
+    engine.recordGovernance('deny', 2, 5, [{ id: 'r-block', action: 'block' }]);
+
+    expect(engine.getTopRules(5)).toEqual([
+      { id: 'r-warn', count: 2, action: 'warn' },
+      { id: 'r-block', count: 1, action: 'block' },
+    ]);
+    // Snapshot plumbing: topRules must reach the public metrics object.
+    expect(engine.metrics.governance.topRules[0]).toEqual({
+      id: 'r-warn',
+      count: 2,
+      action: 'warn',
+    });
+  });
+
+  it('reset clears fired-rule counts', () => {
+    const engine = new MetricsEngine();
+    engine.recordGovernance('deny', 1, 5, [{ id: 'r-block', action: 'block' }]);
+    engine.reset();
+    expect(engine.getTopRules()).toEqual([]);
+  });
+
   it('reset clears all metrics', () => {
     const engine = new MetricsEngine();
 

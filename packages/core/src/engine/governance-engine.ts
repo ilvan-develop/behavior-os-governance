@@ -34,6 +34,7 @@ export class GovernanceEngine {
     }
 
     const evaluatedRules: string[] = [];
+    const firedRules: string[] = [];
     let verdict: GovernanceVerdict = 'allow';
     let reason = 'No rules violated';
     let transformed = false;
@@ -50,6 +51,7 @@ export class GovernanceEngine {
       const matches = this.evaluateConditions(rule.conditions, context.context);
 
       if (matches) {
+        firedRules.push(rule.id);
         switch (rule.action) {
           case 'block':
             verdict = 'deny';
@@ -83,6 +85,7 @@ export class GovernanceEngine {
       verdict,
       reason,
       rulesEvaluated: evaluatedRules,
+      ...(firedRules.length > 0 ? { firedRules } : {}),
       timestamp: new Date().toISOString(),
       agentId: context.agentId,
       missionId: context.missionId,

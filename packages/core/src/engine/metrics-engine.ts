@@ -71,6 +71,8 @@ export class MetricsEngine {
   private readonly _predictions: Array<{ type: string; confidence: number }> = [];
   private readonly _crossDnaSuggestions: Array<{ source: string; target: string }> = [];
   private readonly _learningByType = new Map<string, number>();
+  /** Rule fire counts feeding `topRules`, keyed by rule id. */
+  private readonly _ruleFires = new Map<string, { count: number; action: string }>();
   private startTime: number;
 
   constructor() {
@@ -84,9 +86,10 @@ export class MetricsEngine {
 
   /** Record a governance evaluation. */
   recordGovernance(
-    verdict: 'allow' | 'deny' | 'escalate' | 'warn' | 'log',
+    verdict: 'allow' | 'deny' | 'escalate' | 'warn' | 'log' | 'transform',
     rulesEvaluated: number,
     latencyMs: number,
+    firedRules?: Array<{ id: string; action: string }>,
   ): void {
     const gov = this._metrics.governance;
     gov.totalActions += 1;
@@ -107,12 +110,21 @@ export class MetricsEngine {
       this._latencySamples.shift();
     }
 
+    for (const fired of firedRules ?? []) {
+      const entry = this._ruleFires.get(fired.id);
+      if (entry) {
+        entry.count += 1;
+      } else {
+        this._ruleFires.set(fired.id, { count: 1, action: fired.action });
+      }
+    }
+
     this._metrics = this.computeMetrics();
   }
 
   /** Record a consensus round. */
   recordConsensus(
-    outcome: 'approved' | 'rejected' | 'inconclusive',
+    outcome: 'approved' | 'rejected' | 'inconclusive' | 'no_quorum',
     voteCount: number,
     participatingWeight: number,
   ): void {
@@ -139,9 +151,12 @@ export class MetricsEngine {
     this._metrics = this.computeMetrics();
   }
 
-  /** Get top N rules by usage. */
+  /** Get the top N rules by fire count (real data; a rule that never fired cannot appear). */
   getTopRules(_n = 5): Array<{ id: string; count: number; action: string }> {
-    return [];
+    return [...this._ruleFires.entries()]
+      .map(([id, entry]) => ({ id, count: entry.count, action: entry.action }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, _n);
   }
 
   /** Get average latency in ms. */
@@ -166,6 +181,7 @@ export class MetricsEngine {
     this._predictions.length = 0;
     this._crossDnaSuggestions.length = 0;
     this._learningByType.clear();
+    this._ruleFires.clear();
     this.startTime = Date.now();
     this._metrics = this.createDefaultMetrics();
   }
