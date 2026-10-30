@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
 
 import type {
+  ConsensusVote,
   DecisionPolicy,
   DNA,
   GovernanceDecision,
@@ -1734,6 +1735,126 @@ server.registerTool(
       const bos = getBehaviorOS();
       const predictions = bos.predict(limit);
       return { content: [{ type: 'text', text: JSON.stringify(predictions, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// CONSENSUS & CROSS-DNA LEARNING TOOLS (Feature #8)
+// ============================================================
+
+server.registerTool(
+  'bos_resolve_consensus',
+  {
+    description:
+      'Resolve a multi-agent consensus round. Votes are weighted; ties and all-abstain resolve to rejected (fail-safe).',
+    inputSchema: z.object({
+      subject: z.string().describe('What is being decided'),
+      votes: z.array(
+        z.object({
+          agentId: z.string().describe('Stable agent identifier'),
+          choice: z.enum(['approve', 'reject', 'abstain']),
+          weight: z.number().optional().describe('Weight in the tally (default 1)'),
+          reason: z.string().optional().describe('Human-readable justification'),
+        }),
+      ),
+      policy: z.enum(['majority', 'supermajority', 'unanimous']).optional(),
+      quorum: z.number().optional().describe('Minimum participating weight'),
+    }),
+    annotations: {
+      title: 'Resolve Consensus',
+    },
+  },
+  async ({
+    subject,
+    votes,
+    policy,
+    quorum,
+  }: {
+    subject: string;
+    votes: ConsensusVote[];
+    policy?: 'majority' | 'supermajority' | 'unanimous';
+    quorum?: number;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.resolveConsensus({ subject, votes, policy, quorum });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_suggest_cross_dna_transfer',
+  {
+    description:
+      'Suggest learning transfers (patterns, rules, fixes) from one DNA to another based on shared behavioral patterns.',
+    inputSchema: z.object({
+      sourceDna: z.string().describe('Source DNA pattern name'),
+      targetDna: z.string().describe('Target DNA pattern name'),
+      minConfidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe('Minimum confidence threshold (default 0.5)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Suggest Cross-DNA Transfer' },
+  },
+  async ({
+    sourceDna,
+    targetDna,
+    minConfidence,
+  }: {
+    sourceDna: string;
+    targetDna: string;
+    minConfidence?: number;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const source = dnas[sourceDna.toLowerCase()];
+      const target = dnas[targetDna.toLowerCase()];
+      if (!source || !target) {
+        const missing = [!source ? sourceDna : null, !target ? targetDna : null]
+          .filter(Boolean)
+          .join('", "');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `DNA pattern(s) not found: "${missing}". Available: ${Object.keys(dnas).join(', ')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const result = bos.suggestCrossDnaTransfer(source, target, minConfidence ?? 0.5);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
     } catch (error) {
       return {
         content: [

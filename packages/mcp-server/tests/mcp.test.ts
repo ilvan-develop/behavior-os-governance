@@ -31,8 +31,13 @@ describe('MCP server structure', () => {
     expect(serverSource).toContain("actor: 'mcp'");
   });
 
-  it('registers exactly 81 tools', () => {
-    expect(toolNames).toHaveLength(81);
+  it('registers exactly 83 tools', () => {
+    expect(toolNames).toHaveLength(83);
+  });
+
+  it('exposes the consensus and cross-DNA transfer engines', () => {
+    expect(toolNames).toContain('bos_resolve_consensus');
+    expect(toolNames).toContain('bos_suggest_cross_dna_transfer');
   });
 
   it('exposes the pragmatic value assessment tool', () => {
