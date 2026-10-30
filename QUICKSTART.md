@@ -10,8 +10,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/ilvan-develop/behavioros.git
-cd behavioros
+git clone https://github.com/ilvan-develop/behavior-os.git
+cd behavior-os
 
 # Install dependencies
 pnpm install
@@ -67,24 +67,8 @@ import { BehaviorOS } from "@behavior-os/core";
 
 const bos = new BehaviorOS();
 
-// Load DNA pattern
-await bos.loadDNA({
-  name: "Surgical Team",
-  version: "1.0.0",
-  description: "Zero-defect governance",
-  personas: [],
-  governance: [
-    {
-      id: "code-review",
-      level: "critical",
-      action: "block",
-      conditions: [{ type: "production", value: true }],
-    }
-  ],
-  quality: [
-    { id: "coverage", type: "test_coverage", threshold: 80 }
-  ]
-});
+// Load a DNA pattern from the dnas/ directory (validated against DNASchema)
+await bos.loadDNAFromPath("./dnas/surgical-team.yaml");
 
 // Create and manage mission
 const mission = bos.createMission({
@@ -104,13 +88,13 @@ if (decision.verdict === "deny") {
 }
 
 // Complete mission with audit
-bos.completeMission(mission.id);
-const report = bos.runAudit({ missionId: mission.id, agentId: "devops-agent" });
+bos.completeMission(mission.id, { requiredChecks: ["test", "typecheck"], verificationMode: "real" });
+const report = await bos.runAudit({ missionId: mission.id, agentId: "devops-agent" });
 ```
 
 ## CLI Commands
 
-Run `npx @behavior-os/cli --help` for the full list (12 commands, exit code `0`/`1`).
+Run `npx @behavior-os/cli --help` for the full list (13 commands, exit code `0`/`1`).
 
 ```bash
 # Scaffold a project (dnas/, .behavioros/state.json, .mcp.json, sample DNA)
@@ -169,7 +153,7 @@ built package (`pnpm build` emits `plugins/opencode-v2/dist/index.js`):
 }
 ```
 
-The plugin exposes the 32 `bos_*` tools directly; the MCP server is deliberately
+The plugin exposes the 70 `bos_*` tools directly; the MCP server is deliberately
 not registered inside OpenCode so a session sees a single tool catalog.
 
 ## Next Steps
@@ -177,4 +161,4 @@ not registered inside OpenCode so a session sees a single tool catalog.
 - Read the [Full Documentation](./docs/)
 - Explore [DNA Patterns](./dnas/)
 - Check [Architecture Guide](./docs/ARCHITECTURE.md)
-- Join the [Community](https://github.com/ilvan-develop/behavioros/discussions)
+- Join the [Community](https://github.com/ilvan-develop/behavior-os/discussions)

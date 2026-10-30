@@ -24,14 +24,13 @@ pnpm run typecheck
 
 ```typescript
 import { BehaviorOS } from "@behavior-os/core";
-import { loadDNA, evaluateGovernance } from "@behavior-os/sdk";
+import type { DNA } from "@behavior-os/schemas";
 
-// Criar instância
-const bos = new BehaviorOS();
+// Criar instância com persistência opcional (SQLite, Node >= 22.5)
+const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
 
-// Carregar DNA
-const surgicalDNA = await loadDNA("./dnas/surgical-team.yaml");
-await bos.loadDNA(surgicalDNA);
+// Carregar DNA (sincrono: lê YAML + valida Zod)
+await bos.loadDNAFromPath("./dnas/surgical-team.yaml");
 ```
 
 ### Avaliação de Governança
@@ -64,14 +63,14 @@ const mission = bos.createMission({
 // Iniciar missão
 bos.startMission(mission.id);
 
-// Completar missão
-bos.completeMission(mission.id);
+// Completar missão com evidência de verificação
+bos.completeMission(mission.id, { requiredChecks: ['test', 'typecheck'], verificationMode: 'real' });
 ```
 
 ### Auditoria
 
 ```typescript
-const report = bos.runAudit({
+const report = await bos.runAudit({
   missionId: mission.id,
   agentId: "agent-1",
   stages: ["lint", "typecheck", "security", "coverage"],
@@ -168,13 +167,14 @@ O OpenCode descobre plugins locais em `.opencode/plugins/`. Este repositório te
 }
 ```
 
-O servidor MCP não é registado dentro do OpenCode: o plugin expõe as 32 tools
+O servidor MCP não é registado dentro do OpenCode: o plugin expõe as 70 tools
 `bos_*` diretamente, para que a sessão veja um único catálogo.
 
 ### Ferramentas Disponíveis
 
-O plugin regista 32 tools `bos_*` (as 30 do servidor MCP **mais** `bos_get_log`
-e `bos_verify_audit_trail`). Lista completa:
+O plugin regista 70 tools `bos_*`. As 85 tools do servidor MCP incluem as
+mesmas ferramentas governadas; as exclusivas do plugin são `bos_get_log`
+e `bos_verify_audit_trail` (já integradas no MCP desde v2.1). Lista completa:
 
 | Tool | Descrição |
 |------|-----------|
@@ -274,15 +274,16 @@ pnpm test --coverage
 
 ```typescript
 class BehaviorOS {
-  loadDNA(dna: DNA): Promise<void>
+  loadDNAFromPath(path: string): Promise<void>
   evaluateGovernance(action: string, params: { agent: string; context?: Record<string, unknown> }): GovernanceDecision
   createMission(params: CreateMissionInput): Mission
   startMission(missionId: string): Mission | null
-  completeMission(missionId: string): Mission | null
-  failMission(missionId: string, reason?: string): Mission | null
+  completeMission(missionId: string, options?: { requiredChecks?: string[]; verificationMode?: string }): Mission | null
+  failMission(missionId: string, reason?: string, options?: { requiredChecks?: string[] }): Mission | null
+cancelMission(missionId: string): Mission | null
   getMission(missionId: string): Mission | null
   listMissions(limit?: number): Mission[]
-  runAudit(params: RunAuditInput): AuditReport
+  runAudit(params: RunAuditInput): Promise<AuditReport>
   checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown }
   recordLearning(params: RecordLearningInput): LearningEvent
   getInsights(limit?: number): LearningEvent[]
@@ -340,7 +341,7 @@ interface GovernanceDecision {
 
 ```typescript
 // Solução: Carregar DNA antes de avaliar
-await bos.loadDNA(dna);
+await bos.loadDNAFromPath("./dnas/enterprise-governance.yaml");
 const decision = bos.evaluateGovernance("action", { agent: "test" });
 ```
 
@@ -368,8 +369,8 @@ import type { MissionType, Priority } from "@behavior-os/schemas";
 
 ```bash
 # Fork e clone
-git clone https://github.com/ilvan-develop/behavioros.git
-cd behavioros
+git clone https://github.com/ilvan-develop/behavior-os.git
+cd behavior-os
 
 # Instalar
 pnpm install
@@ -396,5 +397,5 @@ MIT License - ver LICENSE para detalhes.
 ---
 
 **Autor:** BehaviorOS Team 🇦🇴  
-**Versão:** 2.0.0  
-**Data:** 2026-10-10
+**Versão:** 2.1.0  
+**Data:** 2026-10-30

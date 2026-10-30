@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-778-brightgreen" alt="Tests" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-866-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.1.0-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
   <a href="#"><img src="https://img.shields.io/badge/typescript-strict-3178C6" alt="TypeScript" /></a>
@@ -24,17 +24,23 @@ Behavior-OS is a **behavioral governance framework** that gives AI agent teams D
 ## Quick Demo
 
 ```bash
-# Install
+# Install dependencies
 pnpm install
 
-# Build all packages (the CLI in `cli:init` runs from dist/)
+# Build all packages
 pnpm build
 
-# Initialize project
-pnpm cli:init -- --directory ./my-project
+# Initialize a new project scaffold
+pnpm exec behavioros init --dna surgical-team
 
-# Run tests
+# Run the full test suite (866 cases)
 pnpm test
+
+# Type-check (11 packages)
+pnpm typecheck
+
+# Run the governance conformance check (24/24 claims)
+pnpm verify:governance
 ```
 
 ## Why Behavior-OS?
@@ -47,7 +53,7 @@ pnpm test
 | Agents don't learn from mistakes         | Learning engine records events & detects recurring patterns                |
 | Hard to coordinate multiple agents       | 7-step protocol + auto-derived missions for traceable work                 |
 | No quality gates                         | Quality gates + audit stages (lint → typecheck → security → coverage)      |
-| Reinventing infrastructure every project | 43 engine files, 85 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 47 engine files, 85 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -85,26 +91,36 @@ pnpm test
 │   Personas | governance rules | quality gates         │
 └──────────────────────────────────────────────────────┘
 
-> The 9-layer diagram above is documentation of the conceptual stack. Only the
-> **15 engines** listed below are implemented in code; there is no separate
+> The 9-layer diagram above is documentation of the conceptual stack. The
+> **47 engines** listed below are implemented in code; there is no separate
 > "Behavioral" or "Compiler" engine.
 ```
 
-### 17 Core Engines Powering the Stack
+### 47 Core Engines Powering the Stack
 
-| Engine               | Purpose                                                        |
-| -------------------- | -------------------------------------------------------------- |
-| GovernanceEngine     | Rule-based governance evaluation with caching                  |
-| QualityEngine        | Quality gate enforcement (gte/lte/eq/neq)                      |
-| AuditEngine          | Multi-stage audit pipeline (real or simulated)                 |
-| LearningEngine       | Pattern detection + confidence-scored DNA evolution proposals  |
-| MissionEngine        | In-memory mission lifecycle management                         |
-| PipelineEngine       | Ordered gates with synchronous pre-execution blocking          |
-| DecisionEngine       | Weighted voting/quorum (majority/supermajority/unanimous)      |
-| RecommendationEngine | Scored recommendations from learning events                    |
-| DriftEngine          | Behavioral drift between DNA snapshots                         |
-| CodeEditEngine       | Guarded dry-run-by-default file edits with before/after hashes |
-| DNALoader            | YAML pattern loading with Zod validation                       |
+| Engine                   | Purpose                                                        |
+| ------------------------ | -------------------------------------------------------------- |
+| GovernanceEngine         | Rule-based governance evaluation with caching                  |
+| QualityEngine            | Quality gate enforcement (gte/lte/eq/neq)                      |
+| AuditEngine              | Multi-stage audit pipeline (real or simulated)                 |
+| LearningEngine           | Pattern detection + confidence-scored DNA evolution proposals  |
+| MissionEngine            | In-memory mission lifecycle management                         |
+| PipelineEngine           | Ordered gates with synchronous pre-execution blocking          |
+| DecisionEngine           | Weighted voting/quorum (majority/supermajority/unanimous)      |
+| RecommendationEngine     | Scored recommendations from learning events                    |
+| DriftEngine              | Behavioral drift between DNA snapshots                         |
+| CodeEditEngine           | Guarded dry-run-by-default file edits with before/after hashes |
+| DNALoader                | YAML pattern loading with Zod validation                       |
+| CrossDnaLearningEngine   | Cross-DNA pattern transfer between patterns                    |
+| PipelineRecoveryEngine   | Retry/circuit-breaker with plan persistence                    |
+| ConsensusEngine          | Multi-agent consensus voting                                   |
+| PredictionEngine         | Governance outcome prediction from historical data             |
+| TemporalGovernanceEngine | Time-conditional governance rules                              |
+| BrainstormEngine         | Multi-agent brainstorm sessions                                |
+| AntipatternEngine        | Detect anti-patterns in agent behavior                         |
+| MetacognitionEngine      | Agent self-reflection and metacognitive tracking               |
+| KnowledgeGraphEngine     | Knowledge graph construction and querying                      |
+| (…and 27 more)           | Full list in `packages/core/src/engine/` (47 total)            |
 
 ## Features Deep Dive
 
@@ -168,28 +184,40 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 30 Tools + 2 Resources
+### MCP Server — 85 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
-| Category         | Tools                                                                                                                            |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Governance**   | `bos_select_dna`, `bos_list_dna`, `bos_evaluate_governance`, `bos_preflight`                                                     |
-| **Mission**      | `bos_create_mission`, `bos_start_mission`, `bos_list_missions`, `bos_complete_mission`, `bos_fail_mission`, `bos_cancel_mission` |
-| **Quality**      | `bos_check_quality`, `bos_run_audit`                                                                                             |
-| **Decision**     | `bos_decide`                                                                                                                     |
-| **Evolution**    | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes`                                                 |
-| **Code editing** | `bos_code_edit` (dry-run by default), `bos_list_code_edits`                                                                      |
-| **Learning**     | `bos_record_learning`, `bos_get_insights`                                                                                        |
-| **Status**       | `bos_get_status`, `bos_get_state`, `bos_set_agent`, `bos_whoami`                                                                 |
-| **Listing**      | `bos_list_decisions`, `bos_list_pipeline_runs`, `bos_list_audit_reports`                                                         |
-| **Analytics**    | `bos_recommendations`                                                                                                            |
-| **Drift**        | `bos_drift`                                                                                                                      |
+| Category             | Tools                                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Governance**       | `bos_select_dna`, `bos_list_dna`, `bos_evaluate_governance`, `bos_preflight`, `bos_predict_governance`, `bos_resolve_consensus`           |
+| **Mission**          | `bos_create_mission`, `bos_start_mission`, `bos_list_missions`, `bos_complete_mission`, `bos_fail_mission`, `bos_cancel_mission`          |
+| **Quality**          | `bos_check_quality`, `bos_run_audit`                                                                                                      |
+| **Decision**         | `bos_decide`, `bos_create_meta_decision`, `bos_get_meta_cognition_stats`                                                                  |
+| **Evolution**        | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes`                                                          |
+| **Code editing**     | `bos_code_edit` (dry-run by default), `bos_list_code_edits`                                                                               |
+| **Learning**         | `bos_record_learning`, `bos_get_insights`, `bos_suggest_cross_dna_transfer`                                                               |
+| **Status**           | `bos_get_status`, `bos_get_state`, `bos_set_agent`, `bos_whoami`                                                                          |
+| **Listing**          | `bos_list_decisions`, `bos_list_pipeline_runs`, `bos_list_audit_reports`                                                                  |
+| **Analytics**        | `bos_recommendations`, `bos_get_metrics`, `bos_reset_metrics`                                                                             |
+| **Drift**            | `bos_drift`                                                                                                                               |
+| **Governance Log**   | `bos_get_log`, `bos_verify_audit_trail`                                                                                                   |
+| **Collaboration**    | `bos_create_brainstorm`, `bos_list_brainstorms`, `bos_propose_idea`, `bos_vote_idea`                                                      |
+| **Dynamic DNA**      | `bos_create_dynamic_dna`, `bos_override_rule`                                                                                             |
+| **Behavioral UX**    | `bos_behavior_profile`, `bos_behavior_diff`, `bos_teach_behavior`, `bos_behavior_timeline`, `bos_behavior_summary`, `bos_behavior_report` |
+| **Antipatterns**     | `bos_scan_antipatterns`, `bos_fix_antipatterns`, `bos_antipattern_report`                                                                 |
+| **Conversations**    | `bos_start_conversation`, `bos_add_conversation_turn`, `bos_resolve_conversation`, `bos_conversation_report`, `bos_list_conversations`    |
+| **Roles**            | `bos_register_role`, `bos_define_policy`, `bos_evaluate_role_action`, `bos_role_policy_report`, `bos_list_roles`                          |
+| **Agent Capacity**   | `bos_register_agent_capacity`, `bos_assign_task`, `bos_complete_task`, `bos_analyze_workload`, `bos_recommend_assignment`                 |
+| **Natural Language** | `bos_parse_rule`, `bos_parse_rules_batch`, `bos_apply_natural_language_rules`                                                             |
+| **Temporal**         | `bos_add_temporal_rule`, `bos_check_temporal`, `bos_evaluate_dna_temporal`                                                                |
+| **Knowledge Graph**  | `bos_add_knowledge_node`, `bos_add_knowledge_edge`, `bos_query_knowledge_graph`, `bos_get_knowledge_graph_stats`                          |
+| **Memory**           | `bos_save_memory`, `bos_recall_memory`, `bos_recall_relevant`, `bos_reconstruct_context`, `bos_consolidate_memory`                        |
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (70 tools in total), which are host-specific.
+`bos_verify_audit_trail` (70 tools in total).
 
 ### Persistence (opt-in)
 
@@ -288,6 +316,7 @@ blocked `deploy` pre-flight, `autonomous` without `--task`).
 | `npx @behavior-os/cli autonomous`  | Dry-run the 7-step protocol on `--task` (audit simulated, no work executed)     |
 | `npx @behavior-os/cli protocol`    | Check the 7 steps against the local state file                                  |
 | `npx @behavior-os/cli drift-check` | Compare every DNA rule/gate with the baseline (`DriftEngine`; exits 1 on drift) |
+| `npx @behavior-os/cli metrics`      | Display governance metrics (governance events, latency, deny/allow rates) with `--json` / `--reset` flags |
 
 ## Test Status
 
@@ -295,12 +324,12 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric                               | Value                                                    |
 | ------------------------------------ | -------------------------------------------------------- |
-| Test files (`*.test.ts`)             | 66                                                       |
-| Test cases (executed by `pnpm test`) | 778                                                      |
-| Typecheck                            | `pnpm typecheck` (10/10 tasks, 0 errors)                 |
+| Test files (`*.test.ts`)             | 82                                                       |
+| Test cases (executed by `pnpm test`) | 866                                                      |
+| Typecheck                            | `pnpm typecheck` (11/11 tasks, 0 errors)                 |
 | Build                                | `pnpm build` (ESM + DTS)                                 |
-| Coverage                             | `pnpm test:coverage` (same 66 files / 778 cases, exit 0) |
-| Lint                                 | `pnpm lint:check` (Biome, clean)                         |
+| Coverage                             | `pnpm test:coverage` (same 82 files / 866 cases, exit 0) |
+| Lint                                 | `pnpm lint:check` (Biome, 460 files, clean)              |
 | Clean                                | `pnpm clean` (8/8 tasks, removes `dist/`)                |
 
 ## Quick Start
@@ -370,9 +399,9 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. Inside
 this repository it is auto-loaded from `.opencode/plugins/behavioros.ts`, a thin
-loader that re-exports the built package; it exposes the full 32-tool surface
-(`bos_*`) plus governance hooks (`tool:execute.before`) and session context — no
-MCP server registration required.
+loader that re-exports the built package; it exposes the full 70 `bos_*` tool
+surface plus governance hooks (`tool:execute.before`, `tool:execute.after`)
+and session context — no MCP server registration required.
 
 The MCP server is intentionally **not** registered inside OpenCode so sessions
 see a single, non-duplicated tool catalog. For other MCP-capable hosts use the
@@ -392,14 +421,15 @@ mcpServers:
 
 ## Packages
 
-| Package                        | Description                                                                                                                     | Version |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                | 2.0.0   |
-| `@behavior-os/core`            | 47 engines + EngineRegistry                                                                                                     | 2.0.0   |     | 2.1.0 |
-| `@behavior-os/sdk`             | High-level TypeScript SDK                                                                                                       | 2.0.0   |
-| `@behavior-os/cli`             | CLI (12 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check) | 2.0.0   |
-| `@behavior-os/mcp-server`      | MCP server with 85 tools + 2 resources                                                                                          | 2.0.0   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 41 tools + hooks                                                                                        | 2.0.0   |
+| Package                        | Description                                                                                                                              | Version |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                         | 2.0.1   |
+| `@behavior-os/core`            | 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.1.0   |
+| `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.1.0   |
+| `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.0.1   |
+| `@behavior-os/mcp-server`      | MCP server with 85 tools + 2 resources                                                                                                   | 2.0.1   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 70 tools + hooks                                                                                                 | 2.1.0   |
+| `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
 
 ## License
 
@@ -408,8 +438,8 @@ MIT License — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  Created with by <strong>Ilvan Joaquim</strong> from Angola 🇦🇴<br>
-  <a href="https://github.com/ilvan-develop/behavioros">GitHub</a> ·
+  Created by <strong>Ilvan Joaquim</strong> from Angola 🇦🇴<br>
+  <a href="https://github.com/ilvan-develop/behavior-os">GitHub</a> ·
   <a href="./docs/PROTOCOL.md">Protocol</a> ·
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
 </p>

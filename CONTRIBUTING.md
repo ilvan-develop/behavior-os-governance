@@ -4,8 +4,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/ilvan-develop/behavioros.git
-cd behavioros
+git clone https://github.com/ilvan-develop/behavior-os.git
+cd behavior-os
 
 # Install dependencies
 pnpm install
@@ -23,16 +23,16 @@ pnpm typecheck
 ## Project Structure
 
 ```
-behavioros/
+behavior-os/
 ├── packages/
 │   ├── schemas/     # Zod validation schemas
-│   ├── core/        # 14 engines + BehaviorOS facade + persistence (SQLite/Postgres)
+│   ├── core/        # 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
-│   ├── cli/         # CLI tools
-│   ├── mcp-server/  # MCP server implementation (38 tools + 2 resources)
+│   ├── cli/         # CLI tools (13 commands)
+│   ├── mcp-server/  # MCP server implementation (85 tools + 2 resources)
 │   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 64 tests)
 ├── plugins/
-│   └── opencode-v2/ # OpenCode v2 plugin (32 tools)
+│   └── opencode-v2/ # OpenCode v2 plugin (70 tools)
 ├── dnas/            # 21 DNA pattern YAML files
 ├── docs/            # Documentation (CLAIMS.md is the source of truth)
 ├── examples/        # Usage examples (a pnpm workspace member — `pnpm test` runs its 4 cases)
