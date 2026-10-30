@@ -94,21 +94,20 @@ const MCP_TOOLS = [
   'bos_start_conversation',
   'bos_start_mission',
   'bos_teach_behavior',
+  'bos_verify_audit_trail',
   'bos_vote_idea',
   'bos_whoami',
 ];
-// MCP_TOOLS count: 83
+// MCP_TOOLS count: 85
 
 /** Extra tools registered by the OpenCode plugin (`plugins/opencode-v2`). */
 const PLUGIN_ONLY_TOOLS = [
   'bos_approve_loop',
-  'bos_get_log',
   'bos_loop_status',
   'bos_resolve_consensus',
   'bos_resume_loop',
   'bos_start_loop',
   'bos_suggest_cross_dna_transfer',
-  'bos_verify_audit_trail',
 ];
 
 const KNOWN_TOOLS = new Set([...MCP_TOOLS, ...PLUGIN_ONLY_TOOLS]);
@@ -571,7 +570,7 @@ describe('documented counts match the code', () => {
   it('derives the counts it is supposed to guard', () => {
     // A broken derivation would silently compare wrong numbers with wrong
     // numbers, so the derivation itself is pinned to the measured reality.
-    expect(measured.mcpTools).toBe(83);
+    expect(measured.mcpTools).toBe(85);
     expect(measured.mcpResources).toBe(2);
     expect(measured.pluginTools).toBe(70);
     expect(measured.dnas).toBe(21);

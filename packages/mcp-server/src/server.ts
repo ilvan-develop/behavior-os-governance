@@ -1638,6 +1638,87 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'bos_get_log',
+  {
+    description:
+      'Read the recent Behavior-OS governance log (how DNA rules were applied to actions in this session)',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Maximum entries to return (default 50)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Governance Log' },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const entries = bos.getGovernanceLog(limit ?? 50);
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ total: entries.length, entries }, null, 2) },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_verify_audit_trail',
+  {
+    description:
+      'Verify the SHA-256 hash chain of the governance log. Reports whether the in-memory log is intact (tamper-evident audit).',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'Verify Audit Trail' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const verification = bos.verifyAuditTrail();
+      const chain = bos.getGovernanceChainHead();
+      const sink = bos.getGovernanceLogSink();
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ...verification,
+                ...chain,
+                sink: {
+                  enabled: sink.path !== null,
+                  path: sink.path,
+                  writeErrors: sink.writeErrors,
+                },
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // ============================================================
 // ANALYTICS TOOLS
 // ============================================================

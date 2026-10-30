@@ -21,7 +21,7 @@
     "packages/mcp-server/src/server.ts",
     "plugins/opencode-v2/src/index.ts",
     "plugins/opencode-v2/src/storage-sync.ts",
-    "plugins/opencode-v2/src/governance-log.ts",
+    "packages/core/src/governance-log.ts",
     "packages/core/tests/audit-sink.test.ts",
     "dnas/surgical-team.yaml",
     "dnas/open-source.yaml",

@@ -1,10 +1,23 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  appendGovernanceLog,
   BehaviorOS,
   type BehaviorOSSnapshot,
+  exportGovernanceLog,
+  GOVERNANCE_INSTANCE_ID,
+  GOVERNANCE_LOG_FILE_ENV,
+  type GovernanceLogKind,
+  type GovernanceLogOutcome,
+  getGovernanceChainHead,
+  getGovernanceLog,
+  getGovernanceLogSinkStatus,
+  initGovernanceLogSink,
   isControlPlaneAction,
   PROTOCOL_STEPS,
+  seedGovernanceLog,
+  verifyGovernanceLog,
+  verifyGovernanceLogFile,
 } from '@behavior-os/core';
 import type {
   DNA,
@@ -27,21 +40,6 @@ import {
   GOVERNED_PREAMBLE_MARKER,
   isMutating,
 } from './governance.js';
-import {
-  appendGovernanceLog,
-  exportGovernanceLog,
-  GOVERNANCE_INSTANCE_ID,
-  GOVERNANCE_LOG_FILE_ENV,
-  type GovernanceLogKind,
-  type GovernanceLogOutcome,
-  getGovernanceChainHead,
-  getGovernanceLog,
-  getGovernanceLogSinkStatus,
-  initGovernanceLogSink,
-  seedGovernanceLog,
-  verifyGovernanceLog,
-  verifyGovernanceLogFile,
-} from './governance-log.js';
 import { LoopManager, type LoopTaskInput } from './loop-manager.js';
 import { NotificationCoalescer, type NotificationIdentity } from './notifications.js';
 import {

@@ -5,30 +5,35 @@
 > com **29** tools `bos_*`). A fonte de verdade é [`CLAIMS.md`](CLAIMS.md).
 
 ## Status
+
 ✅ Plugin instalado e detectado
 ⚠️ `opencode run` requer PowerShell/CMD nativo (não funciona via Git Bash)
 
 ## Como usar
 
 ### Opção 1: PowerShell (Recomendado)
+
 ```powershell
 cd C:\www\behavior-os
 opencode run --standalone "test behavioros governance"
 ```
 
 ### Opção 2: CMD
+
 ```cmd
 cd C:\www\behavior-os
 opencode run --standalone "test behavioros governance"
 ```
 
 ### Opção 3: Git Bash (com workaround)
+
 ```bash
 # Abrir PowerShell temporariamente
 powershell.exe -Command "cd 'C:\www\behavior-os'; opencode run --standalone 'test behavioros'"
 ```
 
 ## Plugin Detectado
+
 ```
 $ opencode plugin list
 ID           VERSION  SOURCE
@@ -41,6 +46,7 @@ behavior-os  local    C:\www\behavior-os\.opencode\plugins\behavioros.ts
 > mantém-se como pacote standalone para clientes MCP externos.
 
 ## Ferramentas Disponíveis (13 × `bos_*`)
+
 - `bos_evaluate_governance` - Avaliar ações contra regras de governança
 - `bos_create_mission` - Criar novas missões
 - `bos_start_mission` - Iniciar missão
@@ -80,7 +86,7 @@ O plugin registou os hooks (para além das 13 tools):
 - **`ctx.agent.transform`** — anexa um **preâmbulo governado curto** ao `system` de cada
   agente (idempotente, via marcador), para que a governação exista na própria definição do
   agente; o estado dinâmico (DNA/passo/missão) fica no `session.context`.
-- **`tool.execute.before`** — apenas *advisory* (log de escalonamento); não bloqueia.
+- **`tool.execute.before`** — apenas _advisory_ (log de escalonamento); não bloqueia.
 - **`tool.execute.after`** — regista falhas no learning engine (sem avançar o protocolo).
 
 ## Persistência (o estado sobrevive a restart)
@@ -113,19 +119,21 @@ opencode run --session ses-x --auto "Execute: echo deploy to production"
 ## Observabilidade: ler a governação no ecrã
 
 Para que a governação deixe de ser uma "caixa negra", cada decisão é registada num
-**ring buffer** em memória (`plugins/opencode-v2/src/governance-log.ts`, máx. 200 eventos)
+**ring buffer** em memória (`packages/core/src/governance-log.ts`, máx. 200 eventos)
 e fica visível em **três superfícies**:
 
 1. **Na própria sessão (TUI)** — eventos significativos são publicados como mensagens
    sintéticas (`ctx.session.synthetic`): DNA auto-selecionado, missão auto-criada,
-   `⛔` bloqueio e `⚠️` escalonamento. O utilizador vê a governação *enquanto* trabalha.
+   `⛔` bloqueio e `⚠️` escalonamento. O utilizador vê a governação _enquanto_ trabalha.
 2. **Via tool `bos_get_log`** — devolve os N eventos mais recentes (JSON), cada um com
    `seq`, `at` (ISO), `kind`, `outcome`, `dna`, `step`, `mission`, `action` e `detail`:
+
    ```powershell
    opencode run --session ses-x "Usa bos_get_log com limit=20 e resume o que aconteceu"
    ```
 3. **No console do servidor** — os desfechos `deny`/`escalate`/`error` são também
-   impressos numa linha única e *greppable*:
+   impressos numa linha única e _greppable_:
+
    ```
    [Behavior-OS:LOG:permission:deny] dna=Surgical Team step=3 mission=mission-… action="bash" Blocked by rule: sterile-field
    ```
@@ -137,10 +145,10 @@ nunca influencia decisões.
 
 ## Provar a governação: conformance de promessas
 
-Observar um log mostra *o que aconteceu*; para provar que o Behavior-OS **cumpre o que
+Observar um log mostra _o que aconteceu_; para provar que o Behavior-OS **cumpre o que
 promete**, cada promessa é convertida numa verificação executável. O harness
 `scripts/governance-conformance.mjs` arranca o plugin real + o core real (sem servidor,
-sem rede, estado limpo) e avalia um conjunto de *claims*:
+sem rede, estado limpo) e avalia um conjunto de _claims_:
 
 ```powershell
 pnpm verify:governance
@@ -150,34 +158,34 @@ O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
 (pronto para CI). Cobertura atual: **24/24 claims**.
 
-| Claim | Promessa | Prova |
-| --- | --- | --- |
-| C01 | Surgical Team bloqueia mudanças de produção | hook `permission` → `deny` |
-| C02 | Auto-verificação do agente == enforcement | `bos_evaluate_governance` → `deny` |
-| C03 | Enterprise Governance escala mudanças | hook `permission` → `ask` |
-| C04 | Auto-verificação == escalonamento | `bos_evaluate_governance` → `escalate` |
-| C05 | Todo `deny`/`escalate` é registado (DNA+passo) | `bos_get_log` |
-| C06 | Log limitado e monotónico | ring buffer `seq++` |
-| C07 | Seleção de DNA = passo 1 do protocolo | `stepHistory` |
-| C08 | `exportState`/`importState` round-trip | core |
-| C09 | Iniciar missão define `activeMission` | sem divergência |
-| C10 | Quality gates aplicam thresholds do DNA | `bos_check_quality` |
-| C11 | Learnings surgem em insights | `bos_record_learning` → `bos_get_insights` |
-| C12 | `deny`/`escalate` emite mensagem no ecrã | `session.synthetic` |
-| C13 | Auto-missão do prompt deixa `activeMission` == missão aberta | instância isolada |
-| C14 | Cada evento do log carrega um `instance` estável | divergência entre instâncias visível |
-| C15 | Instâncias concorrentes fazem *adopt-then-write* | revisões monotónicas, sem clobber (`storage-sync`) |
-| C16 | Merge de conflito preserva itens locais | união por id, sem updates perdidos (`mergeSnapshots`) |
-| C17 | Persists concorrentes na mesma instância são serializados | single-flight (`persistQueue`) + verificação pós-escrita com retry (`detectOvertake`) |
-| C18 | O log de governação sobrevive a um restart | tail do log persistido no snapshot e reinjetado no arranque; sequência retomada (monotónica) |
-| C19 | Uma colisão de revisão igual (outro writer) é detetada | `detectOvertake` considera um writer estrangeiro na mesma revisão; retry com adopt+merge forçado |
-| C20 | Uma ação read-only nunca é negada por `data-encryption` | O flag `pii-data` (operação) só nega ações mutantes; ler PII não é operar sobre ela |
-| C21 | O control plane (`bos_*`) nunca é negado | A troca de DNA é imune ao DNA ativo (sem deadlock de bootstrap); o override fica registado |
-| C22 | Todo o veredito não-`allow` é registado | Deny/escalate/erro são gravados no log antes de aplicar o efeito |
-| C23 | Toda a negação é atribuível | Tem entrada `permission`/`deny` no log com a `action` correspondente, e o veredito é reproduzível via `bos_evaluate_governance` |
-| C24 | Sinais de ambiente só vêm de ações capazes de operar | `deployment` exige uma ação que **executa** (`bash`, `shell`, `deploy`, `apply`, …): pesquisar ou escrever a palavra "deploy" não implanta. `production`/`production-change` exigem uma ação não-read-only. O harness falhava o C24 contra o `dist` publicado (23/24) e passa a **24/24** depois do rebuild |
+| Claim | Promessa                                                     | Prova                                                                                                                                                                                                                                                                                                       |
+| ----- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C01   | Surgical Team bloqueia mudanças de produção                  | hook `permission` → `deny`                                                                                                                                                                                                                                                                                  |
+| C02   | Auto-verificação do agente == enforcement                    | `bos_evaluate_governance` → `deny`                                                                                                                                                                                                                                                                          |
+| C03   | Enterprise Governance escala mudanças                        | hook `permission` → `ask`                                                                                                                                                                                                                                                                                   |
+| C04   | Auto-verificação == escalonamento                            | `bos_evaluate_governance` → `escalate`                                                                                                                                                                                                                                                                      |
+| C05   | Todo `deny`/`escalate` é registado (DNA+passo)               | `bos_get_log`                                                                                                                                                                                                                                                                                               |
+| C06   | Log limitado e monotónico                                    | ring buffer `seq++`                                                                                                                                                                                                                                                                                         |
+| C07   | Seleção de DNA = passo 1 do protocolo                        | `stepHistory`                                                                                                                                                                                                                                                                                               |
+| C08   | `exportState`/`importState` round-trip                       | core                                                                                                                                                                                                                                                                                                        |
+| C09   | Iniciar missão define `activeMission`                        | sem divergência                                                                                                                                                                                                                                                                                             |
+| C10   | Quality gates aplicam thresholds do DNA                      | `bos_check_quality`                                                                                                                                                                                                                                                                                         |
+| C11   | Learnings surgem em insights                                 | `bos_record_learning` → `bos_get_insights`                                                                                                                                                                                                                                                                  |
+| C12   | `deny`/`escalate` emite mensagem no ecrã                     | `session.synthetic`                                                                                                                                                                                                                                                                                         |
+| C13   | Auto-missão do prompt deixa `activeMission` == missão aberta | instância isolada                                                                                                                                                                                                                                                                                           |
+| C14   | Cada evento do log carrega um `instance` estável             | divergência entre instâncias visível                                                                                                                                                                                                                                                                        |
+| C15   | Instâncias concorrentes fazem _adopt-then-write_             | revisões monotónicas, sem clobber (`storage-sync`)                                                                                                                                                                                                                                                          |
+| C16   | Merge de conflito preserva itens locais                      | união por id, sem updates perdidos (`mergeSnapshots`)                                                                                                                                                                                                                                                       |
+| C17   | Persists concorrentes na mesma instância são serializados    | single-flight (`persistQueue`) + verificação pós-escrita com retry (`detectOvertake`)                                                                                                                                                                                                                       |
+| C18   | O log de governação sobrevive a um restart                   | tail do log persistido no snapshot e reinjetado no arranque; sequência retomada (monotónica)                                                                                                                                                                                                                |
+| C19   | Uma colisão de revisão igual (outro writer) é detetada       | `detectOvertake` considera um writer estrangeiro na mesma revisão; retry com adopt+merge forçado                                                                                                                                                                                                            |
+| C20   | Uma ação read-only nunca é negada por `data-encryption`      | O flag `pii-data` (operação) só nega ações mutantes; ler PII não é operar sobre ela                                                                                                                                                                                                                         |
+| C21   | O control plane (`bos_*`) nunca é negado                     | A troca de DNA é imune ao DNA ativo (sem deadlock de bootstrap); o override fica registado                                                                                                                                                                                                                  |
+| C22   | Todo o veredito não-`allow` é registado                      | Deny/escalate/erro são gravados no log antes de aplicar o efeito                                                                                                                                                                                                                                            |
+| C23   | Toda a negação é atribuível                                  | Tem entrada `permission`/`deny` no log com a `action` correspondente, e o veredito é reproduzível via `bos_evaluate_governance`                                                                                                                                                                             |
+| C24   | Sinais de ambiente só vêm de ações capazes de operar         | `deployment` exige uma ação que **executa** (`bash`, `shell`, `deploy`, `apply`, …): pesquisar ou escrever a palavra "deploy" não implanta. `production`/`production-change` exigem uma ação não-read-only. O harness falhava o C24 contra o `dist` publicado (23/24) e passa a **24/24** depois do rebuild |
 
-### Limites honestos (o que *não* é 100%)
+### Limites honestos (o que _não_ é 100%)
 
 "Governação 100%" não é um estado que se afirma — é **cobertura sobre um conjunto
 enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. Hoje:
@@ -189,7 +197,7 @@ enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. H
   `warn`/`escalate`, mas não impede execução.
 - **Reativo (exige ator):** a progressão do protocolo, ciclo de missões e auditorias só
   avançam quando alguém invoca as tools `bos_*`. Não é autónomo por si.
-- **Não provado ainda:** que *toda* ação mutadora passe pelo hook (depende do host).
+- **Não provado ainda:** que _toda_ ação mutadora passe pelo hook (depende do host).
 - **Atenuado, não resolvido:** a coerência entre instâncias/sessões concorrentes que
   partilham storage mas não memória. Cada snapshot leva `revision` + `writer`
   (`storage-sync`); um escritor **adota** um snapshot mais recente de outra instância
@@ -198,7 +206,7 @@ enumerado de promessas**. O harness torna o conjunto e as lacunas explícitos. H
   (C16). Persists concorrentes **na mesma instância** são serializados por uma fila
   single-flight (`persistQueue`) com verificação pós-escrita e retry em caso de
   overtake (`detectOvertake`) — C17. Desde então: o log de governação é persistido e restaurado (C18) e uma colisão de revisão igual entre processos é detetada e recuperada por merge forçado (C19). Os três defeitos seguintes foram corrigidos e provados: a leitura nunca é negada por data-encryption (C20), o control plane é imune ao DNA ativo (C21) e todo o veredito não-allow é registado (C22). O claim C23 fixa a atribuibilidade: toda a negação do plugin tem entrada no log com a ação correspondente e o veredito é reproduzível via bos_evaluate_governance. Limite honesto remanescente: negações emitidas por uma camada fora do plugin não são atribuíveis pelo repositório. Falta ainda transação atómica de storage (lock/compare-and-swap real no
-  backend) e política de resolução para *mesmo* item editado concorrentemente
+  backend) e política de resolução para _mesmo_ item editado concorrentemente
   (hoje ganha o snapshot mais recente).
 
 Corolário: para aumentar a cobertura, adiciona-se um claim por cada nova promessa, com a
@@ -213,5 +221,6 @@ auditorias ou mudanças de produção. A skill documenta o protocolo de 7 passos
 intenção→DNA e como interpretar um bloqueio `[Behavior-OS:…]`.
 
 ## DNA Patterns Disponíveis
+
 21 padrões carregados dinamicamente:
 surgical-team, enterprise-governance, military-operations, lean-factory, devops-pipeline, financial-compliance, healthcare-hipaa, startup-agile, enterprise-sox, research-lab, gaming-studio, iot-embedded, ai-ml-pipeline, blockchain-web3, mobile-app, cloud-native, legacy-modernization, open-source, data-engineering, fintech-trading, quantum-computing

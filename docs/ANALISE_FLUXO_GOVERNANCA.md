@@ -27,31 +27,31 @@ Artefactos: `docs/analysis/governance-flow-scenarios.csv` (1000 linhas),
 **O comportamento dos agentes NÃO está a ser governado hoje.** Os mecanismos existem,
 mas nenhum deles bloqueia efetivamente:
 
-| # | Severidade | Achado | Evidência |
-|---|-----------|--------|-----------|
-| **F1** | 🔴 Crítico | O hook de governação **nunca bloqueia** — duas avarias independentes (contexto errado + `throw` engolido pelo próprio `catch`) | `index.ts:474-489` · **315/315** veredictos `allow` |
-| **F2** | 🔴 Crítico | O mecanismo de bloqueio usado (`execute.before` + `throw`) **não é** o oficial do v2; o oficial é `permission.evaluate → effect:"deny"` | `permission.d.ts` · **0** permission hooks |
-| **F3** | 🟠 Alto | O **MCP server** tem o mesmo bug de contexto → **315/315** `allow` | `server.ts:54-58` |
-| **F4** | 🟠 Alto | **Não existe hook de mensagem** (`session.prompt`) → enviar mensagem não cria missão nem sugere DNA | **0** prompt hooks |
-| **F5** | 🟠 Alto | **Sem DNA selecionado, o agente não recebe sinal nenhum** (injeção condicionada) | `index.ts:495` · **0/5** injeções sem DNA |
-| **F6** | 🟠 Alto | **Seleção de DNA não é inteligente** — 21 padrões, seleção 100% manual | `bos_select_dna` |
-| **F7** | 🟡 Médio | **Missão não é automática**; sem `execute.after` para audit/learning | **0** after hooks |
-| **F8** | 🟡 Médio | **Não existe skill `behavior-os` nem prompt governado** (só um bloco de 3 linhas, condicional) | `.opencode/` |
-| **F9** | 🟡 Médio | Estado **só em memória**; `docs/PROTOCOL.md` promete `.behavioros/state.json` (não implementado) | sem `writeFile` no core |
-| **F10** | 🟢 Baixo | `execute.before` só apanha nomes com `bash/write/edit/mcp__` (substring) | `index.ts:468` |
-| **F11** | 🟢 Baixo | `evaluateGovernance` cria um engine novo por chamada → cache de 5 min nunca é usada | `behavior-os.ts:128` |
-| **F12** | 🟢 Baixo | MCP tem 11 tools vs 12 do plugin (falta `bos_list_dna`) | `server.ts` |
+| #       | Severidade | Achado                                                                                                                                 | Evidência                                           |
+| ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **F1**  | 🔴 Crítico | O hook de governação **nunca bloqueia** — duas avarias independentes (contexto errado + `throw` engolido pelo próprio `catch`)         | `index.ts:474-489` · **315/315** veredictos `allow` |
+| **F2**  | 🔴 Crítico | O mecanismo de bloqueio usado (`execute.before` + `throw`)**não é** o oficial do v2; o oficial é `permission.evaluate → effect:"deny"` | `permission.d.ts` · **0** permission hooks          |
+| **F3**  | 🟠 Alto    | O **MCP server** tem o mesmo bug de contexto → **315/315** `allow`                                                                     | `server.ts:54-58`                                   |
+| **F4**  | 🟠 Alto    | **Não existe hook de mensagem** (`session.prompt`) → enviar mensagem não cria missão nem sugere DNA                                    | **0** prompt hooks                                  |
+| **F5**  | 🟠 Alto    | **Sem DNA selecionado, o agente não recebe sinal nenhum** (injeção condicionada)                                                       | `index.ts:495` · **0/5** injeções sem DNA           |
+| **F6**  | 🟠 Alto    | **Seleção de DNA não é inteligente** — 21 padrões, seleção 100% manual                                                                 | `bos_select_dna`                                    |
+| **F7**  | 🟡 Médio   | **Missão não é automática**; sem `execute.after` para audit/learning                                                                   | **0** after hooks                                   |
+| **F8**  | 🟡 Médio   | **Não existe skill `behavior-os` nem prompt governado** (só um bloco de 3 linhas, condicional)                                         | `.opencode/`                                        |
+| **F9**  | 🟡 Médio   | Estado **só em memória**; `docs/PROTOCOL.md` promete `.behavioros/state.json` (não implementado)                                       | sem `writeFile` no core                             |
+| **F10** | 🟢 Baixo   | `execute.before` só apanha nomes com `bash/write/edit/mcp__` (substring)                                                               | `index.ts:468`                                      |
+| **F11** | 🟢 Baixo   | `evaluateGovernance` cria um engine novo por chamada → cache de 5 min nunca é usada                                                    | `behavior-os.ts:128`                                |
+| **F12** | 🟢 Baixo   | MCP tem 11 tools vs 12 do plugin (falta `bos_list_dna`)                                                                                | `server.ts`                                         |
 
 > **Pós-correção (ver §8):** F1–F3, F5–F12 resolvidos ou implementados. O estado agora
 > **persiste** via `ctx.storage` (F9) e o cache de governação é **reutilizado** (F11).
 
-**Resumo da matriz:** de 570 cenários em que a DNA define uma regra de *block* e o
+**Resumo da matriz:** de 570 cenários em que a DNA define uma regra de _block_ e o
 contexto era satisfazível, **0 bloquearam** pelos canais instalados (plugin e MCP).
 Só a chamada "correta" (aninhando `context.context`) produz `deny`/`escalate`.
 
 **O que está bem:** a progressão do protocolo de 7 passos é monotónica e correta
 (`advanceProtocolStep`, `PROTOCOL_TOOL_STEPS`, `currentStep`), e as 12 tools diretas
-funcionam. O problema está no *enforcement*, não no *tracking*.
+funcionam. O problema está no _enforcement_, não no _tracking_.
 
 ---
 
@@ -117,16 +117,16 @@ Utilizador envia mensagem
 
 ### Comportamento por trigger
 
-| Trigger | Hook registado? | Efeito real | Governado? |
-|---|---|---|---|
-| Utilizador envia mensagem | ❌ `prompt` | nada | ❌ |
-| Montagem do pedido ao modelo | ✅ `context` | injeta estado **só se houver DNA** | ⚠️ |
-| Tool prestes a correr | ✅ `execute.before` | avalia, mas **nunca bloqueia** | ❌ |
-| Tool terminada | ❌ `execute.after` | nada (sem audit/learning automático) | ❌ |
-| Decisão de permissão | ❌ `permission.evaluate` | nada (mecanismo oficial ausente) | ❌ |
-| Skill disponível | ❌ | não existe skill | ❌ |
-| Prompt do agente | ❌ | sem preâmbulo governado | ❌ |
-| Persistência de estado | ❌ | só memória (reset por processo) | ❌ |
+| Trigger                      | Hook registado?          | Efeito real                          | Governado? |
+| ---------------------------- | ------------------------ | ------------------------------------ | ---------- |
+| Utilizador envia mensagem    | ❌ `prompt`              | nada                                 | ❌         |
+| Montagem do pedido ao modelo | ✅ `context`             | injeta estado **só se houver DNA**   | ⚠️         |
+| Tool prestes a correr        | ✅ `execute.before`      | avalia, mas **nunca bloqueia**       | ❌         |
+| Tool terminada               | ❌ `execute.after`       | nada (sem audit/learning automático) | ❌         |
+| Decisão de permissão         | ❌ `permission.evaluate` | nada (mecanismo oficial ausente)     | ❌         |
+| Skill disponível             | ❌                       | não existe skill                     | ❌         |
+| Prompt do agente             | ❌                       | sem preâmbulo governado              | ❌         |
+| Persistência de estado       | ❌                       | só memória (reset por processo)      | ❌         |
 
 ---
 
@@ -167,7 +167,7 @@ Prova: `governance-flow-summary.json → partB.toolExecuteBeforeBlocks = 0`.
 
 ### F2 — 🔴 Mecanismo de bloqueio errado (não é o oficial do v2)
 
-A doc oficial (`opencode.ai/v2/docs/build/plugins`, secção *Tools*) diz apenas que
+A doc oficial (`opencode.ai/v2/docs/build/plugins`, secção _Tools_) diz apenas que
 `tool.execute.before` serve para **"inspect or replace tool input"** e a assinatura é
 `(event) => Promise<void> | void` — **não existe API de rejeição**.
 
@@ -175,14 +175,15 @@ O bloqueio tipado e oficial é **`permission.evaluate`** (`permission.d.ts`):
 
 ```ts
 interface PermissionEvaluation {
-  action: string; resources: readonly string[];
-  effect: "allow" | "ask" | "deny";   // ← bloqueia aqui
+  action: string;
+  resources: readonly string[];
+  effect: 'allow' | 'ask' | 'deny'; // ← bloqueia aqui
   message?: string;
 }
 ```
 
-Regras: *"A hook may change `effect` to `allow`, `ask`, or `deny`; `message` becomes the
-denial reason"*. O plugin **não regista** este hook (`permissionHookRegistered = 0`).
+Regras: _"A hook may change `effect` to `allow`, `ask`, or `deny`; `message` becomes the
+denial reason"_. O plugin **não regista** este hook (`permissionHookRegistered = 0`).
 
 ### F3 — 🟠 O MCP tem o mesmo bug de contexto
 
@@ -270,13 +271,12 @@ Curiosidade: `ctx.storage` (durabilidade por plugin) está disponível e não é
 
 ### Parte A — alcançabilidade da governação (945)
 
-| Fornecedor | allow | escalate | deny | *(antes)* |
-|---|---:|---:|---:|---:|
-| **plugin** (corrigido) | 261 | 44 | 10 | *315 allow* |
-| **mcp** (corrigido) | 15 | 110 | 190 | *315 allow* |
-| **caller-correct** | 15 | 110 | 190 | *15 / 110 / 190* |
-
-- **19/21** DNAs definem regra de *block*; **20/21** definem *escalate*; só `lean-factory`
+| Fornecedor             | allow | escalate | deny |        _(antes)_ |
+| ---------------------- | ----: | -------: | ---: | ---------------: |
+| **plugin** (corrigido) |   261 |       44 |   10 |      _315 allow_ |
+| **mcp** (corrigido)    |    15 |      110 |  190 |      _315 allow_ |
+| **caller-correct**     |    15 |      110 |  190 | _15 / 110 / 190_ |
+- **19/21** DNAs definem regra de _block_; **20/21** definem _escalate_; só `lean-factory`
   é só-`warn` (0 deny, 0 escalate).
 - O plugin aplica heurísticas genéricas (`deploy`/`production`/`destrutivo`/PII…) e por
   isso bloqueia/escala mudanças de produção, mas **não** classifica flags de domínio
@@ -286,15 +286,15 @@ Curiosidade: `ctx.storage` (durabilidade por plugin) está disponível e não é
 
 ### Parte B — fluxo (55)
 
-| Métrica | Antes | Agora |
-|---|---:|---:|
-| `session.prompt` registados | 0 | **11** |
-| `tool.execute.after` registados | 0 | **11** |
-| `permission.evaluate` registados | 0 | **11** |
-| Bloqueios via `execute.before` (throw) | 0 | 0 (passou a advisory) |
-| Ações **efetivamente** negadas/escaladas via `permission.evaluate` | 0 | **6** |
-| Injeções de contexto (com DNA / sem DNA) | 5 / 0 | **11 / 6** |
-| Cenários com gap (plugin, flags de domínio) | 50 | 231 |
+| Métrica                                                            | Antes |                 Agora |
+| ------------------------------------------------------------------ | ----: | --------------------: |
+| `session.prompt` registados                                        |     0 |                **11** |
+| `tool.execute.after` registados                                    |     0 |                **11** |
+| `permission.evaluate` registados                                   |     0 |                **11** |
+| Bloqueios via `execute.before` (throw)                             |     0 | 0 (passou a advisory) |
+| Ações **efetivamente** negadas/escaladas via `permission.evaluate` |     0 |                 **6** |
+| Injeções de contexto (com DNA / sem DNA)                           | 5 / 0 |            **11 / 6** |
+| Cenários com gap (plugin, flags de domínio)                        |    50 |                   231 |
 
 ---
 
@@ -374,43 +374,43 @@ Implementado e verificado. Cada correção tem testes que a provam.
 
 ### P0 — governação real ✅
 
-| Finding | Correção | Ficheiro | Prova |
-|---|---|---|---|
-| **F1** nunca bloqueia | Enforcement passou para o hook **`permission.evaluate`**; o contexto é construído de facto a partir de `action`/`resources`/`metadata`; `execute.before` deixou de lançar (é *advisory*) | `plugins/opencode-v2/src/index.ts` | `permission.effect = "deny"` em `verify:plugin`, testes, **E2E** |
-| **F2** mecanismo errado | Hook `permission.hook("evaluate")` registado; mapeia `deny`/`escalate` → `effect: "deny"`/`"ask"` + `message` | `index.ts` | `permissionHooks.evaluate` presente (11 cenários) |
-| **F3** bug de contexto no MCP | `context.context` aninhado + `action` | `packages/mcp-server/src/server.ts` | `smoke:mcp` → `escalate` por `change-control` |
-| **F5** cold start mudo | `session.context` injeta sempre (com ou sem DNA) | `index.ts` | injeções **11 / 6** (era 5 / 0) |
+| Finding                       | Correção                                                                                                                                                                                 | Ficheiro                            | Prova                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------- |
+| **F1** nunca bloqueia         | Enforcement passou para o hook **`permission.evaluate`**; o contexto é construído de facto a partir de `action`/`resources`/`metadata`; `execute.before` deixou de lançar (é _advisory_) | `plugins/opencode-v2/src/index.ts`  | `permission.effect = "deny"` em `verify:plugin`, testes, **E2E** |
+| **F2** mecanismo errado       | Hook `permission.hook("evaluate")` registado; mapeia `deny`/`escalate` → `effect: "deny"`/`"ask"` + `message`                                                                            | `index.ts`                          | `permissionHooks.evaluate` presente (11 cenários)                |
+| **F3** bug de contexto no MCP | `context.context` aninhado + `action`                                                                                                                                                    | `packages/mcp-server/src/server.ts` | `smoke:mcp` → `escalate` por `change-control`                    |
+| **F5** cold start mudo        | `session.context` injeta sempre (com ou sem DNA)                                                                                                                                         | `index.ts`                          | injeções **11 / 6** (era 5 / 0)                                  |
 
 ### P1 — inteligência de fluxo ✅
 
-| Finding | Correção | Estado |
-|---|---|---|
-| **F4** sem hook de mensagem | `session.prompt` classifica a intenção e **auto-seleciona** o DNA (ex.: "patient/HIPAA" → `healthcare-hipaa`) | ✅ |
-| **F6** seleção não inteligente | `classifyDNA` (21 padrões × palavras-chave, com desempate por pontuação) | ✅ |
-| **F7** sem `execute.after` | Hook regista `failure` no learning engine (sem avançar o protocolo — `recordLearning({ advanceProtocol: false })`) | ✅ |
-| **F7** missão não automática | `session.prompt` cria **e** inicia uma missão (`classifyMissionIntent` → tipo/prioridade) quando há DNA ativo e nenhuma missão ativa; **não** avança o protocolo e **não** repete por mensagem | ✅ |
-| **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2); **preâmbulo governado** anexado ao `system` de cada agente via `ctx.agent.transform` | ✅ |
-| **F9** estado só em memória | `BehaviorOS.exportState()/importState()` + persistência automática via **`ctx.storage`** (chave `behavioros:state`); restauro no `setup` | ✅ |
+| Finding                             | Correção                                                                                                                                                                                                                           | Estado  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **F4** sem hook de mensagem         | `session.prompt` classifica a intenção e **auto-seleciona** o DNA (ex.: "patient/HIPAA" → `healthcare-hipaa`)                                                                                                                      | ✅      |
+| **F6** seleção não inteligente      | `classifyDNA` (21 padrões × palavras-chave, com desempate por pontuação)                                                                                                                                                           | ✅      |
+| **F7** sem `execute.after`          | Hook regista `failure` no learning engine (sem avançar o protocolo — `recordLearning({ advanceProtocol: false })`)                                                                                                                 | ✅      |
+| **F7** missão não automática        | `session.prompt` cria **e** inicia uma missão (`classifyMissionIntent` → tipo/prioridade) quando há DNA ativo e nenhuma missão ativa; **não** avança o protocolo e **não** repete por mensagem                                     | ✅      |
+| **F8** sem skill / prompt governado | Prompt governado sempre injetado no `context`; **skill `behavior-os`** criada em `.opencode/skills/behavior-os/SKILL.md` (advertida pelo v2); **preâmbulo governado** anexado ao `system` de cada agente via `ctx.agent.transform` | ✅      |
+| **F9** estado só em memória         | `BehaviorOS.exportState()/importState()` + persistência automática via **`ctx.storage`** (chave `behavioros:state`); restauro no `setup`                                                                                           | ✅      |
 
 ### P2 — robustez ✅
 
-| Finding | Correção | Estado |
-|---|---|---|
-| **F12** paridade MCP | `bos_list_dna` adicionado (MCP passou de 11 → **12** tools) + catálogo `behavioros://dna/catalog` dinâmico | ✅ |
-| **F10** subconjunto de tools no before | `GOVERNED_TOOL = /bash\|write\|edit\|patch\|apply\|shell\|mcp__/i` (advisory) | ✅ |
-| **F11** cache de governação | Efetivamente resolvido: o registry reutiliza o engine enquanto a referência do DNA não muda → `decisionCache` de 5 min ativo | ✅ |
+| Finding                                | Correção                                                                                                                     | Estado  |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **F12** paridade MCP                   | `bos_list_dna` adicionado (MCP passou de 11 → **12** tools) + catálogo `behavioros://dna/catalog` dinâmico                   | ✅      |
+| **F10** subconjunto de tools no before | `GOVERNED_TOOL = /bash\|write\|edit\|patch\|apply\|shell\|mcp__/i` (advisory)                                                | ✅      |
+| **F11** cache de governação            | Efetivamente resolvido: o registry reutiliza o engine enquanto a referência do DNA não muda → `decisionCache` de 5 min ativo | ✅      |
 
 ### P3 — observabilidade (ler a governação no ecrã) ✅
 
 > Pedido explícito: poder **ler**, na sessão do OpenCode, como o DNA/governança está a ser
 > aplicado. Antes só existia `console.log` disperso, sem histórico consultável.
 
-| Comportamento | Correção | Estado |
-|---|---|---|
-| Sem histórico de decisões | **Ring buffer** de eventos (máx. 200) em `governance-log.ts` | ✅ |
-| Sem leitura na sessão | Tool **`bos_get_log`** (13ª tool) devolve os N eventos em JSON | ✅ |
-| Sem feedback imediato | Mensagens sintéticas (`ctx.session.synthetic`) em DNA auto, missão auto, `⛔` deny e `⚠️` escalate | ✅ |
-| Sem análise nos logs do servidor | Linha única greppable `[Behavior-OS:LOG:kind:outcome] dna=… step=… mission=… action="…"` para `deny`/`escalate`/`error` | ✅ |
+| Comportamento                    | Correção                                                                                                                | Estado  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------- |
+| Sem histórico de decisões        | **Ring buffer** de eventos (máx. 200) em `governance-log.ts`                                                            | ✅      |
+| Sem leitura na sessão            | Tool **`bos_get_log`** (13ª tool) devolve os N eventos em JSON                                                          | ✅      |
+| Sem feedback imediato            | Mensagens sintéticas (`ctx.session.synthetic`) em DNA auto, missão auto, `⛔` deny e `⚠️` escalate                      | ✅      |
+| Sem análise nos logs do servidor | Linha única greppable `[Behavior-OS:LOG:kind:outcome] dna=… step=… mission=… action="…"` para `deny`/`escalate`/`error` | ✅      |
 
 Cada evento carrega `seq`, `at`, `kind`, `outcome`, `dna`, `step`, `mission`, `action` e
 `detail`; os `kind` possíveis são `dna_selected`, `mission`, `protocol`, `permission`,
@@ -420,27 +420,27 @@ decisões.
 
 ### P4 — provar a governação (conformance de promessas) ✅
 
-> Pergunta: *"como provamos que temos governação total e que o Behavior-OS cumpre tudo o
-> que promete a 100%?"* Resposta rigorosa: "100%" não é um estado que se afirma — é
+> Pergunta: _"como provamos que temos governação total e que o Behavior-OS cumpre tudo o
+> que promete a 100%?"_ Resposta rigorosa: "100%" não é um estado que se afirma — é
 > **cobertura sobre um conjunto enumerado de promessas**, cada uma com uma verificação
 > executável.
 
-| Comportamento | Correção | Estado |
-|---|---|---|
-| Duas vias de decisão divergiam: o hook `permission` **escalava** `deploy to production` enquanto a auto-verificação `bos_evaluate_governance` respondia `allow` | A tool passa a construir o *condition bag* via `buildGovernanceContext` (igual ao hook): `tool`/`resources`/`text` + `metadata` explícitos | ✅ |
-| Nenhuma prova agregada de que o motor cumpre as promessas | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 24 *claims*, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0 | ✅ |
-| Divergência entre instâncias/sessões invisível | Cada evento do log ganha `instance` (`p<pid>-<rand>`) e o harness inclui C13 (auto-missão coerente numa instância isolada) e C14 (identidade estável) | ✅ |
-| Clobber entre instâncias concorrentes (last-writer-wins) | Módulo puro `storage-sync.ts`: cada snapshot leva `revision`+`writer`; `planPersist` decide **adopt-then-write** (adota snapshot mais recente de outra instância antes de escrever) e mantém revisões monotónicas; C15 prova o contrato | ✅ |
-| Updates locais perdidos no adopt | `mergeSnapshots`: missões/learnings unidas por `id` (o mais recente ganha no mesmo `id`), DNA/`activeMission` do mais recente com fallback ao local, `currentStep` máximo, `stepHistory` unida; C16 + teste de integração com dois writers | ✅ |
-| Persists concorrentes na mesma instância | Fila single-flight (`persistQueue`) serializa as escritas; verificação pós-escrita com detecção de overtake (`detectOvertake`) + retry; C17 prova revisões monotónicas. O CAS de backend continua a ser o limite irreduzível (a API só expõe get/set) | ✅ |
-| Log de governação perdido no restart | O snapshot persistido transporta um tail do log (limite `GOVERNANCE_LOG_PERSIST_LIMIT`); no arranque é reinjetado e a sequência retoma (C18) | ✅ |
-| Colisão de revisão igual entre processos indeterminada | `detectOvertake` trata um `writer` estrangeiro na mesma revisão como overtake e o retry força adopt+merge (C19) | ✅ |
-| Leitura bloqueada por data-encryption (falso-positivo) | Negar apenas ações mutantes: ler PII não é operar sobre ela (C20) | ✅ |
-| Deadlock de bootstrap ao trocar de DNA | O control plane (`bos_*`) nunca é negado e o override é registado (C21) | ✅ |
-| Deny sem entrada no log | Todo o veredito não-`allow` é gravado antes de aplicar o efeito (C22) | ✅ |
-| Negação sem origem (camada externa ao plugin) | Garantia in-repo: toda a negação do plugin tem entrada no log e é reproduzível (C23). Limite honesto: negações emitidas fora do plugin não são atribuíveis pelo repositório | ⚠️ |
-| Limites não declarados | Secção "Limites honestos" no `OPENCODE_RUN.md` separa **Enforced** (`permission` deny) / **Advisory** (`escalate`→`ask`, não impede execução) / **Reativo** (protocolo por tools) / **Não provado** | ✅ |
-| Ações read-only escalavam por `deployment-approval` | Os sinais de ambiente passam a exigir capacidade de operar: leitura/pesquisa nunca derivam `deployment` nem `production`; escrita deriva `production` mas não `deployment`; execução deriva ambos (C24) | ✅ |
+| Comportamento                                                                                                                                                   | Correção                                                                                                                                                                                                                                              | Estado  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Duas vias de decisão divergiam: o hook `permission` **escalava** `deploy to production` enquanto a auto-verificação `bos_evaluate_governance` respondia `allow` | A tool passa a construir o _condition bag_ via `buildGovernanceContext` (igual ao hook): `tool`/`resources`/`text` + `metadata` explícitos                                                                                                            | ✅      |
+| Nenhuma prova agregada de que o motor cumpre as promessas                                                                                                       | **Harness de conformance** `scripts/governance-conformance.mjs` (`pnpm verify:governance`): arranca plugin+core reais, avalia 24 _claims_, imprime `claims → evidência` e grava `docs/analysis/governance-conformance.json`; falha com exit ≠ 0       | ✅      |
+| Divergência entre instâncias/sessões invisível                                                                                                                  | Cada evento do log ganha `instance` (`p<pid>-<rand>`) e o harness inclui C13 (auto-missão coerente numa instância isolada) e C14 (identidade estável)                                                                                                 | ✅      |
+| Clobber entre instâncias concorrentes (last-writer-wins)                                                                                                        | Módulo puro `storage-sync.ts`: cada snapshot leva `revision`+`writer`; `planPersist` decide **adopt-then-write** (adota snapshot mais recente de outra instância antes de escrever) e mantém revisões monotónicas; C15 prova o contrato               | ✅      |
+| Updates locais perdidos no adopt                                                                                                                                | `mergeSnapshots`: missões/learnings unidas por `id` (o mais recente ganha no mesmo `id`), DNA/`activeMission` do mais recente com fallback ao local, `currentStep` máximo, `stepHistory` unida; C16 + teste de integração com dois writers            | ✅      |
+| Persists concorrentes na mesma instância                                                                                                                        | Fila single-flight (`persistQueue`) serializa as escritas; verificação pós-escrita com detecção de overtake (`detectOvertake`) + retry; C17 prova revisões monotónicas. O CAS de backend continua a ser o limite irreduzível (a API só expõe get/set) | ✅      |
+| Log de governação perdido no restart                                                                                                                            | O snapshot persistido transporta um tail do log (limite `GOVERNANCE_LOG_PERSIST_LIMIT`); no arranque é reinjetado e a sequência retoma (C18)                                                                                                          | ✅      |
+| Colisão de revisão igual entre processos indeterminada                                                                                                          | `detectOvertake` trata um `writer` estrangeiro na mesma revisão como overtake e o retry força adopt+merge (C19)                                                                                                                                       | ✅      |
+| Leitura bloqueada por data-encryption (falso-positivo)                                                                                                          | Negar apenas ações mutantes: ler PII não é operar sobre ela (C20)                                                                                                                                                                                     | ✅      |
+| Deadlock de bootstrap ao trocar de DNA                                                                                                                          | O control plane (`bos_*`) nunca é negado e o override é registado (C21)                                                                                                                                                                               | ✅      |
+| Deny sem entrada no log                                                                                                                                         | Todo o veredito não-`allow` é gravado antes de aplicar o efeito (C22)                                                                                                                                                                                 | ✅      |
+| Negação sem origem (camada externa ao plugin)                                                                                                                   | Garantia in-repo: toda a negação do plugin tem entrada no log e é reproduzível (C23). Limite honesto: negações emitidas fora do plugin não são atribuíveis pelo repositório                                                                           | ⚠️      |
+| Limites não declarados                                                                                                                                          | Secção "Limites honestos" no `OPENCODE_RUN.md` separa **Enforced** (`permission` deny) / **Advisory** (`escalate`→`ask`, não impede execução) / **Reativo** (protocolo por tools) / **Não provado**                                                   | ✅      |
+| Ações read-only escalavam por `deployment-approval`                                                                                                             | Os sinais de ambiente passam a exigir capacidade de operar: leitura/pesquisa nunca derivam `deployment` nem `production`; escrita deriva `production` mas não `deployment`; execução deriva ambos (C24)                                               | ✅      |
 
 As 24 claims cobrem: C01 bloqueio real, C02/C04 consistência hook↔auto-verificação,
 C03 escalonamento, C05 log com DNA+passo, C06 limite+monotonicidade, C07 protocolo,
@@ -453,7 +453,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
 - `plugins/opencode-v2/src/governance.ts` **(novo)** — `classifyDNA`, `buildGovernanceContext`,
   `classifyMissionIntent` e `buildGovernedPreamble`/`GOVERNED_PREAMBLE_MARKER` (helpers puros,
   sem imports do OpenCode).
-- `plugins/opencode-v2/src/governance-log.ts` **(novo, P3)** — ring buffer de eventos de
+- `packages/core/src/governance-log.ts` **(novo, P3)** — ring buffer de eventos de
   governação + `serializeGovernanceLog` (linha greppable para o console).
 - `plugins/opencode-v2/src/index.ts` — hooks `permission.evaluate`, `session.prompt`
   (auto-DNA + **auto-missão**), `session.context` (sempre ativo), `tool.execute.before`
@@ -466,7 +466,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
 - `packages/core/src/engine/mission-engine.ts` / `learning-engine.ts` — `snapshot()`/`restore()`.
 - `packages/mcp-server/src/server.ts` — contexto aninhado + `bos_list_dna` + catálogo dinâmico.
 - `scripts/verify-plugin.mjs` — valida hooks e **bloqueio real**.
-- `scripts/governance-conformance.mjs` **(novo, P4)** — harness de conformance: 24 *claims*
+- `scripts/governance-conformance.mjs` **(novo, P4)** — harness de conformance: 24 _claims_
   sobre plugin+core reais, relatório `claims → evidência` + JSON.
 - `scripts/smoke-mcp.mjs` — valida 12 tools e o **match de contexto**.
 - `scripts/analyze-governance-flow.mjs` — modela o novo contrato; regenera CSV/JSON.
@@ -480,7 +480,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
 
 ### Provas end-to-end (`opencode run`, harness real)
 
-1. `bos_select_dna(surgical-team)` executado via `opencode run` → *"Governance rules activated."*
+1. `bos_select_dna(surgical-team)` executado via `opencode run` → _"Governance rules activated."_
 2. `opencode run --auto "…echo deploy to production"` →
    **`permission.rejected`: `[Behavior-OS:Surgical Team] Blocked by rule: sterile-field`**.
    O `--auto` **não** sobrepõe um `deny` explícito — o bloqueio é real.
@@ -488,7 +488,7 @@ adopt-then-write entre instâncias, C16 merge de conflito sem updates perdidos, 
    negados enquanto o DNA `surgical-team` estava ativo no servidor de fundo (partilhado),
    confirmando que o hook governa **qualquer** ferramenta, não só as tools `bos_*`.
 4. Auto-missão e persistência provadas **ao vivo** (`opencode run --standalone`): após
-   *"Fix the crash in the payment service"*, `bos_get_state` devolveu
+   _"Fix the crash in the payment service"_, `bos_get_state` devolveu
    `{"selectedDna":"Financial Compliance","activeMission":"mission-…","currentStep":3}`; um
    **segundo processo** restaurou o mesmo `activeMission` a partir de `ctx.storage`.
 5. `pnpm verify:plugin` confirma o **preâmbulo governado nos agentes**

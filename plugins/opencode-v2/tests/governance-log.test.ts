@@ -1,7 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendGovernanceLog,
   clearGovernanceLog,
@@ -16,7 +15,8 @@ import {
   serializeGovernanceLog,
   verifyGovernanceLog,
   verifyGovernanceLogFile,
-} from '../src/governance-log.js';
+} from '@behavior-os/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 function sampleInput(overrides: Partial<Parameters<typeof appendGovernanceLog>[0]> = {}) {
   return {

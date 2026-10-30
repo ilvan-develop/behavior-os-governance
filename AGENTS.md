@@ -18,7 +18,7 @@ packages/schemas/      Zod schemas for every domain type
 packages/core/         47 engines + BehaviorOS facade + persistence
 packages/sdk/          TypeScript SDK
 packages/cli/          CLI (init, validate, status, simulate, deploy, ...)
-packages/mcp-server/   MCP server: 83 tools + 2 resources (stdio)
+packages/mcp-server/   MCP server: 85 tools + 2 resources (stdio)
 packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (64 tests)
 plugins/opencode-v2/   OpenCode V2 plugin: 70 bos_* tools + hooks
 examples/              Workspace example app (4 tests in `pnpm test`)

@@ -35,6 +35,7 @@ import type {
 } from '@behavior-os/schemas';
 import { load as yamlLoad } from 'js-yaml';
 import { isControlPlaneAction, isMutatingAction } from '../action-classification.js';
+import * as GovernanceLog from '../governance-log.js';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
 import { CodeEditEngine, type CodeEditPreview } from './code-edit-engine.js';
@@ -1629,6 +1630,54 @@ export class BehaviorOS {
     firedRules?: Array<{ id: string; action: string }>,
   ): void {
     this.getMetricsEngine().recordGovernance(verdict, rulesEvaluated, latencyMs, firedRules);
+    // Mirror the event into the hash-chained governance log so the same
+    // `bos_get_log` / `bos_verify_audit_trail` observability is available to
+    // MCP hosts, not just the OpenCode plugin (Finding #8: dual audit systems).
+    // 'log' maps to 'info' in the governance log outcome vocabulary.
+    const logOutcome: GovernanceLog.GovernanceLogOutcome =
+      verdict === 'log' ? 'info' : verdict === 'allow' ? 'allow' : verdict;
+    GovernanceLog.appendGovernanceLog({
+      kind: 'permission',
+      outcome: logOutcome,
+      dna: this.currentDNA?.name ?? null,
+      step: this.agentState.currentStep,
+      mission: this.agentState.activeMission ?? null,
+      action: firedRules?.map((r) => r.action).join(',') ?? 'unknown',
+      detail: `rulesEvaluated=${rulesEvaluated} latency=${latencyMs}ms`,
+    });
+  }
+
+  // Governance Log (read / verify / sink) ----------------------------------
+  // Exposed so MCP hosts (not just the OpenCode plugin) can read the
+  // hash-chained governance log and verify its integrity (Finding #8).
+
+  /** Return the most recent governance log events (newest last), capped at `limit`. */
+  getGovernanceLog(limit = 50): GovernanceLog.GovernanceLogEvent[] {
+    return GovernanceLog.getGovernanceLog(limit);
+  }
+
+  /** Enable or reset the durable append-only JSONL audit sink. */
+  initGovernanceLogSink(filePath: string | null): void {
+    GovernanceLog.initGovernanceLogSink(filePath);
+  }
+
+  /** Current sink status: `path` is null when the durable sink is disabled. */
+  getGovernanceLogSink(): { path: string | null; writeErrors: number } {
+    return GovernanceLog.getGovernanceLogSinkStatus();
+  }
+
+  /** Current chain head + anchor, for external attestation. */
+  getGovernanceChainHead(): { head: string; anchor: string; length: number } {
+    return GovernanceLog.getGovernanceChainHead();
+  }
+
+  /**
+   * Verify the in-memory hash chain over the retained events.
+   * Returns `{ valid, checked, complete }` — `complete: false` means only
+   * the retained window was attested, not the evicted history.
+   */
+  verifyAuditTrail(): GovernanceLog.ChainVerification {
+    return GovernanceLog.verifyGovernanceLog();
   }
 
   // Brainstorming & Collaboration ------------------------------------------

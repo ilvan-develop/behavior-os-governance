@@ -32,7 +32,7 @@ describe('Governance log durable sink', () => {
       }
     }
     // Reset module-level sink state between tests to avoid cross-test contamination.
-    import('../../../plugins/opencode-v2/src/governance-log.js')
+    import('../src/governance-log.js')
       .then((m) => {
         try {
           m.clearGovernanceLog();
@@ -44,9 +44,7 @@ describe('Governance log durable sink', () => {
   });
 
   it('appends entries to the JSONL file when sink is enabled', async () => {
-    const { initGovernanceLogSink, appendGovernanceLog } = await import(
-      '../../../plugins/opencode-v2/src/governance-log.js'
-    );
+    const { initGovernanceLogSink, appendGovernanceLog } = await import('../src/governance-log.js');
     initGovernanceLogSink(logFile);
 
     appendGovernanceLog({
@@ -77,9 +75,7 @@ describe('Governance log durable sink', () => {
   });
 
   it('detects a truncated head (missing genesis)', async () => {
-    const { verifyGovernanceLogFile } = await import(
-      '../../../plugins/opencode-v2/src/governance-log.js'
-    );
+    const { verifyGovernanceLogFile } = await import('../src/governance-log.js');
     writeFileSync(
       logFile,
       `${JSON.stringify({
@@ -105,7 +101,7 @@ describe('Governance log durable sink', () => {
 
   it('reports complete: true when chain starts at genesis', async () => {
     const { initGovernanceLogSink, appendGovernanceLog, verifyGovernanceLogFile } = await import(
-      '../../../plugins/opencode-v2/src/governance-log.js'
+      '../src/governance-log.js'
     );
     initGovernanceLogSink(logFile);
     appendGovernanceLog({
@@ -126,7 +122,7 @@ describe('Governance log durable sink', () => {
 
   it('detects a hash mismatch (tampered entry)', async () => {
     const { initGovernanceLogSink, appendGovernanceLog, verifyGovernanceLogFile } = await import(
-      '../../../plugins/opencode-v2/src/governance-log.js'
+      '../src/governance-log.js'
     );
     initGovernanceLogSink(logFile);
     appendGovernanceLog({
