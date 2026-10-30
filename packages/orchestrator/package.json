@@ -2,6 +2,7 @@
   "name": "behavioros-orchestrator",
   "version": "1.0.1",
   "description": "Autonomous orchestration skills for Behavior-OS",
+  "type": "module",
   "author": "Ilvan Joaquim",
   "license": "MIT",
   "repository": {
@@ -19,6 +20,14 @@
     "node": ">=22.0.0"
   },
   "packageManager": "pnpm@10.4.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "node ../../node_modules/vitest/vitest.mjs run",
@@ -29,6 +38,9 @@
     "@behavior-os/core": "workspace:*",
     "@behavior-os/schemas": "workspace:*"
   },
+  "files": [
+    "dist/"
+  ],
   "devDependencies": {
     "typescript": "~5.9.3"
   }

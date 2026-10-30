@@ -15,6 +15,7 @@ import type {
   DNA,
   DriftInfo,
   EvolutionProposal,
+  GovernanceAction,
   GovernanceDecision,
   LearningEvent,
   LearningImpact,
@@ -47,12 +48,14 @@ import {
   type LearningEngine,
   type PredictionEngine,
   type RecommendationEngine,
+  type TemporalGovernanceEngine,
 } from './index.js';
 import type {
   AdvanceLearningRecordOptions,
   CreateLearningRecordOptions,
   LearningAdvanceResult,
 } from './learning-engine.js';
+
 import type {
   MissionEvidenceInput,
   MissionTransitionOptions,
@@ -131,6 +134,8 @@ export interface EvolutionResult {
   proposals: EvolutionProposal[];
   /** The subset that was actually written into the active DNA. */
   applied: EvolutionProposal[];
+  /** Proposals skipped because their vote gate was not satisfied. */
+  voteSkipped?: EvolutionProposal[];
   /** Whether `config.evolution.enabled` allowed writing. */
   enabled: boolean;
   /** Present when votes were supplied to gate the change. */
@@ -347,6 +352,11 @@ export class BehaviorOS {
     this.currentDNA = dna;
     // Rebuild the gate pipeline so per-DNA quality gates reflect the new pattern.
     this.pipeline = null;
+    // Clear the governance decision cache: decisions were computed under the
+    // previous DNA's rules and may no longer be valid after a switch. Stale
+    // cache entries would return the old verdict until TTL expiry (5 min),
+    // which breaks cross-DNA continuity.
+    this.registry.get<import('./index.js').GovernanceEngine>('governance')?.clearCache();
     this.agentState.selectedDna = dna.name;
     // Selecting a DNA also selects its first persona as the acting identity, so
     // audits and governance logs carry a DNA-derived agent rather than a model
@@ -490,17 +500,34 @@ export class BehaviorOS {
     const roleId = persona.role.trim() ? persona.role : persona.name;
     if (roleId.trim() === '') return;
     const engine = this.getRolePolicyEngine();
-    if (engine.getRole(roleId)) return;
-    engine.registerRole({
-      id: roleId,
-      name: persona.name,
-      displayName: persona.name,
-      responsibilities: [...persona.skills],
-      policies: [],
-      canAudit: false,
-      canEnforce: false,
-      canTeach: false,
-    });
+    // Register under both the bare id and the persona-prefixed id so that
+    // resolveAgentIdentity()'s `persona:<role>` lookup always finds the role
+    // without requiring the host to manually register persona:* entries.
+    const personaRoleId = `persona:${roleId}`;
+    if (!engine.getRole(roleId)) {
+      engine.registerRole({
+        id: roleId,
+        name: persona.name,
+        displayName: persona.name,
+        responsibilities: [...(persona.skills ?? [])],
+        policies: [],
+        canAudit: false,
+        canEnforce: false,
+        canTeach: false,
+      });
+    }
+    if (!engine.getRole(personaRoleId)) {
+      engine.registerRole({
+        id: personaRoleId,
+        name: persona.name,
+        displayName: `${persona.name} (persona)`,
+        responsibilities: [...(persona.skills ?? [])],
+        policies: [],
+        canAudit: false,
+        canEnforce: false,
+        canTeach: false,
+      });
+    }
     this.persistRolePolicyState();
   }
 
@@ -597,6 +624,28 @@ export class BehaviorOS {
     const qualityEngine = this.registry.createQualityEngine(this.currentDNA);
     const result = qualityEngine.evaluate(metrics);
     return { passed: result.passed, details: result };
+  }
+
+  // Quality Engine
+  /** Get the quality engine, creating it on first use. */
+  getQualityEngine(): import('./quality-engine.js').QualityEngine {
+    if (!this.currentDNA) {
+      throw new Error('No DNA loaded. Call loadDNA() first.');
+    }
+    let engine = this.registry.get<import('./quality-engine.js').QualityEngine>('quality');
+    if (!engine) engine = this.registry.createQualityEngine(this.currentDNA);
+    return engine;
+  }
+
+  /** Assess the pragmatic value of a set of code changes. */
+  assessPragmaticValue(
+    changes: Array<{ addedLines: number; removedLines: number }>,
+    metrics: {
+      before: { complexity: number; testCoverage: number; rulesCount: number };
+      after: { complexity: number; testCoverage: number; rulesCount: number };
+    },
+  ) {
+    return this.getQualityEngine().assessPragmaticValue(changes, metrics);
   }
 
   // Gate Pipeline -----------------------------------------------------------
@@ -1035,9 +1084,18 @@ export class BehaviorOS {
   /**
    * Apply evolution proposals to the active DNA. This only happens when
    * `config.evolution.enabled` is true and the caller passes `apply: true`.
-   * When `votes` are supplied the change must first be approved by the decision
-   * engine. Only `warn` rules are ever added, so an applied proposal can never
-   * block an action.
+   *
+   * Proposals are applied per-type:
+   * - `add-warn`: adds a new `warn` rule — no vote required, safe by construction.
+   * - `relax-block`: relaxes a `block` rule to `escalate` or `warn` — requires
+   *   a vote gate with threshold 0.67 (supermajority).
+   * - `add-block`: adds a new `block` rule — requires a vote gate with
+   *   threshold 0.90 (near-unanimous).
+   *
+   * When `votes` are supplied, the decision engine evaluates each vote-gated
+   * proposal independently. Proposals without `requiresVote` are applied
+   * directly; proposals with `requiresVote` are skipped unless the supplied
+   * votes meet or exceed the proposal's `voteThreshold`.
    */
   applyEvolution(
     options: {
@@ -1055,31 +1113,75 @@ export class BehaviorOS {
       return { proposals, applied: [], enabled };
     }
 
-    let decision: Decision | undefined;
+    // When votes are supplied, evaluate them against vote-gated proposals.
+    let voteApproval: Decision | undefined;
     if (options.votes && options.votes.length > 0) {
-      decision = this.decide({
+      voteApproval = this.decide({
         subject: `DNA evolution (${proposals.length} proposal(s))`,
         votes: options.votes,
-        policy: options.policy,
+        policy: options.policy ?? 'majority',
       });
-      if (decision.outcome !== 'approved') {
-        return { proposals, applied: [], enabled, decision };
-      }
     }
 
     const governance = [...this.currentDNA.governance];
     const applied: EvolutionProposal[] = [];
+    const voteSkipped: EvolutionProposal[] = [];
+
     for (const proposal of proposals) {
       if (governance.some((rule) => rule.id === proposal.ruleId)) continue;
       // Guard against the inert rule regression: a proposal whose condition no
-      // real host context key can match would never fire. The learning engine
-      // only emits matchable conditions (context key `tool`); anything without
-      // one is skipped here by construction.
+      // real host context key can match would never fire.
       if (!proposal.condition) continue;
+
+      // Determine the effective action for this proposal
+      let ruleAction: 'warn' | 'escalate' | 'block' = 'warn';
+
+      // Vote-gate check for proposals that require approval.
+      // Only vote-gated proposals are affected; add-warn proposals
+      // (requiresVote: false) are applied directly.
+      if (proposal.requiresVote && (proposal.voteThreshold ?? 0) > 0) {
+        if (voteApproval?.outcome !== 'approved') {
+          voteSkipped.push(proposal);
+          continue;
+        }
+        const totalWeight = voteApproval.approve + voteApproval.reject + voteApproval.abstain;
+        const approvalRatio = totalWeight > 0 ? voteApproval.approve / totalWeight : 0;
+        if (approvalRatio < proposal.voteThreshold) {
+          voteSkipped.push(proposal);
+          continue;
+        }
+      }
+
+      if (proposal.changeType === 'relax-block') {
+        // Relax: find the existing block/escalate rule and soften it
+        const existing = governance.find((r) => r.action === 'block' || r.action === 'escalate');
+        if (existing) {
+          ruleAction = existing.action === 'block' ? 'escalate' : 'warn';
+          existing.action = ruleAction;
+          existing.conditions = [...(existing.conditions ?? []), proposal.condition];
+          existing.description = `${existing.description ?? ''} [relaxed by evolution]`;
+          applied.push(proposal);
+          continue;
+        }
+        // No block/escalate rule to relax — skip
+        continue;
+      }
+
+      if (proposal.changeType === 'add-block') {
+        ruleAction = 'block';
+      }
+
+      // Add the new rule
+      const level =
+        (ruleAction as 'warn' | 'escalate' | 'block') === 'block'
+          ? 'critical'
+          : (ruleAction as 'warn' | 'escalate' | 'block') === 'escalate'
+            ? 'high'
+            : 'medium';
       governance.push({
         id: proposal.ruleId,
-        level: 'medium',
-        action: 'warn',
+        level,
+        action: ruleAction as GovernanceAction,
         conditions: [proposal.condition],
         description: proposal.description,
       });
@@ -1095,15 +1197,21 @@ export class BehaviorOS {
         this.recordLearning({
           type: 'optimization',
           source: 'dna-evolution',
-          content: `Applied ${proposal.kind} rule ${proposal.ruleId} (confidence ${proposal.confidence})`,
-          impact: 'medium',
+          content: `Applied ${proposal.changeType} rule ${proposal.ruleId} (confidence ${proposal.confidence})`,
+          impact: proposal.changeType === 'add-block' ? 'high' : 'medium',
           relatedPattern: proposal.pattern,
           advanceProtocol: false,
         });
       }
     }
 
-    return { proposals, applied, enabled, ...(decision ? { decision } : {}) };
+    return {
+      proposals,
+      applied,
+      enabled,
+      voteSkipped,
+      ...(voteApproval ? { decision: voteApproval } : {}),
+    };
   }
 
   /**
@@ -1588,6 +1696,500 @@ export class BehaviorOS {
       this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
     if (!engine) engine = this.registry.createRolePolicyEngine();
     return engine;
+  }
+
+  // Cognitive Load Engine -----------------------------------------------------
+  /** Get the cognitive load balancer engine. */
+  getCognitiveLoadBalancer(): import('./cognitive-load-engine.js').CognitiveLoadBalancerEngine {
+    let engine =
+      this.registry.get<import('./cognitive-load-engine.js').CognitiveLoadBalancerEngine>(
+        'cognitive-load',
+      );
+    if (!engine) engine = this.registry.createCognitiveLoadBalancerEngine();
+    return engine;
+  }
+
+  // Natural Language Engine ---------------------------------------------------
+  /** Get the natural language rules engine. */
+  getNaturalLanguageEngine(): import('./natural-language-engine.js').NaturalLanguageEngine {
+    let engine =
+      this.registry.get<import('./natural-language-engine.js').NaturalLanguageEngine>(
+        'natural-language',
+      );
+    if (!engine) engine = this.registry.createNaturalLanguageEngine();
+    return engine;
+  }
+
+  // Temporal Governance Engine --------------------------------------------------
+  /**
+   * Get the temporal governance engine for time-based rule evaluation.
+   * Wraps existing governance rules with temporal windows (absolute, recurring, cron).
+   */
+  getTemporalGovernanceEngine(): TemporalGovernanceEngine {
+    let engine = this.registry.get<TemporalGovernanceEngine>('temporal-governance');
+    if (!engine) engine = this.registry.createTemporalGovernanceEngine();
+    return engine;
+  }
+
+  /**
+   * Add a temporal rule to the active configuration. Temporal rules wrap an
+   * existing governance rule and make it active only during specific time windows.
+   */
+  addTemporalRule(
+    rule: Omit<import('./temporal-governance-engine.js').TemporalRule, 'id' | 'createdAt'>,
+  ): { id: string; ok: boolean } {
+    const engine = this.getTemporalGovernanceEngine();
+    const result = engine.addTemporalRule(rule);
+    // Persist if store is available
+    this.persistTemporalState();
+    return result;
+  }
+
+  /** Evaluate all temporal rules against a context at the current time. */
+  evaluateTemporal(
+    context: import('./temporal-governance-engine.js').TemporalEvaluationContext,
+  ): import('./temporal-governance-engine.js').TemporalCheckResult {
+    return this.getTemporalGovernanceEngine().evaluate(context);
+  }
+
+  /** Evaluate a DNA's governance rules with temporal overrides applied. */
+  evaluateDNAWithTemporal(
+    dna: DNA,
+    context: import('./temporal-governance-engine.js').TemporalEvaluationContext,
+  ): {
+    effectiveRules: import('@behavior-os/schemas').GovernanceRule[];
+    temporalOverrides: import('./temporal-governance-engine.js').TemporalRule[];
+  } {
+    return this.getTemporalGovernanceEngine().evaluateDNA(dna, context);
+  }
+
+  /** Write the temporal governance engine state to the store's metadata (no-op unsaved). */
+  private persistTemporalState(): void {
+    if (!this.store) return;
+    const engine = this.registry.get<TemporalGovernanceEngine>('temporal-governance');
+    if (!engine) return;
+    this.store.setMeta('temporal-governance-state', JSON.stringify(engine.getTemporalRules()));
+  }
+
+  // MetaCognition Engine (G-002) ---------------------------------------------
+  /**
+   * Get the metacognition engine for reasoning path reconstruction and bias detection.
+   */
+  getMetaCognition(): import('./metacognition-engine.js').MetaCognitionEngine {
+    let engine =
+      this.registry.get<import('./metacognition-engine.js').MetaCognitionEngine>('metacognition');
+    if (!engine) engine = this.registry.createMetaCognitionEngine();
+    return engine;
+  }
+
+  /**
+   * G-009: Get the anomaly detection engine for behavioral deviation scoring.
+   */
+  getAnomalyDetection(): import('./anomaly-detection-engine.js').AnomalyDetectionEngine {
+    let engine =
+      this.registry.get<import('./anomaly-detection-engine.js').AnomalyDetectionEngine>(
+        'anomaly-detection',
+      );
+    if (!engine) engine = this.registry.createAnomalyDetectionEngine();
+    return engine;
+  }
+
+  /**
+   * G-013: Get the experiential learning engine for the Execute→Observe→Reflect→Abstract→Apply loop.
+   */
+  getExperientialLearning(): import('./experiential-learning-engine.js').ExperientialLearningEngine {
+    let engine =
+      this.registry.get<import('./experiential-learning-engine.js').ExperientialLearningEngine>(
+        'experiential-learning',
+      );
+    if (!engine) engine = this.registry.createExperientialLearningEngine();
+    return engine;
+  }
+
+  /**
+   * G-016: Get the compliance mapper engine for regulatory rule mapping.
+   */
+  getComplianceMapper(): import('./compliance-mapper-engine.js').ComplianceMapperEngine {
+    let engine =
+      this.registry.get<import('./compliance-mapper-engine.js').ComplianceMapperEngine>(
+        'compliance-mapper',
+      );
+    if (!engine) engine = this.registry.createComplianceMapperEngine();
+    return engine;
+  }
+
+  /**
+   * G-004: Get the hybrid evaluation engine for symbolic-neural combined decisions.
+   */
+  getHybridEvaluation(): import('./hybrid-evaluation-engine.js').HybridEvaluationEngine {
+    let engine =
+      this.registry.get<import('./hybrid-evaluation-engine.js').HybridEvaluationEngine>(
+        'hybrid-evaluation',
+      );
+    if (!engine) engine = this.registry.createHybridEvaluationEngine();
+    return engine;
+  }
+
+  /**
+   * G-010: Get the zero-trust identity engine for DID-based agent identity.
+   */
+  getZeroTrustIdentity(): import('./zero-trust-identity-engine.js').ZeroTrustIdentityEngine {
+    let engine =
+      this.registry.get<import('./zero-trust-identity-engine.js').ZeroTrustIdentityEngine>(
+        'zero-trust-identity',
+      );
+    if (!engine) engine = this.registry.createZeroTrustIdentityEngine();
+    return engine;
+  }
+
+  /**
+   * G-011: Get the dynamic policy engine for risk-adaptive enforcement.
+   */
+  getDynamicPolicy(): import('./dynamic-policy-engine.js').DynamicPolicyEngine {
+    let engine =
+      this.registry.get<import('./dynamic-policy-engine.js').DynamicPolicyEngine>('dynamic-policy');
+    if (!engine) engine = this.registry.createDynamicPolicyEngine();
+    return engine;
+  }
+
+  /**
+   * G-017: Get the counterfactual audit engine for forensic what-if analysis.
+   */
+  getCounterfactualAudit(): import('./counterfactual-audit-engine.js').CounterfactualAuditEngine {
+    let engine =
+      this.registry.get<import('./counterfactual-audit-engine.js').CounterfactualAuditEngine>(
+        'counterfactual-audit',
+      );
+    if (!engine) engine = this.registry.createCounterfactualAuditEngine();
+    return engine;
+  }
+
+  /**
+   * G-018: Get the explainable report engine for stakeholder-friendly summaries.
+   */
+  getExplainableReport(): import('./explainable-report-engine.js').ExplainableReportEngine {
+    let engine =
+      this.registry.get<import('./explainable-report-engine.js').ExplainableReportEngine>(
+        'explainable-report',
+      );
+    if (!engine) engine = this.registry.createExplainableReportEngine();
+    return engine;
+  }
+
+  /**
+   * G-005: Get the temporal pattern engine for recurring behavior detection.
+   */
+  getTemporalPattern(): import('./temporal-pattern-engine.js').TemporalPatternEngine {
+    let engine =
+      this.registry.get<import('./temporal-pattern-engine.js').TemporalPatternEngine>(
+        'temporal-pattern',
+      );
+    if (!engine) engine = this.registry.createTemporalPatternEngine();
+    return engine;
+  }
+
+  /**
+   * G-007: Get the cross-domain knowledge transfer engine.
+   */
+  getCrossDomainTransfer(): import('./cross-domain-transfer-engine.js').CrossDomainTransferEngine {
+    let engine =
+      this.registry.get<import('./cross-domain-transfer-engine.js').CrossDomainTransferEngine>(
+        'cross-domain-transfer',
+      );
+    if (!engine) engine = this.registry.createCrossDomainTransferEngine();
+    return engine;
+  }
+
+  /**
+   * R-023: Get the cross-DNA pipeline transfer engine.
+   * Finds transferable pipeline phases between DNA patterns —
+   * e.g., transferring Surgical Team's zero-defect testing phase to DevOps Pipeline.
+   */
+  getCrossDnaPipelineTransfer(): import('./cross-dna-pipeline-transfer-engine.js').CrossDnaPipelineTransferEngine {
+    let engine = this.registry.get<
+      import('./cross-dna-pipeline-transfer-engine.js').CrossDnaPipelineTransferEngine
+    >('cross-dna-pipeline-transfer');
+    if (!engine) engine = this.registry.createCrossDnaPipelineTransferEngine();
+    return engine;
+  }
+
+  /**
+   * F-024: Get the confidence-weighted gate selector.
+   * Uses confidence scores to determine which gates from cross-DNA transfers
+   * should be recommended for adoption in the target pipeline.
+   */
+  getConfidenceWeightedGateSelector(): import('./confidence-weighted-gate-selector.js').ConfidenceWeightedGateSelector {
+    let engine = this.registry.get<
+      import('./confidence-weighted-gate-selector.js').ConfidenceWeightedGateSelector
+    >('confidence-weighted-gate-selector');
+    if (!engine) engine = this.registry.createConfidenceWeightedGateSelector();
+    return engine;
+  }
+
+  /**
+   * G-008: Get the memory consolidation engine.
+   */
+  getMemoryConsolidation(): import('./memory-consolidation-engine.js').MemoryConsolidationEngine {
+    let engine =
+      this.registry.get<import('./memory-consolidation-engine.js').MemoryConsolidationEngine>(
+        'memory-consolidation',
+      );
+    if (!engine) engine = this.registry.createMemoryConsolidationEngine();
+    return engine;
+  }
+
+  /**
+   * G-012: Get the circuit breaker intelligence engine.
+   */
+  getCircuitBreakerIntelligence(): import('./circuit-breaker-intelligence.js').CircuitBreakerIntelligence {
+    let engine = this.registry.get<
+      import('./circuit-breaker-intelligence.js').CircuitBreakerIntelligence
+    >('circuit-breaker-intelligence');
+    if (!engine) engine = this.registry.createCircuitBreakerIntelligence();
+    return engine;
+  }
+
+  /**
+   * G-014: Get the value alignment engine.
+   */
+  getValueAlignment(): import('./value-alignment-engine.js').ValueAlignmentEngine {
+    let engine =
+      this.registry.get<import('./value-alignment-engine.js').ValueAlignmentEngine>(
+        'value-alignment',
+      );
+    if (!engine) engine = this.registry.createValueAlignmentEngine();
+    return engine;
+  }
+
+  /**
+   * G-015: Get the collective intelligence engine.
+   */
+  getCollectiveIntelligence(): import('./collective-intelligence-engine.js').CollectiveIntelligenceEngine {
+    let engine =
+      this.registry.get<import('./collective-intelligence-engine.js').CollectiveIntelligenceEngine>(
+        'collective-intelligence',
+      );
+    if (!engine) engine = this.registry.createCollectiveIntelligenceEngine();
+    return engine;
+  }
+
+  /**
+   * G-019: Get the external system adapter engine.
+   */
+  getExternalSystemAdapter(): import('./external-adapter-engine.js').ExternalSystemAdapter {
+    let engine =
+      this.registry.get<import('./external-adapter-engine.js').ExternalSystemAdapter>(
+        'external-adapter',
+      );
+    if (!engine) engine = this.registry.createExternalSystemAdapter();
+    return engine;
+  }
+
+  /**
+   * G-020: Get the governance-as-code engine.
+   */
+  getGovernanceAsCode(): import('./governance-as-code-engine.js').GovernanceAsCodeEngine {
+    let engine =
+      this.registry.get<import('./governance-as-code-engine.js').GovernanceAsCodeEngine>(
+        'governance-as-code',
+      );
+    if (!engine) engine = this.registry.createGovernanceAsCodeEngine();
+    return engine;
+  }
+
+  /**
+   * G-021: Get the DNA-adaptive pipeline planner engine.
+   * Maps DNA + project context to a construction pipeline with
+   * phases, gates, agents, and auto-loadable skills.
+   */
+  getPipelinePlanner(): import('./pipeline-planner.js').PipelinePlannerEngine {
+    let engine =
+      this.registry.get<import('./pipeline-planner.js').PipelinePlannerEngine>('pipeline-planner');
+    if (!engine) engine = this.registry.createPipelinePlannerEngine();
+    return engine;
+  }
+
+  /**
+   * R-022: Get the pipeline recovery engine (Auto-Recovery / Self-Healing).
+   * When a phase gate fails, this engine generates fix proposals,
+   * applies high-confidence fixes automatically, and escalates only
+   * when recovery is not possible — enabling full autonomous construction.
+   */
+  getPipelineRecovery(): import('./pipeline-recovery-engine.js').PipelineRecoveryEngine {
+    let engine =
+      this.registry.get<import('./pipeline-recovery-engine.js').PipelineRecoveryEngine>(
+        'pipeline-recovery',
+      );
+    if (!engine) engine = this.registry.createPipelineRecoveryEngine();
+    return engine;
+  }
+
+  /**
+   * Create a meta-decision from a governance evaluation, including reasoning path,
+   * confidence scoring, bias detection, and self-critique.
+   */
+  createMetaDecision(
+    decision: import('@behavior-os/schemas').GovernanceDecision,
+    options: {
+      context?: Record<string, unknown>;
+      agentId?: string;
+      dnaPattern?: string;
+      additionalEvidence?: string[];
+    } = {},
+  ): import('./metacognition-engine.js').MetaDecision {
+    return this.getMetaCognition().createMetaDecision(decision, {
+      context: options.context ?? {},
+      agentId: options.agentId ?? this.resolveAgentIdentity().agentId ?? 'unknown',
+      ...options,
+    });
+  }
+
+  /**
+   * Get statistics about the meta-cognition engine.
+   */
+  getMetaCognitionStats() {
+    return this.getMetaCognition().getStats();
+  }
+
+  // Knowledge Graph Engine (G-001) -------------------------------------------
+  /**
+   * Get the knowledge graph engine for structured relationship queries and inference.
+   */
+  getKnowledgeGraph(): import('./knowledge-graph-engine.js').KnowledgeGraphEngine {
+    let engine =
+      this.registry.get<import('./knowledge-graph-engine.js').KnowledgeGraphEngine>(
+        'knowledge-graph',
+      );
+    if (!engine) engine = this.registry.createKnowledgeGraphEngine();
+    return engine;
+  }
+
+  /**
+   * Add a node to the knowledge graph.
+   */
+  addKnowledgeNode(node: import('@behavior-os/schemas').KnowledgeGraphNode): void {
+    this.getKnowledgeGraph().addNode(node);
+  }
+
+  /**
+   * Add an edge to the knowledge graph.
+   */
+  addKnowledgeEdge(edge: import('@behavior-os/schemas').KnowledgeGraphEdge): void {
+    this.getKnowledgeGraph().addEdge(edge);
+  }
+
+  /**
+   * Query the knowledge graph with traversal and filtering.
+   */
+  queryKnowledgeGraph(
+    query: import('@behavior-os/schemas').KnowledgeQuery,
+  ): import('@behavior-os/schemas').KnowledgeResult {
+    return this.getKnowledgeGraph().query(query);
+  }
+
+  /**
+   * Populate the knowledge graph from existing Behavior-OS state.
+   * This is called automatically on hydration to rebuild the graph.
+   */
+  populateKnowledgeGraph(options: {
+    agents?: Array<{ id: string; name: string; type: string; dnaPattern?: string }>;
+    missions?: Array<{
+      id: string;
+      title: string;
+      type: string;
+      status: string;
+      dnaPattern?: string;
+    }>;
+    rules?: Array<{ id: string; level: string; action: string }>;
+    learnings?: Array<{ id: string; type: string; source: string; content: string }>;
+    decisions?: Array<{ id: string; subject: string; outcome: string }>;
+  }): void {
+    this.getKnowledgeGraph().populateFromState(options);
+  }
+
+  /**
+   * Get statistics about the knowledge graph.
+   */
+  getKnowledgeGraphStats() {
+    return this.getKnowledgeGraph().getStats();
+  }
+
+  // Persistent Memory Engine (G-003) -------------------------------------------
+  /**
+   * Get the persistent memory engine for durable memory management.
+   * Integrates the knowledge graph and metacognition engines with SQLite storage.
+   */
+  getPersistentMemory(): import('./persistent-memory-engine.js').PersistentMemoryEngine {
+    let engine =
+      this.registry.get<import('./persistent-memory-engine.js').PersistentMemoryEngine>(
+        'persistent-memory',
+      );
+    if (!engine) {
+      engine = this.registry.createPersistentMemoryEngine();
+      // Wire up dependencies
+      engine.setStore(this.store ?? undefined);
+      engine.setKnowledgeGraph(this.getKnowledgeGraph());
+    }
+    return engine;
+  }
+
+  /**
+   * Save a memory (knowledge graph node) to persistent storage.
+   */
+  saveMemory(
+    node: import('@behavior-os/schemas').KnowledgeGraphNode,
+    options?: { expiresAt?: string; relevanceScore?: number },
+  ): void {
+    this.getPersistentMemory().saveMemory(node, options);
+  }
+
+  /**
+   * Save a meta-decision to persistent storage.
+   */
+  saveMetaDecision(decision: import('./metacognition-engine.js').MetaDecision): void {
+    this.getPersistentMemory().saveMetaDecision(decision);
+  }
+
+  /**
+   * Recall a memory by node ID.
+   */
+  recallMemory(nodeId: string): import('@behavior-os/schemas').KnowledgeGraphNode | null {
+    return this.getPersistentMemory().recallMemory(nodeId);
+  }
+
+  /**
+   * Recall memories relevant to a context (graph traversal with scoring).
+   */
+  recallRelevant(
+    startNodeId: string,
+    options: { maxDepth?: number; minScore?: number; nodeTypes?: string[] } = {},
+  ): import('./persistent-memory-engine.js').MemoryRecallResult[] {
+    return this.getPersistentMemory().recallRelevant(startNodeId, options);
+  }
+
+  /**
+   * Reconstruct agent context from past missions, decisions, and learnings.
+   */
+  reconstructContext(agentId: string): {
+    missions: string[];
+    decisions: import('./metacognition-engine.js').MetaDecision[];
+    learnings: string[];
+  } {
+    return this.getPersistentMemory().reconstructContext(agentId);
+  }
+
+  /**
+   * Consolidate in-memory knowledge graph state to persistent storage.
+   */
+  consolidateMemory(): { savedNodes: number; savedEdges: number } {
+    return this.getPersistentMemory().consolidate();
+  }
+
+  /**
+   * Get statistics about persistent memory usage.
+   */
+  getPersistentMemoryStats() {
+    return this.getPersistentMemory().getStats();
   }
 
   /**

@@ -100,7 +100,9 @@ describe('LearningEngine confidence', () => {
     }
     // 3 occurrences, critical impact -> 0.6 * 0.6 + 1 * 0.4 = 0.76
     expect(engine.proposeEvolution('dna', 0.8)).toHaveLength(0);
-    expect(engine.proposeEvolution('dna', 0.7)).toHaveLength(1);
+    // At 0.7 threshold: add-warn (0.76 >= 0.7) + relax-block (0.76 >= 0.75, hasCritical) = 2
+    // add-block is NOT proposed (0.76 < 0.9)
+    expect(engine.proposeEvolution('dna', 0.7)).toHaveLength(2);
   });
 });
 
@@ -162,17 +164,21 @@ describe('BehaviorOS DNA evolution', () => {
     expect(learnings.some((l) => l.source === 'dna-evolution')).toBe(true);
   });
 
-  it('requires approval when votes are supplied', async () => {
+  it('applies non-vote-gated proposals regardless of vote outcome', async () => {
+    // bosWithFailures uses impact: 'high' -> only add-warn proposal (requiresVote: false)
     const bos = await bosWithFailures({ evolution: { enabled: true } });
 
+    // Rejected vote — add-warn (no vote required) is still applied
     const rejected = bos.applyEvolution({
       apply: true,
       votes: [{ voterId: 'a', choice: 'reject' }],
     });
     expect(rejected.decision?.outcome).toBe('rejected');
-    expect(rejected.applied).toEqual([]);
-    expect(bos.getDNA()?.governance).toHaveLength(0);
+    expect(rejected.applied).toHaveLength(1); // add-warn applied (doesn't require vote)
+    expect(bos.getDNA()?.governance).toHaveLength(1);
 
+    // Second call: rule already applied, so no new proposals
+    await bos.loadDNA(makeDNA());
     const approved = bos.applyEvolution({
       apply: true,
       votes: [{ voterId: 'a', choice: 'approve' }],
@@ -186,6 +192,175 @@ describe('BehaviorOS DNA evolution', () => {
     expect(bos.applyEvolution({ apply: true }).applied).toHaveLength(1);
     expect(bos.applyEvolution({ apply: true }).applied).toHaveLength(0);
     expect(bos.getDNA()?.governance).toHaveLength(1);
+  });
+
+  it('proposes add-warn, add-block, and relax-block for critical failures', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true } });
+    await bos.loadDNA(makeDNA());
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'failure',
+        source: 'tool:write',
+        content: `critical fail ${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+
+    const proposals = bos.proposeEvolution();
+    // 5 critical events: confidence = min(1, 5/5)*0.6 + 1.0*0.4 = 1.0
+    expect(proposals).toHaveLength(3);
+    expect(proposals.map((p) => p.changeType).sort()).toEqual([
+      'add-block',
+      'add-warn',
+      'relax-block',
+    ]);
+  });
+
+  it('does not apply add-block without an approving vote', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true } });
+    await bos.loadDNA(makeDNA());
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'failure',
+        source: 'tool:shell',
+        content: `critical ${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+
+    // Without votes, add-block and relax-block should be skipped
+    const result = bos.applyEvolution({ apply: true });
+    expect(result.applied).toHaveLength(1); // only the add-warn proposal
+    expect(result.voteSkipped).toHaveLength(2); // add-block and relax-block skipped
+    const actions = bos.getDNA()?.governance.map((r) => r.action);
+    expect(actions).toEqual(['warn']);
+  });
+
+  it('applies vote-gated proposals only when threshold is met', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true } });
+
+    function freshDNAToRelax(): DNA {
+      return {
+        ...makeDNA(),
+        governance: [
+          {
+            id: 'existing-block',
+            level: 'critical',
+            action: 'block',
+            conditions: [{ type: 'tool', value: 'shell' }],
+            description: 'Existing block rule',
+          },
+        ],
+      };
+    }
+    await bos.loadDNA(freshDNAToRelax());
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'failure',
+        source: 'tool:shell',
+        content: `critical ${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+
+    // No votes supplied — add-warn applied, vote-gated proposals skipped
+    const noVotes = bos.applyEvolution({ apply: true });
+    expect(noVotes.applied).toHaveLength(1); // add-warn only
+    expect(noVotes.voteSkipped).toHaveLength(2); // add-block + relax-block
+
+    // Rejected vote — add-warn still applied, vote-gated skipped
+    await bos.loadDNA(freshDNAToRelax());
+    const rejected = bos.applyEvolution({
+      apply: true,
+      votes: [
+        { voterId: 'a', choice: 'reject' },
+        { voterId: 'b', choice: 'reject' },
+      ],
+    });
+    expect(rejected.applied).toHaveLength(1); // add-warn
+    expect(rejected.voteSkipped).toHaveLength(2);
+
+    // Simple majority: 60% approval (3/5) — below both thresholds
+    await bos.loadDNA(freshDNAToRelax());
+    const lowApproval = bos.applyEvolution({
+      apply: true,
+      votes: [
+        { voterId: 'a', choice: 'approve' },
+        { voterId: 'b', choice: 'approve' },
+        { voterId: 'c', choice: 'approve' },
+        { voterId: 'd', choice: 'reject' },
+        { voterId: 'e', choice: 'reject' },
+      ],
+      policy: 'majority',
+    });
+    expect(lowApproval.applied).toHaveLength(1); // add-warn only
+    expect(lowApproval.voteSkipped).toHaveLength(2); // 0.60 < 0.67 and < 0.90
+
+    // Supermajority with 75% approval (3/4) — above relax-block threshold (0.67), below add-block (0.90)
+    await bos.loadDNA(freshDNAToRelax());
+    const supermajority = bos.applyEvolution({
+      apply: true,
+      votes: [
+        { voterId: 'a', choice: 'approve' },
+        { voterId: 'b', choice: 'approve' },
+        { voterId: 'c', choice: 'approve' },
+        { voterId: 'd', choice: 'reject' },
+      ],
+      policy: 'supermajority',
+    });
+    expect(supermajority.applied).toHaveLength(2); // add-warn + relax-block
+    expect(supermajority.voteSkipped).toHaveLength(1); // add-block (0.75 < 0.90)
+
+    // Near-unanimous 90% approval (9/10) — above both thresholds
+    await bos.loadDNA(freshDNAToRelax());
+    const nearUnanimous = bos.applyEvolution({
+      apply: true,
+      votes: [
+        { voterId: 'a', choice: 'approve' },
+        { voterId: 'b', choice: 'approve' },
+        { voterId: 'c', choice: 'approve' },
+        { voterId: 'd', choice: 'approve' },
+        { voterId: 'e', choice: 'approve' },
+        { voterId: 'f', choice: 'approve' },
+        { voterId: 'g', choice: 'approve' },
+        { voterId: 'h', choice: 'approve' },
+        { voterId: 'i', choice: 'approve' },
+        { voterId: 'j', choice: 'reject' },
+      ],
+      policy: 'supermajority',
+    });
+    expect(nearUnanimous.applied).toHaveLength(3); // all three
+    expect(nearUnanimous.voteSkipped).toHaveLength(0);
+    const actions = bos
+      .getDNA()
+      ?.governance.map((r) => r.action)
+      .sort();
+    expect(actions).toEqual(['block', 'escalate', 'warn']);
+  });
+
+  it('tracks voteSkipped proposals in the result', async () => {
+    const bos = new BehaviorOS({ evolution: { enabled: true } });
+    await bos.loadDNA(makeDNA());
+    for (let i = 0; i < 5; i++) {
+      bos.recordLearning({
+        type: 'failure',
+        source: 'tool:shell',
+        content: `critical ${i}`,
+        impact: 'critical',
+        advanceProtocol: false,
+      });
+    }
+
+    const result = bos.applyEvolution({ apply: true });
+    expect(result.voteSkipped).toBeDefined();
+    expect(result.voteSkipped).toHaveLength(2);
+    expect(result.voteSkipped?.map((p) => p.changeType).sort()).toEqual([
+      'add-block',
+      'relax-block',
+    ]);
   });
 });
 

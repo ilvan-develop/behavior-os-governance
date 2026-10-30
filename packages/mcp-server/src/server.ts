@@ -5,6 +5,7 @@ import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core'
 import type {
   DecisionPolicy,
   DNA,
+  GovernanceDecision,
   LearningImpact,
   LearningType,
   MissionPriority,
@@ -856,6 +857,66 @@ server.registerTool(
 );
 
 // ============================================================
+// PRAGMATIC VALUE ASSESSMENT TOOLS (Feature 10: Validação Pragmática)
+// ============================================================
+
+server.registerTool(
+  'bos_assess_pragmatic_value',
+  {
+    description:
+      'Assess the pragmatic value of code changes: net lines removed, complexity change, test coverage change',
+    inputSchema: z.object({
+      changes: z
+        .array(
+          z.object({
+            addedLines: z.number().min(0).describe('Lines added'),
+            removedLines: z.number().min(0).describe('Lines removed'),
+          }),
+        )
+        .describe('Code changes to assess'),
+      metrics: z
+        .object({
+          before: z
+            .object({
+              complexity: z.number().describe('Cyclomatic complexity before changes'),
+              testCoverage: z.number().describe('Test coverage percentage before'),
+              rulesCount: z.number().describe('Business rules count before'),
+            })
+            .passthrough(),
+          after: z
+            .object({
+              complexity: z.number().describe('Cyclomatic complexity after changes'),
+              testCoverage: z.number().describe('Test coverage percentage after'),
+              rulesCount: z.number().describe('Business rules count after'),
+            })
+            .passthrough(),
+        })
+        .describe('Metrics before and after the changes'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Assess Pragmatic Value' },
+  },
+  async ({ changes, metrics }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.assessPragmaticValue(changes, metrics);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // PIPELINE TOOLS
 // ============================================================
 
@@ -1633,6 +1694,39 @@ server.registerTool(
       }
       const drift = getBehaviorOS().compareDNADrift(a, b);
       return { content: [{ type: 'text', text: JSON.stringify(drift, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// PREDICTION TOOLS
+// ============================================================
+
+server.registerTool(
+  'bos_predict_governance',
+  {
+    description:
+      'Predict likely future governance events from learning history. Returns confidence-scored predictions about governance-block, mission-failure, quality-fall, drift-significant, or pattern-repeated events.',
+    inputSchema: z.object({
+      limit: z.number().optional().describe('Max predictions to return (default 5)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Predict Governance Events' },
+  },
+  async ({ limit }: { limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const predictions = bos.predict(limit);
+      return { content: [{ type: 'text', text: JSON.stringify(predictions, null, 2) }] };
     } catch (error) {
       return {
         content: [
@@ -2864,9 +2958,906 @@ server.registerTool(
 );
 
 // ============================================================
-// START SERVER
+// COGNITIVE LOAD BALANCER TOOLS (Feature 5: Balanceamento Cognitivo)
 // ============================================================
 
+server.registerTool(
+  'bos_register_agent_capacity',
+  {
+    description: 'Register an agent with cognitive capacity and skills for load balancing',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      maxCapacity: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.8)
+        .describe('Maximum capacity before overload (0-1)'),
+      skills: z.array(z.string()).default([]).describe('Agent skills'),
+      completionRate: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.8)
+        .describe('Historical task completion rate'),
+      fatigue: z.number().min(0).max(1).default(0).describe('Current fatigue factor (0-1)'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Register Agent Capacity' },
+  },
+  async ({ agentId, maxCapacity, skills, completionRate, fatigue }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.getCognitiveLoadBalancer().registerAgent(agentId, {
+        maxCapacity,
+        skills,
+        completionRate,
+        fatigue,
+      });
+      return {
+        content: [{ type: 'text', text: `✅ Agent "${agentId}" registered for load balancing` }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_assign_task',
+  {
+    description: 'Assign a task to an agent, tracking cognitive load',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      taskId: z.string().describe('Task ID'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Assign Task' },
+  },
+  async ({ agentId, taskId }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.getCognitiveLoadBalancer().assignTask(agentId, taskId);
+      return {
+        content: [{ type: 'text', text: `✅ Task "${taskId}" assigned to agent "${agentId}"` }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_complete_task',
+  {
+    description: 'Mark a task as completed, reducing the agent cognitive load',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      taskId: z.string().describe('Task ID'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Complete Task' },
+  },
+  async ({ agentId, taskId }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.getCognitiveLoadBalancer().completeTask(agentId, taskId);
+      return {
+        content: [{ type: 'text', text: `✅ Task "${taskId}" completed for agent "${agentId}"` }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_analyze_workload',
+  {
+    description: 'Analyze workload distribution and get balancing recommendations',
+    inputSchema: z
+      .object({
+        maxLoadThreshold: z.number().optional().describe('Max load threshold (default 0.75)'),
+        minLoadThreshold: z.number().optional().describe('Min load threshold (default 0.25)'),
+        considerSkills: z.boolean().optional().describe('Consider skills in analysis'),
+        considerFatigue: z.boolean().optional().describe('Consider fatigue in analysis'),
+      })
+      .passthrough()
+      .optional(),
+    annotations: { readOnlyHint: true, title: 'Analyze Workload' },
+  },
+  async (params?: {
+    maxLoadThreshold?: number;
+    minLoadThreshold?: number;
+    considerSkills?: boolean;
+    considerFatigue?: boolean;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const summary = bos.getCognitiveLoadBalancer().analyzeWorkload({
+        maxLoadThreshold: params?.maxLoadThreshold ?? 0.75,
+        minLoadThreshold: params?.minLoadThreshold ?? 0.25,
+        considerSkills: params?.considerSkills ?? true,
+        considerFatigue: params?.considerFatigue ?? true,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_recommend_assignment',
+  {
+    description: 'Recommend the best agent for a task based on load and skills',
+    inputSchema: z.object({
+      taskId: z.string().describe('Task ID'),
+      requiredSkills: z.array(z.string()).describe('Required skills for the task'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Recommend Task Assignment' },
+  },
+  async ({ taskId, requiredSkills }) => {
+    try {
+      const bos = getBehaviorOS();
+      const recommendation = bos
+        .getCognitiveLoadBalancer()
+        .recommendAssignment(taskId, requiredSkills);
+      return { content: [{ type: 'text', text: JSON.stringify(recommendation, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// NATURAL LANGUAGE RULES TOOLS (Feature 6: Regras em Língua Natural)
+// ============================================================
+
+server.registerTool(
+  'bos_parse_rule',
+  {
+    description: 'Parse a natural language governance rule into structured form',
+    inputSchema: z.object({
+      rule: z
+        .string()
+        .describe('Natural language rule, e.g. "Block production deploys when tests are failing"'),
+      ruleId: z.string().optional().describe('Optional custom rule ID'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Parse Natural Language Rule' },
+  },
+  async ({ rule, ruleId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.getNaturalLanguageEngine().parseRule(rule, ruleId ? { ruleId } : {});
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_parse_rules_batch',
+  {
+    description: 'Parse multiple natural language rules in a single call',
+    inputSchema: z.object({
+      rules: z.array(z.string()).describe('Array of natural language rules to parse'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Parse Rules Batch' },
+  },
+  async ({ rules }) => {
+    try {
+      const bos = getBehaviorOS();
+      const results = bos.getNaturalLanguageEngine().parseRulesBatch(rules);
+      return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_apply_natural_language_rules',
+  {
+    description: 'Parse and apply natural language rules to a DNA pattern',
+    inputSchema: z.object({
+      dnaName: z.string().describe('DNA pattern name to modify'),
+      rules: z.array(z.string()).describe('Natural language rules to apply'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Apply NL Rules to DNA' },
+  },
+  async ({ dnaName, rules }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const dna = dnas[dnaName.toLowerCase()];
+      if (!dna) {
+        return {
+          content: [{ type: 'text', text: `DNA pattern "${dnaName}" not found` }],
+          isError: true,
+        };
+      }
+      const result = bos.getNaturalLanguageEngine().applyRules(dna, rules);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ applied: result.applied, errors: result.errors }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// TEMPORAL GOVERNANCE TOOLS (Feature 7: Governança Temporal)
+// ============================================================
+
+server.registerTool(
+  'bos_add_temporal_rule',
+  {
+    description:
+      'Add a time-based governance rule that is only active during specific time windows (absolute, recurring/cron). Temporal rules wrap existing DNA governance rules with temporal constraints.',
+    inputSchema: z.object({
+      baseRuleId: z.string().describe('ID of the existing DNA governance rule to wrap'),
+      rule: z.object({
+        id: z.string().describe('ID of the temporal rule'),
+        level: z.enum(['critical', 'high', 'medium', 'low']).describe('Severity level'),
+        action: z
+          .enum(['block', 'escalate', 'warn', 'log', 'transform'])
+          .describe('Action to take when active'),
+        conditions: z
+          .array(z.object({ type: z.string(), value: z.unknown() }))
+          .describe('Rule conditions'),
+        description: z.string().optional().describe('Human-readable description'),
+      }),
+      scheduleType: z.enum(['absolute', 'recurring', 'cron']).describe('Schedule type'),
+      startTime: z.string().optional().describe('ISO timestamp (for absolute)'),
+      endTime: z.string().optional().describe('ISO timestamp (for absolute)'),
+      schedule: z.string().optional().describe('Cron expression (e.g. "0 9-17 * * 1-5")'),
+      reason: z.string().describe('Why this temporal rule exists'),
+      authorizedBy: z.string().describe('Who authorized it'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Add Temporal Rule' },
+  },
+  async ({
+    baseRuleId,
+    rule,
+    scheduleType,
+    startTime,
+    endTime,
+    schedule,
+    reason,
+    authorizedBy,
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.addTemporalRule({
+        baseRuleId,
+        rule,
+        scheduleType,
+        startTime,
+        endTime,
+        schedule,
+        reason,
+        authorizedBy,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_check_temporal',
+  {
+    description:
+      'Evaluate temporal rules against a context to see which are active and which recommendations apply.',
+    inputSchema: z.object({
+      action: z.string().describe('The action being evaluated'),
+      agentId: z.string().describe('Agent ID'),
+      context: z.record(z.string(), z.unknown()).optional().describe('Context bag'),
+      missionId: z.string().optional().describe('Related mission ID'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Check Temporal Rules' },
+  },
+  async ({ action, agentId, context, missionId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.evaluateTemporal({
+        action,
+        agentId,
+        context: context ?? {},
+        ...(missionId ? { missionId } : {}),
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_evaluate_dna_temporal',
+  {
+    description:
+      'Evaluate a DNA pattern with temporal overrides applied, returning the effective ruleset.',
+    inputSchema: z.object({
+      dnaName: z.string().describe('DNA pattern name (e.g. "lean-factory")'),
+      action: z.string().describe('The action being evaluated'),
+      agentId: z.string().describe('Agent ID'),
+      context: z.record(z.string(), z.unknown()).optional().describe('Context bag'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Evaluate DNA with Temporal Rules' },
+  },
+  async ({ dnaName, action, agentId, context }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const dna = dnas[dnaName.toLowerCase()];
+      if (!dna) {
+        return {
+          content: [{ type: 'text', text: `DNA pattern "${dnaName}" not found` }],
+          isError: true,
+        };
+      }
+      const result = bos.evaluateDNAWithTemporal(dna, {
+        action,
+        agentId,
+        context: context ?? {},
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// KNOWLEDGE GRAPH TOOLS (G-001)
+// ============================================================
+
+server.registerTool(
+  'bos_add_knowledge_node',
+  {
+    description:
+      'Add a node to the knowledge graph (agent, mission, rule, learning, decision, etc.)',
+    inputSchema: z.object({
+      id: z.string().describe('Unique node ID'),
+      type: z
+        .enum([
+          'agent',
+          'mission',
+          'rule',
+          'learning',
+          'decision',
+          'pattern',
+          'dna',
+          'audit',
+          'task',
+        ])
+        .describe('Node type'),
+      label: z.string().describe('Human-readable label'),
+      properties: z.record(z.string(), z.unknown()).optional().describe('Structured properties'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Add Knowledge Node' },
+  },
+  async ({ id, type, label, properties }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.addKnowledgeNode({
+        id,
+        type,
+        label,
+        properties: properties ?? {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text', text: `Node "${id}" added to knowledge graph` }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_add_knowledge_edge',
+  {
+    description: 'Add an edge to the knowledge graph representing a relationship between nodes',
+    inputSchema: z.object({
+      id: z.string().describe('Unique edge ID'),
+      from: z.string().describe('Source node ID'),
+      to: z.string().describe('Target node ID'),
+      type: z
+        .enum([
+          'GOVERNED_BY',
+          'PART_OF',
+          'CAUSES',
+          'RELATED_TO',
+          'TRIGGERED',
+          'EVIDENCE_FOR',
+          'TRANSFORMS',
+          'SIMILAR_TO',
+          'OBSERVED_IN',
+          'IMPLEMENTS',
+        ])
+        .describe('Relationship type'),
+      weight: z.number().min(0).max(1).default(1).optional().describe('Edge weight (0-1)'),
+      properties: z.record(z.string(), z.unknown()).optional().describe('Edge properties'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Add Knowledge Edge' },
+  },
+  async ({ id, from, to, type, weight, properties }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.addKnowledgeEdge({
+        id,
+        from,
+        to,
+        type,
+        weight: weight ?? 1,
+        properties: properties ?? undefined,
+        createdAt: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text', text: `Edge "${id}" added: ${from} --[${type}]--> ${to}` }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_query_knowledge_graph',
+  {
+    description: 'Query the knowledge graph with traversal and filtering',
+    inputSchema: z.object({
+      startNode: z.string().optional().describe('Starting node ID or "*" for all'),
+      nodeType: z
+        .enum([
+          'agent',
+          'mission',
+          'rule',
+          'learning',
+          'decision',
+          'pattern',
+          'dna',
+          'audit',
+          'task',
+          'any',
+        ])
+        .optional()
+        .describe('Filter by node type'),
+      edgeType: z
+        .enum([
+          'GOVERNED_BY',
+          'PART_OF',
+          'CAUSES',
+          'RELATED_TO',
+          'TRIGGERED',
+          'EVIDENCE_FOR',
+          'TRANSFORMS',
+          'SIMILAR_TO',
+          'OBSERVED_IN',
+          'IMPLEMENTS',
+          'any',
+        ])
+        .optional()
+        .describe('Filter by edge type'),
+      depth: z.number().min(1).max(10).default(3).optional().describe('Maximum traversal depth'),
+      properties: z.record(z.string(), z.unknown()).optional().describe('Property filters'),
+      sortBy: z.enum(['createdAt', 'weight', 'label']).optional().describe('Sort results'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Query Knowledge Graph' },
+  },
+  async ({ startNode, nodeType, edgeType, depth, properties, sortBy }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.queryKnowledgeGraph({
+        startNode: startNode === '*' ? undefined : startNode,
+        nodeType: nodeType ?? 'any',
+        edgeType: edgeType ?? 'any',
+        depth: depth ?? 3,
+        properties: properties ?? undefined,
+        sortBy: sortBy ?? 'createdAt',
+        sortOrder: 'desc',
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_get_knowledge_graph_stats',
+  {
+    description:
+      'Get statistics about the knowledge graph (node/edge counts, types, average degree)',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'Knowledge Graph Stats' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const stats = bos.getKnowledgeGraphStats();
+      return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// META-COGNITION TOOLS (G-002)
+// ============================================================
+
+server.registerTool(
+  'bos_create_meta_decision',
+  {
+    description:
+      'Create a meta-decision from a governance evaluation with reasoning path, confidence, and bias detection',
+    inputSchema: z.object({
+      decision: z.record(z.string(), z.unknown()).describe('Governance decision'),
+      context: z.record(z.string(), z.unknown()).optional().describe('Context bag'),
+      agentId: z.string().optional().describe('Agent ID'),
+      dnaPattern: z.string().optional().describe('DNA pattern name'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Create Meta Decision' },
+  },
+  async ({ decision, context, agentId, dnaPattern }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.createMetaDecision(decision as GovernanceDecision, {
+        context: context ?? {},
+        agentId: agentId ?? bos.resolveAgentIdentity().agentId ?? 'unknown',
+        dnaPattern,
+      });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_get_meta_cognition_stats',
+  {
+    description: 'Get statistics about the meta-cognition engine',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'Meta Cognition Stats' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const stats = bos.getMetaCognitionStats();
+      return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// PERSISTENT MEMORY TOOLS (G-003)
+// ============================================================
+
+server.registerTool(
+  'bos_save_memory',
+  {
+    description: 'Save a memory (knowledge graph node) to persistent storage',
+    inputSchema: z.object({
+      id: z.string().describe('Unique node ID'),
+      type: z
+        .enum([
+          'agent',
+          'mission',
+          'rule',
+          'learning',
+          'decision',
+          'pattern',
+          'dna',
+          'audit',
+          'task',
+        ])
+        .describe('Node type'),
+      label: z.string().describe('Human-readable label'),
+      properties: z.record(z.string(), z.unknown()).optional().describe('Structured properties'),
+      relevanceScore: z.number().min(0).max(1).optional().describe('Relevance score (0-1)'),
+      expiresAt: z.string().optional().describe('Optional expiration timestamp (ISO)'),
+    }),
+    annotations: { readOnlyHint: false, title: 'Save Memory' },
+  },
+  async ({ id, type, label, properties, relevanceScore, expiresAt }) => {
+    try {
+      const bos = getBehaviorOS();
+      bos.saveMemory(
+        {
+          id,
+          type,
+          label,
+          properties: properties ?? {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        { relevanceScore, expiresAt },
+      );
+      return { content: [{ type: 'text', text: `Memory "${id}" saved to persistent storage` }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_recall_memory',
+  {
+    description: 'Recall a memory by node ID from persistent storage',
+    inputSchema: z.object({
+      nodeId: z.string().describe('Node ID to recall'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Recall Memory' },
+  },
+  async ({ nodeId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.recallMemory(nodeId);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_recall_relevant',
+  {
+    description: 'Recall memories relevant to a context via graph traversal',
+    inputSchema: z.object({
+      startNodeId: z.string().describe('Starting node ID for traversal'),
+      maxDepth: z.number().min(1).max(10).default(3).optional().describe('Maximum traversal depth'),
+      minScore: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.3)
+        .optional()
+        .describe('Minimum relevance score'),
+      nodeTypes: z.array(z.string()).optional().describe('Filter by node types'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Recall Relevant Memories' },
+  },
+  async ({ startNodeId, maxDepth, minScore, nodeTypes }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.recallRelevant(startNodeId, { maxDepth, minScore, nodeTypes });
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_reconstruct_context',
+  {
+    description: 'Reconstruct agent context from past missions, decisions, and learnings',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID to reconstruct context for'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Reconstruct Agent Context' },
+  },
+  async ({ agentId }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.reconstructContext(agentId);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_consolidate_memory',
+  {
+    description: 'Consolidate in-memory knowledge graph state to persistent storage',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: false, title: 'Consolidate Memory' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.consolidateMemory();
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
+// START SERVER
+// ============================================================
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

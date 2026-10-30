@@ -17,6 +17,8 @@ import type {
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
+import { DoomLoopGuard, evaluateDenyList, QuotaBreaker } from './company-guard.js';
+import { subscribeToGovernanceEvents } from './event-monitor.js';
 import {
   buildGovernanceContext,
   buildGovernedPreamble,
@@ -40,6 +42,7 @@ import {
   verifyGovernanceLog,
   verifyGovernanceLogFile,
 } from './governance-log.js';
+import { LoopManager, type LoopTaskInput } from './loop-manager.js';
 import { NotificationCoalescer, type NotificationIdentity } from './notifications.js';
 import {
   detectOvertake,
@@ -51,9 +54,14 @@ import {
 
 // Global state for this plugin instance
 let behaviorOS: BehaviorOS | null = null;
+// Autonomous-mode guard instances (created only when BEHAVIOROS_AUTONOMOUS=true)
+let quotaBreaker: QuotaBreaker | undefined;
+let doomLoopGuard: DoomLoopGuard | undefined;
 let loadedDnaPatterns: Map<string, DNA> = new Map();
 /** Highest snapshot revision this instance has written or adopted. */
 let storageRevision = 0;
+/** Manages autonomous control loops (bos_start_loop / bos_resume_loop / bos_loop_status). */
+let loopManager: LoopManager | null = null;
 
 /** Storage key under which the engine snapshot is persisted. */
 const STORAGE_KEY = 'behavioros:state';
@@ -205,9 +213,25 @@ async function persistStateOnce(ctx: Context, strict = false): Promise<void> {
         GOVERNANCE_INSTANCE_ID,
       );
       if (retry.overtaken) {
-        logRestoreWarn(
-          `Still overtaken after retry (store rev=${retry.storedRevision}); giving up this round — backend CAS required for atomicity`,
+        // Second retry with a brief backoff to let the rival instance finish
+        // its write window. A third overtaken means the backend truly lacks
+        // compare-and-swap and we must surface the risk rather than loop.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await writeSnapshot(storage, true);
+        const afterFinal = await storage.get(STORAGE_KEY);
+        const storedFinal = readStoredManifest(afterFinal);
+        const finalCheck = detectOvertake(
+          storageRevision,
+          storedFinal.revision,
+          storedFinal.writer,
+          GOVERNANCE_INSTANCE_ID,
         );
+        if (finalCheck.overtaken) {
+          logRestoreWarn(
+            `Still overtaken after second retry (store rev=${finalCheck.storedRevision}); ` +
+              `backend CAS required for atomicity — cross-instance data loss is possible`,
+          );
+        }
       }
     }
   } catch (error) {
@@ -339,38 +363,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
-// YAML parser using js-yaml (same parser as the MCP server and CLI)
-// Predefined DNA patterns (fallback)
-const DNA_PATTERNS: Readonly<Record<string, DNA>> = {
-  'surgical-team': {
-    name: 'Surgical Team',
-    version: '2.0.0',
-    description: 'Zero-defect governance with sterile field protocols',
-    personas: [
-      {
-        role: 'architect' as const,
-        name: 'Lead Surgeon',
-        authority: 'architect' as const,
-        boundaries: [{ id: 'max-modules', type: 'max_modules', value: 1 }],
-        skills: ['surgical-procedure', 'team-leadership', 'clinical-decision'],
-      },
-    ],
-    governance: [
-      {
-        id: 'sterile-field',
-        level: 'critical' as const,
-        action: 'block' as const,
-        conditions: [{ type: 'production', value: true }],
-        description: 'Block any non-approved production changes',
-      },
-    ],
-    quality: [
-      { id: 'zero-defect', type: 'test_coverage', threshold: 100 },
-      { id: 'no-lint', type: 'lint', threshold: 0 },
-      { id: 'no-security', type: 'security', threshold: 0 },
-    ],
-  },
-};
+// YAML parser using js-yaml (same parser as the MCP server and CLI).
+// No hardcoded DNA fallback: if dnas/ is missing or empty, governance starts
+// disabled and a clear warning is emitted. Silently falling back to a partial
+// pattern set made failures invisible — operators would not know their DNA
+// directory was unreachable.
 
 export type { ProtocolStep };
 // The 7-step protocol is defined exactly once, in the core engine
@@ -380,7 +377,8 @@ export { PROTOCOL_STEPS };
 
 export default Plugin.define({
   id: 'behavior-os',
-  async setup(ctx: Context): Promise<void> {
+  async setup(ctx: Context): Promise<(() => Promise<void> | void) | void> {
+    // Opt-in durable, append-only audit sink (JSONL). When set, the file keeps
     // Opt-in durable, append-only audit sink (JSONL). When set, the file keeps
     // the whole history and is the source of truth for the chain across
     // restarts; without it the trail is in-memory + a bounded snapshot tail.
@@ -401,20 +399,34 @@ export default Plugin.define({
         console.warn(`DNA pattern skipped: ${error}`);
       }
 
-      // Merge with built-in patterns
-      for (const [key, pattern] of Object.entries(DNA_PATTERNS)) {
-        if (!loadedDnaPatterns.has(key)) {
-          loadedDnaPatterns.set(key, pattern);
-        }
+      if (loadedDnaPatterns.size === 0) {
+        console.warn(
+          'No DNA patterns found in dnas/ — governance is disabled. ' +
+            'Place at least one valid YAML pattern in the dnas/ directory.',
+        );
+      } else {
+        console.log(`Loaded ${loadedDnaPatterns.size} DNA patterns`);
       }
-
-      console.log(`Loaded ${loadedDnaPatterns.size} DNA patterns`);
     } catch (error) {
-      console.warn('Failed to load DNA patterns from directory, using built-in patterns');
-      // Use built-in patterns
-      for (const [key, pattern] of Object.entries(DNA_PATTERNS)) {
-        loadedDnaPatterns.set(key, pattern);
-      }
+      console.warn(`Failed to load DNA patterns from directory: ${error}`);
+    }
+
+    // Initialize the control-loop manager so the three bos_loop_* tools are
+    // available. The manager shares the same BehaviorOS instance so missions
+    // created by loop tasks appear in bos_list_missions automatically.
+    loopManager = new LoopManager(bos, ctx.location.directory);
+
+    // --- Autonomous-mode guard initialization --------------------------------
+    // When BEHAVIOROS_AUTONOMOUS=true, the plugin shifts from human-in-the-loop
+    // (permission `ask`) to pre-decision hardening: deny-list vetoes in
+    // `execute.before`, per-session quota limits in `ctx.storage`, and doom-loop
+    // detection that permanently blocks repeated failures.
+    if (process.env.BEHAVIOROS_AUTONOMOUS === 'true') {
+      quotaBreaker = new QuotaBreaker(ctx.storage);
+      doomLoopGuard = new DoomLoopGuard();
+      console.log(
+        '[Behavior-OS] Autonomous mode enabled — no human gate, pre-decision hardening active',
+      );
     }
 
     // Restore any state persisted by a previous process so protocol progress,
@@ -2034,7 +2046,1235 @@ export default Plugin.define({
           return { content: JSON.stringify(result, null, 2) };
         },
       });
+
+      // Tools 38-41: ControlLoop — autonomous task orchestration with durable state.
+      tools.add({
+        name: 'bos_start_loop',
+        description:
+          'Start an autonomous control loop: create a mission, dispatch tasks through the shell adapter with retries and circuit breakers, validate acceptance checks, and persist state so a blocked or crashed run can be resumed. Runs to completion (or until blocked) before returning.',
+        input: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            tasks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  objective: { type: 'string' },
+                  adapter: { type: 'string' },
+                  agentId: { type: 'string' },
+                  acceptance: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        gate: { type: 'string' },
+                        description: { type: 'string' },
+                        type: {
+                          type: 'string',
+                          enum: [
+                            'exit-code',
+                            'stdout-contains',
+                            'stdout-matches',
+                            'stderr-not-contains',
+                          ],
+                        },
+                        expected: { type: 'string' },
+                        required: { type: 'boolean' },
+                      },
+                      required: ['gate', 'description', 'type'],
+                    },
+                  },
+                  type: { type: 'string' },
+                  phase: { type: 'string' },
+                  dependsOn: { type: 'array', items: { type: 'string' } },
+                  input: { type: 'object', additionalProperties: true },
+                  timeoutMs: { type: 'number' },
+                  maxAttempts: { type: 'number' },
+                },
+                required: ['id', 'objective', 'adapter', 'agentId', 'acceptance'],
+              },
+            },
+            authorizedPhases: { type: 'array', items: { type: 'string' } },
+            missionType: {
+              type: 'string',
+              enum: [
+                'feature',
+                'bugfix',
+                'deployment',
+                'research',
+                'refactor',
+                'audit',
+                'incident',
+              ],
+            },
+            priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+          },
+          required: ['title', 'tasks'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          if (!loopManager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const params = input as {
+            title: string;
+            tasks: LoopTaskInput[];
+            authorizedPhases?: string[];
+            missionType?:
+              | 'feature'
+              | 'bugfix'
+              | 'deployment'
+              | 'research'
+              | 'refactor'
+              | 'audit'
+              | 'incident';
+            priority?: 'critical' | 'high' | 'medium' | 'low';
+          };
+          const manager = loopManager;
+          if (!manager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const result = await manager.start({
+            title: params.title,
+            tasks: params.tasks,
+            ...(params.authorizedPhases ? { authorizedPhases: params.authorizedPhases } : {}),
+            ...(params.missionType ? { missionType: params.missionType } : {}),
+            ...(params.priority ? { priority: params.priority } : {}),
+            dna: bos.getDNA(),
+          });
+          return {
+            content: JSON.stringify(
+              {
+                ok: true,
+                statePath: result.statePath,
+                planPath: result.planPath,
+                ...LoopManager.summarise(result.runId, result.state),
+              },
+              null,
+              2,
+            ),
+          };
+        },
+      });
+
+      tools.add({
+        name: 'bos_resume_loop',
+        description:
+          'Resume a control loop from its persisted plan and state: rebuild the orchestrator, register the run agents, and continue dispatch. Idempotent — a loop already in a terminal state is returned unchanged.',
+        input: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'] },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          if (!loopManager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const params = input as { runId: string };
+          const manager = loopManager;
+          if (!manager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const result = await manager.resume(params.runId, bos.getDNA());
+          if (!result)
+            return {
+              content: JSON.stringify({
+                error: `Loop "${params.runId}" not found`,
+                runId: params.runId,
+              }),
+            };
+          return {
+            content: JSON.stringify(
+              {
+                ok: true,
+                statePath: result.statePath,
+                planPath: result.planPath,
+                ...LoopManager.summarise(result.runId, result.state),
+              },
+              null,
+              2,
+            ),
+          };
+        },
+      });
+
+      tools.add({
+        name: 'bos_loop_status',
+        description:
+          'Return the current state of a control loop (runId). Poll this to watch progress; call bos_resume_loop after a crash to re-hydrate.',
+        input: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'] },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          if (!loopManager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const params = input as { runId: string };
+          const manager = loopManager;
+          if (!manager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          const result = manager.status(params.runId);
+          if (!result.exists || !result.state)
+            return {
+              content: JSON.stringify({ ok: true, runId: result.runId, exists: false }, null, 2),
+            };
+          return {
+            content: JSON.stringify(
+              { ok: true, exists: true, ...LoopManager.summarise(result.runId, result.state) },
+              null,
+              2,
+            ),
+          };
+        },
+      });
+
+      tools.add({
+        name: 'bos_approve_loop',
+        description:
+          'Record an approval or denial for a control loop that is blocked pending human approval. A pending mission-level approval is required; the run may still stop again at a subsequent gate. Returns the resulting state after resuming.',
+        input: {
+          type: 'object',
+          properties: {
+            runId: { type: 'string' },
+            decision: { type: 'string', enum: ['approve', 'deny'] },
+            reason: { type: 'string' },
+          },
+          required: ['runId', 'decision'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            runId: string;
+            decision: 'approve' | 'deny';
+            reason?: string;
+          };
+          const manager = loopManager;
+          if (!manager)
+            return { content: JSON.stringify({ error: 'loop manager not initialized' }, null, 2) };
+          try {
+            const result = await manager.approve(params.runId, params.decision, params.reason);
+            return {
+              content: JSON.stringify(
+                {
+                  ok: true,
+                  statePath: result.statePath,
+                  planPath: result.planPath,
+                  ...LoopManager.summarise(result.runId, result.state),
+                },
+                null,
+                2,
+              ),
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 7: Temporal Governance (Governança Temporal)
+      tools.add({
+        name: 'bos_add_temporal_rule',
+        description:
+          'Add a time-based governance rule that is only active during specific time windows (absolute, recurring/cron). Temporal rules wrap existing DNA governance rules with temporal constraints.',
+        input: {
+          type: 'object',
+          properties: {
+            baseRuleId: {
+              type: 'string',
+              description: 'ID of the existing DNA governance rule to wrap',
+            },
+            rule: { type: 'object', description: 'The governance rule to apply when active' },
+            scheduleType: { type: 'string', enum: ['absolute', 'recurring', 'cron'] },
+            startTime: { type: 'string', description: 'ISO timestamp (for absolute)' },
+            endTime: { type: 'string', description: 'ISO timestamp (for absolute)' },
+            schedule: { type: 'string', description: 'Cron expression' },
+            reason: { type: 'string' },
+            authorizedBy: { type: 'string' },
+          },
+          required: ['baseRuleId', 'rule', 'scheduleType', 'reason', 'authorizedBy'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            baseRuleId: string;
+            rule: {
+              id?: string;
+              level: string;
+              action: string;
+              conditions: unknown[];
+              description?: string;
+            };
+            scheduleType: 'absolute' | 'recurring' | 'cron';
+            startTime?: string;
+            endTime?: string;
+            schedule?: string;
+            reason: string;
+            authorizedBy: string;
+          };
+          try {
+            const result = bos.addTemporalRule({
+              baseRuleId: params.baseRuleId,
+              rule: {
+                id: params.rule.id ?? `temp-${Date.now()}`,
+                level: params.rule.level as 'critical' | 'high' | 'medium' | 'low',
+                action: params.rule.action as 'block' | 'escalate' | 'warn' | 'log' | 'transform',
+                conditions: params.rule.conditions as { type: string; value: unknown }[],
+                description: params.rule.description,
+              },
+              scheduleType: params.scheduleType,
+              ...(params.startTime ? { startTime: params.startTime } : {}),
+              ...(params.endTime ? { endTime: params.endTime } : {}),
+              ...(params.schedule ? { schedule: params.schedule } : {}),
+              reason: params.reason,
+              authorizedBy: params.authorizedBy,
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_check_temporal',
+        description:
+          'Evaluate temporal rules against a context to see which are active and which recommendations apply.',
+        input: {
+          type: 'object',
+          properties: {
+            action: { type: 'string' },
+            agentId: { type: 'string' },
+            context: { type: 'object' },
+            missionId: { type: 'string' },
+          },
+          required: ['action', 'agentId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            action: string;
+            agentId: string;
+            context?: Record<string, unknown>;
+            missionId?: string;
+          };
+          try {
+            const result = bos.evaluateTemporal({
+              action: params.action,
+              agentId: params.agentId,
+              context: params.context ?? {},
+              ...(params.missionId ? { missionId: params.missionId } : {}),
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_evaluate_dna_temporal',
+        description:
+          'Evaluate a DNA pattern with temporal overrides applied, returning the effective ruleset.',
+        input: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'DNA pattern name (e.g. "lean-factory")' },
+            action: { type: 'string' },
+            agentId: { type: 'string' },
+            context: { type: 'object' },
+          },
+          required: ['pattern', 'action', 'agentId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            pattern: string;
+            action: string;
+            agentId: string;
+            context?: Record<string, unknown>;
+          };
+          try {
+            const dna = loadedDnaPatterns.get(params.pattern.toLowerCase());
+            if (!dna) {
+              return {
+                content: `DNA pattern "${params.pattern}" not found. Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
+              };
+            }
+            const result = bos.evaluateDNAWithTemporal(dna, {
+              action: params.action,
+              agentId: params.agentId,
+              context: params.context ?? {},
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 5: Cognitive Load Balancer
+      tools.add({
+        name: 'bos_register_agent_capacity',
+        description: 'Register an agent with capacity and skills for load balancing.',
+        input: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            maxCapacity: { type: 'number', description: 'Maximum cognitive load (0-1)' },
+            skills: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['agentId', 'maxCapacity'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { agentId: string; maxCapacity: number; skills?: string[] };
+          try {
+            const engine = bos.getCognitiveLoadBalancer();
+            engine.registerAgent(params.agentId, {
+              maxCapacity: params.maxCapacity,
+              ...(params.skills ? { skills: params.skills } : {}),
+            });
+            return { content: JSON.stringify({ ok: true, agentId: params.agentId }, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_assign_task',
+        description:
+          'Assign a task to an agent and update cognitive load. Returns overload status.',
+        input: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            taskId: { type: 'string' },
+          },
+          required: ['agentId', 'taskId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { agentId: string; taskId: string };
+          try {
+            const engine = bos.getCognitiveLoadBalancer();
+            const result = engine.assignTask(params.agentId, params.taskId);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_complete_task',
+        description: "Complete a task and reduce the agent's cognitive load.",
+        input: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            taskId: { type: 'string' },
+          },
+          required: ['agentId', 'taskId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { agentId: string; taskId: string };
+          try {
+            const engine = bos.getCognitiveLoadBalancer();
+            engine.completeTask(params.agentId, params.taskId);
+            return { content: JSON.stringify({ ok: true }, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_analyze_workload',
+        description: 'Analyze workload distribution and get balancing recommendations.',
+        input: {
+          type: 'object',
+          properties: {
+            maxLoadThreshold: { type: 'number', description: 'Max load threshold (default 0.75)' },
+            minLoadThreshold: { type: 'number', description: 'Min load threshold (default 0.25)' },
+            considerSkills: { type: 'boolean', description: 'Consider skills in analysis' },
+            considerFatigue: { type: 'boolean', description: 'Consider fatigue in analysis' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            maxLoadThreshold?: number;
+            minLoadThreshold?: number;
+            considerSkills?: boolean;
+            considerFatigue?: boolean;
+          };
+          try {
+            const engine = bos.getCognitiveLoadBalancer();
+            const result = engine.analyzeWorkload({
+              ...(params.maxLoadThreshold ? { maxLoadThreshold: params.maxLoadThreshold } : {}),
+              ...(params.minLoadThreshold ? { minLoadThreshold: params.minLoadThreshold } : {}),
+              ...(params.considerSkills !== undefined
+                ? { considerSkills: params.considerSkills }
+                : {}),
+              ...(params.considerFatigue !== undefined
+                ? { considerFatigue: params.considerFatigue }
+                : {}),
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_recommend_assignment',
+        description: 'Recommend an agent for a task based on load, skills, and fatigue.',
+        input: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string' },
+            requiredSkills: { type: 'array', items: { type: 'string' } },
+            context: { type: 'object' },
+          },
+          required: ['taskId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { taskId: string; requiredSkills?: string[] };
+          try {
+            const result = bos
+              .getCognitiveLoadBalancer()
+              .recommendAssignment(params.taskId, params.requiredSkills ?? []);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 6: Natural Language Rules
+      tools.add({
+        name: 'bos_parse_rule',
+        description: 'Parse a natural language rule into a structured governance rule.',
+        input: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', description: 'Natural language rule text' },
+          },
+          required: ['text'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { rule: string; ruleId?: string };
+          try {
+            const engine = bos.getNaturalLanguageEngine();
+            const result = engine.parseRule(
+              params.rule,
+              params.ruleId ? { ruleId: params.ruleId } : {},
+            );
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_parse_rules_batch',
+        description: 'Parse multiple natural language rules in a single batch.',
+        input: {
+          type: 'object',
+          properties: {
+            texts: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of natural language rule texts',
+            },
+          },
+          required: ['texts'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { texts: string[] };
+          try {
+            const engine = bos.getNaturalLanguageEngine();
+            const result = engine.parseRulesBatch(params.texts);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_apply_natural_language_rules',
+        description: 'Parse and apply natural language rules to a DNA pattern.',
+        input: {
+          type: 'object',
+          properties: {
+            dnaName: { type: 'string', description: 'DNA pattern name to modify' },
+            rules: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Natural language rules to apply',
+            },
+          },
+          required: ['dnaName', 'rules'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { dnaName: string; rules: string[] };
+          try {
+            const dna = loadedDnaPatterns.get(params.dnaName.toLowerCase());
+            if (!dna) {
+              return {
+                content: `DNA pattern "${params.dnaName}" not found. Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
+              };
+            }
+            const result = bos.getNaturalLanguageEngine().applyRules(dna, params.rules);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 2: Consensus
+      tools.add({
+        name: 'bos_resolve_consensus',
+        description:
+          'Resolve a multi-agent consensus round. Votes are weighted; ties and all-abstain resolve to rejected (fail-safe).',
+        input: {
+          type: 'object',
+          properties: {
+            subject: { type: 'string', description: 'What is being decided' },
+            votes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  agentId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['agentId', 'choice'],
+              },
+            },
+            policy: {
+              type: 'string',
+              enum: ['unanimous', 'supermajority', 'majority'],
+              description: 'Voting policy',
+            },
+            quorum: { type: 'number', description: 'Minimum votes required' },
+          },
+          required: ['subject', 'votes'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            subject: string;
+            votes: {
+              agentId: string;
+              choice: 'approve' | 'reject' | 'abstain';
+              weight?: number;
+              reason?: string;
+            }[];
+            policy?: 'unanimous' | 'supermajority' | 'majority';
+            quorum?: number;
+          };
+          try {
+            const result = bos.resolveConsensus({
+              subject: params.subject,
+              votes: params.votes,
+              ...(params.policy ? { policy: params.policy } : {}),
+              ...(params.quorum !== undefined ? { quorum: params.quorum } : {}),
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 3: Cross-DNA Learning
+      tools.add({
+        name: 'bos_suggest_cross_dna_transfer',
+        description:
+          'Suggest learning transfers (patterns, rules, fixes) from one DNA to another based on shared behavioral patterns.',
+        input: {
+          type: 'object',
+          properties: {
+            sourceDna: { type: 'string', description: 'Source DNA pattern name' },
+            targetDna: { type: 'string', description: 'Target DNA pattern name' },
+            minConfidence: {
+              type: 'number',
+              description: 'Minimum confidence threshold (default 0.5)',
+            },
+          },
+          required: ['sourceDna', 'targetDna'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { sourceDna: string; targetDna: string; minConfidence?: number };
+          try {
+            const source = loadedDnaPatterns.get(params.sourceDna.toLowerCase());
+            const target = loadedDnaPatterns.get(params.targetDna.toLowerCase());
+            if (!source || !target) {
+              const missing = [!source ? params.sourceDna : null, !target ? params.targetDna : null]
+                .filter(Boolean)
+                .join('", "');
+              return {
+                content: `DNA pattern(s) not found: "${missing}". Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
+              };
+            }
+            const result = bos.suggestCrossDnaTransfer(source, target, params.minConfidence ?? 0.5);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 1: Prediction
+      tools.add({
+        name: 'bos_predict_governance',
+        description:
+          'Predict likely future governance events from learning history. Returns ranked predictions with confidence scores.',
+        input: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum predictions to return (default 5)' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { limit?: number };
+          try {
+            const result = bos.predict(params.limit ?? 5);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Feature 10: Pragmatic Conversation
+      tools.add({
+        name: 'bos_start_conversation',
+        description: 'Start a pragmatic conversation between agents to solve a problem.',
+        input: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Conversation title' },
+            problem: { type: 'string', description: 'Problem description' },
+            participants: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Agent IDs participating',
+            },
+          },
+          required: ['title', 'problem', 'participants'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { title: string; problem: string; participants: string[] };
+          try {
+            const engine = bos.getPragmaticConversation();
+            const result = engine.startSession({
+              title: params.title,
+              problem: params.problem,
+              participants: params.participants,
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_add_conversation_turn',
+        description: 'Add a turn to a pragmatic conversation.',
+        input: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            agentId: { type: 'string' },
+            content: { type: 'string' },
+            role: { type: 'string', enum: ['system', 'user', 'agent', 'expert'], default: 'agent' },
+          },
+          required: ['sessionId', 'agentId', 'content'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            sessionId: string;
+            agentId: string;
+            content: string;
+            role?: string;
+          };
+          try {
+            const engine = bos.getPragmaticConversation();
+            const result = engine.addTurn(
+              params.sessionId,
+              params.agentId,
+              params.content,
+              (params.role as 'system' | 'user' | 'agent' | 'expert') || 'agent',
+            );
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_resolve_conversation',
+        description: 'Resolve a conversation with solution and lessons learned.',
+        input: {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            solution: { type: 'string' },
+            lessonsLearned: { type: 'array', items: { type: 'string' } },
+            resolvedBy: { type: 'string' },
+          },
+          required: ['sessionId', 'solution', 'lessonsLearned', 'resolvedBy'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            sessionId: string;
+            solution: string;
+            lessonsLearned: string[];
+            resolvedBy: string;
+          };
+          try {
+            const engine = bos.getPragmaticConversation();
+            const result = engine.resolveConversation(
+              params.sessionId,
+              params.solution,
+              params.lessonsLearned,
+              params.resolvedBy,
+            );
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_list_conversations',
+        description: 'List all active pragmatic conversation sessions.',
+        input: {
+          type: 'object',
+          properties: {},
+        },
+        execute: async (): Promise<{ content: string }> => {
+          try {
+            const engine = bos.getPragmaticConversation();
+            const sessions = engine.listSessions();
+            return { content: JSON.stringify(sessions, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Knowledge Graph Tools (G-001)
+      tools.add({
+        name: 'bos_add_knowledge_node',
+        description:
+          'Add a node to the knowledge graph (agent, mission, rule, learning, decision, etc.)',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: {
+              type: 'string',
+              enum: [
+                'agent',
+                'mission',
+                'rule',
+                'learning',
+                'decision',
+                'pattern',
+                'dna',
+                'audit',
+                'task',
+              ],
+            },
+            label: { type: 'string' },
+            properties: { type: 'object' },
+          },
+          required: ['id', 'type', 'label'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id: string;
+            type: string;
+            label: string;
+            properties?: Record<string, unknown>;
+          };
+          try {
+            bos.addKnowledgeNode({
+              id: params.id,
+              type: params.type as any,
+              label: params.label,
+              properties: params.properties ?? {},
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            return { content: `Node "${params.id}" added to knowledge graph` };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_add_knowledge_edge',
+        description: 'Add an edge to the knowledge graph representing a relationship between nodes',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            from: { type: 'string' },
+            to: { type: 'string' },
+            type: {
+              type: 'string',
+              enum: [
+                'GOVERNED_BY',
+                'PART_OF',
+                'CAUSES',
+                'RELATED_TO',
+                'TRIGGERED',
+                'EVIDENCE_FOR',
+                'TRANSFORMS',
+                'SIMILAR_TO',
+                'OBSERVED_IN',
+                'IMPLEMENTS',
+              ],
+            },
+            weight: { type: 'number' },
+            properties: { type: 'object' },
+          },
+          required: ['id', 'from', 'to', 'type'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id: string;
+            from: string;
+            to: string;
+            type: string;
+            weight?: number;
+            properties?: Record<string, unknown>;
+          };
+          try {
+            bos.addKnowledgeEdge({
+              id: params.id,
+              from: params.from,
+              to: params.to,
+              type: params.type as any,
+              weight: params.weight ?? 1,
+              properties: params.properties,
+              createdAt: new Date().toISOString(),
+            });
+            return {
+              content: `Edge "${params.id}" added: ${params.from} --[${params.type}]--> ${params.to}`,
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_query_knowledge_graph',
+        description: 'Query the knowledge graph with traversal and filtering',
+        input: {
+          type: 'object',
+          properties: {
+            startNode: { type: 'string' },
+            nodeType: {
+              type: 'string',
+              enum: [
+                'agent',
+                'mission',
+                'rule',
+                'learning',
+                'decision',
+                'pattern',
+                'dna',
+                'audit',
+                'task',
+                'any',
+              ],
+            },
+            edgeType: {
+              type: 'string',
+              enum: [
+                'GOVERNED_BY',
+                'PART_OF',
+                'CAUSES',
+                'RELATED_TO',
+                'TRIGGERED',
+                'EVIDENCE_FOR',
+                'TRANSFORMS',
+                'SIMILAR_TO',
+                'OBSERVED_IN',
+                'IMPLEMENTS',
+                'any',
+              ],
+            },
+            depth: { type: 'number' },
+            properties: { type: 'object' },
+            sortBy: { type: 'string', enum: ['createdAt', 'weight', 'label'] },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            startNode?: string;
+            nodeType?: string;
+            edgeType?: string;
+            depth?: number;
+            properties?: Record<string, unknown>;
+            sortBy?: string;
+          };
+          try {
+            const result = bos.queryKnowledgeGraph({
+              startNode: params.startNode,
+              nodeType: (params.nodeType ?? 'any') as any,
+              edgeType: (params.edgeType ?? 'any') as any,
+              depth: params.depth ?? 3,
+              properties: params.properties,
+              sortBy: (params.sortBy ?? 'createdAt') as any,
+              sortOrder: 'desc',
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_get_knowledge_graph_stats',
+        description: 'Get statistics about the knowledge graph',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          try {
+            const stats = bos.getKnowledgeGraphStats();
+            return { content: JSON.stringify(stats, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // MetaCognition Tools (G-002)
+      tools.add({
+        name: 'bos_create_meta_decision',
+        description:
+          'Create a meta-decision from a governance evaluation with reasoning path, confidence, and bias detection',
+        input: {
+          type: 'object',
+          properties: {
+            decision: { type: 'object' },
+            context: { type: 'object' },
+            agentId: { type: 'string' },
+            dnaPattern: { type: 'string' },
+          },
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            decision: any;
+            context?: Record<string, unknown>;
+            agentId?: string;
+            dnaPattern?: string;
+          };
+          try {
+            const result = bos.createMetaDecision(params.decision, {
+              context: params.context ?? {},
+              agentId: params.agentId ?? bos.resolveAgentIdentity().agentId ?? 'unknown',
+              dnaPattern: params.dnaPattern,
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_get_meta_cognition_stats',
+        description: 'Get statistics about the meta-cognition engine',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          try {
+            const stats = bos.getMetaCognitionStats();
+            return { content: JSON.stringify(stats, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      // Persistent Memory Tools (G-003)
+      tools.add({
+        name: 'bos_save_memory',
+        description: 'Save a memory (knowledge graph node) to persistent storage',
+        input: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: {
+              type: 'string',
+              enum: [
+                'agent',
+                'mission',
+                'rule',
+                'learning',
+                'decision',
+                'pattern',
+                'dna',
+                'audit',
+                'task',
+              ],
+            },
+            label: { type: 'string' },
+            properties: { type: 'object' },
+            relevanceScore: { type: 'number' },
+            expiresAt: { type: 'string' },
+          },
+          required: ['id', 'type', 'label'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            id: string;
+            type: string;
+            label: string;
+            properties?: Record<string, unknown>;
+            relevanceScore?: number;
+            expiresAt?: string;
+          };
+          try {
+            bos.saveMemory(
+              {
+                id: params.id,
+                type: params.type as any,
+                label: params.label,
+                properties: params.properties ?? {},
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              { relevanceScore: params.relevanceScore, expiresAt: params.expiresAt },
+            );
+            return { content: `Memory "${params.id}" saved to persistent storage` };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_recall_memory',
+        description: 'Recall a memory by node ID from persistent storage',
+        input: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string' },
+          },
+          required: ['nodeId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { nodeId: string };
+          try {
+            const result = bos.recallMemory(params.nodeId);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_recall_relevant',
+        description: 'Recall memories relevant to a context via graph traversal',
+        input: {
+          type: 'object',
+          properties: {
+            startNodeId: { type: 'string' },
+            maxDepth: { type: 'number' },
+            minScore: { type: 'number' },
+            nodeTypes: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['startNodeId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            startNodeId: string;
+            maxDepth?: number;
+            minScore?: number;
+            nodeTypes?: string[];
+          };
+          try {
+            const result = bos.recallRelevant(params.startNodeId, {
+              maxDepth: params.maxDepth,
+              minScore: params.minScore,
+              nodeTypes: params.nodeTypes,
+            });
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_reconstruct_context',
+        description: 'Reconstruct agent context from past missions, decisions, and learnings',
+        input: {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+          },
+          required: ['agentId'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as { agentId: string };
+          try {
+            const result = bos.reconstructContext(params.agentId);
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
+
+      tools.add({
+        name: 'bos_consolidate_memory',
+        description: 'Consolidate in-memory knowledge graph state to persistent storage',
+        input: { type: 'object', properties: {} },
+        execute: async (): Promise<{ content: string }> => {
+          try {
+            const result = bos.consolidateMemory();
+            return { content: JSON.stringify(result, null, 2) };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+          }
+        },
+      });
     });
+
     // Bake a short, static Behavior-OS reminder into every agent's system prompt
     // so governance is present in the agent definition itself, not only in the
     // per-request `session.context` injection. State-free on purpose: the live
@@ -2059,112 +3299,146 @@ export default Plugin.define({
       if (!currentState.selectedDna) return;
 
       try {
-        const context = buildGovernanceContext({
-          tool: event.action,
-          action: event.action,
-          resources: event.resources,
-          metadata: event.metadata,
-        });
-        const decision = bos.evaluateGovernance(event.action, {
-          // Attribute to the governed identity (DNA persona / registered agent),
-          // never to the host's model-facing agent name.
-          agent: bos.resolveAgentIdentity().agentId,
-          context,
-        });
-
-        // Denies only ever apply to state-changing actions, and never to the
-        // governance control plane: reading PII is not an *operation* on it,
-        // and a restrictive DNA must stay escapable (a bootstrap deadlock
-        // would otherwise be inescapable). The policy lives in the facade
-        // (`bootstrapDenyOverride`) so every enforcement host applies the
-        // same rule; either way the verdict is recorded, never silently lost.
         const isControlPlane = isControlPlaneAction(event.action);
         const readOnly = !isMutating(event.action);
-        const overridden = bos.bootstrapDenyOverride(event.action, decision);
-        const effectiveVerdict = overridden ? 'allow' : decision.verdict;
 
-        // Record the decision in the governance log: always for deny/escalate;
-        // for allow only when at least one rule was actually evaluated, keeping
-        // the log focused on governance activity rather than benign tool calls.
-        const isActive =
-          effectiveVerdict !== 'allow' || overridden || decision.rulesEvaluated.length > 0;
-        if (isActive) {
-          recordLog(
-            'permission',
-            decision.verdict as GovernanceLogOutcome,
-            event.action,
-            overridden ? `control-plane override: ${decision.reason}` : decision.reason,
-          );
-        }
-
-        if (effectiveVerdict === 'deny') {
-          event.effect = 'deny';
-          event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
-          await notify(
-            event.sessionID,
-            `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}\n${BLOCK_HINT}`,
-            { kind: 'deny', action: event.action, reason: decision.reason },
-          );
-        } else if (effectiveVerdict === 'escalate' && event.effect !== 'deny') {
-          event.effect = 'ask';
-          event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
-          await notify(
-            event.sessionID,
-            `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}\n${ASK_HINT}`,
-            { kind: 'escalate', action: event.action, reason: decision.reason },
-          );
-        }
-
-        // Second deterministic authority: operator-defined role/policy rules,
-        // evaluated AFTER the DNA so the DNA verdict is already applied and no
-        // role decision can ever downgrade it (a role can only block or
-        // escalate further). Same bootstrap carve-out as the DNA override
-        // above: governance control-plane and read-only actions stay
-        // escapable — role policies govern what agents DO, not their ability
-        // to govern. The auto-registered persona role carries no policies, so
-        // this evaluates as a deterministic no-op ("no policy matched") until
-        // an operator defines one; a named-but-unknown role fails safe to
-        // require. auto-fix is escalated rather than silently applied: the
-        // permission hook has no rewrite channel.
+        // R9: Role pre-evaluate — operator-defined role policies run BEFORE DNA
+        // so a role can deny an action even when the DNA would allow it. A DNA
+        // deny is still authoritative: if DNA blocks, the pre-evaluate result is
+        // irrelevant. Role pre-evaluate only short-circuits to deny; it never
+        // forces allow over a DNA deny. Control-plane and read-only actions stay
+        // escapable (same bootstrap carve-out as the post-DNA role authority).
         if (!isControlPlane && !readOnly) {
-          const roleDecision = bos.evaluateRoleAction(
+          const preRoleDecision = bos.evaluateRoleAction(
             { agentId: bos.resolveAgentIdentity().agentId },
             event.action,
           );
-          if (roleDecision.action === 'block') {
-            const reason = `role-policy: ${roleDecision.reason}`;
+          if (preRoleDecision.action === 'block') {
+            const reason = `role-pre-evaluate: ${preRoleDecision.reason}`;
             recordLog('permission', 'deny', event.action, reason);
-            if (event.effect !== 'deny') {
-              event.effect = 'deny';
+            event.effect = 'deny';
+            event.message = `[Behavior-OS:role] ${preRoleDecision.reason}`;
+            await notify(
+              event.sessionID,
+              `[Behavior-OS] ⛔ Role policy blocked "${event.action}" — ${preRoleDecision.reason}\n${BLOCK_HINT}`,
+              { kind: 'deny', action: event.action, reason },
+            );
+            return;
+          }
+        }
+
+        try {
+          const context = buildGovernanceContext({
+            tool: event.action,
+            action: event.action,
+            resources: event.resources,
+            metadata: event.metadata,
+          });
+          const decision = bos.evaluateGovernance(event.action, {
+            // Attribute to the governed identity (DNA persona / registered agent),
+            // never to the host's model-facing agent name.
+            agent: bos.resolveAgentIdentity().agentId,
+            context,
+          });
+
+          // Denies only ever apply to state-changing actions, and never to the
+          // governance control plane: reading PII is not an *operation* on it,
+          // and a restrictive DNA must stay escapable (a bootstrap deadlock
+          // would otherwise be inescapable). The policy lives in the facade
+          // (`bootstrapDenyOverride`) so every enforcement host applies the
+          // same rule; either way the verdict is recorded, never silently lost.
+          const overridden = bos.bootstrapDenyOverride(event.action, decision);
+          const effectiveVerdict = overridden ? 'allow' : decision.verdict;
+
+          // Record the decision in the governance log: always for deny/escalate;
+          // for allow only when at least one rule was actually evaluated, keeping
+          // the log focused on governance activity rather than benign tool calls.
+          const isActive =
+            effectiveVerdict !== 'allow' || overridden || decision.rulesEvaluated.length > 0;
+          if (isActive) {
+            recordLog(
+              'permission',
+              decision.verdict as GovernanceLogOutcome,
+              event.action,
+              overridden ? `control-plane override: ${decision.reason}` : decision.reason,
+            );
+          }
+
+          if (effectiveVerdict === 'deny') {
+            event.effect = 'deny';
+            event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
+            await notify(
+              event.sessionID,
+              `[Behavior-OS] ⛔ Blocked "${event.action}" — ${decision.reason}\n${BLOCK_HINT}`,
+              { kind: 'deny', action: event.action, reason: decision.reason },
+            );
+          } else if (effectiveVerdict === 'escalate' && event.effect !== 'deny') {
+            event.effect = 'ask';
+            event.message = `[Behavior-OS:${currentState.selectedDna}] ${decision.reason}`;
+            await notify(
+              event.sessionID,
+              `[Behavior-OS] ⚠️ "${event.action}" needs approval — ${decision.reason}\n${ASK_HINT}`,
+              { kind: 'escalate', action: event.action, reason: decision.reason },
+            );
+          }
+
+          // Second deterministic authority: operator-defined role/policy rules,
+          // evaluated AFTER the DNA so the DNA verdict is already applied and no
+          // role decision can ever downgrade it (a role can only block or
+          // escalate further). Same bootstrap carve-out as the DNA override
+          // above: governance control-plane and read-only actions stay
+          // escapable — role policies govern what agents DO, not their ability
+          // to govern. The auto-registered persona role carries no policies, so
+          // this evaluates as a deterministic no-op ("no policy matched") until
+          // an operator defines one; a named-but-unknown role fails safe to
+          // require. auto-fix is escalated rather than silently applied: the
+          // permission hook has no rewrite channel.
+          if (!isControlPlane && !readOnly) {
+            const roleDecision = bos.evaluateRoleAction(
+              { agentId: bos.resolveAgentIdentity().agentId },
+              event.action,
+            );
+            if (roleDecision.action === 'block') {
+              const reason = `role-policy: ${roleDecision.reason}`;
+              recordLog('permission', 'deny', event.action, reason);
+              if (event.effect !== 'deny') {
+                event.effect = 'deny';
+                event.message = `[Behavior-OS:role-policy] ${roleDecision.reason}`;
+                await notify(
+                  event.sessionID,
+                  `[Behavior-OS] ⛔ Role policy blocked "${event.action}" — ${roleDecision.reason}`,
+                  { kind: 'deny', action: event.action, reason },
+                );
+              }
+            } else if (
+              (roleDecision.action === 'require' || roleDecision.action === 'auto-fix') &&
+              event.effect !== 'deny' &&
+              event.effect !== 'ask'
+            ) {
+              const reason = `role-policy: ${roleDecision.reason}`;
+              recordLog('permission', 'escalate', event.action, reason);
+              event.effect = 'ask';
               event.message = `[Behavior-OS:role-policy] ${roleDecision.reason}`;
               await notify(
                 event.sessionID,
-                `[Behavior-OS] ⛔ Role policy blocked "${event.action}" — ${roleDecision.reason}`,
-                { kind: 'deny', action: event.action, reason },
+                `[Behavior-OS] ⚠️ Role policy: "${event.action}" needs approval — ${roleDecision.reason}`,
+                { kind: 'escalate', action: event.action, reason },
+              );
+            } else if (roleDecision.action === 'warn') {
+              recordLog(
+                'permission',
+                'info',
+                event.action,
+                `role-policy warn: ${roleDecision.reason}`,
               );
             }
-          } else if (
-            (roleDecision.action === 'require' || roleDecision.action === 'auto-fix') &&
-            event.effect !== 'deny' &&
-            event.effect !== 'ask'
-          ) {
-            const reason = `role-policy: ${roleDecision.reason}`;
-            recordLog('permission', 'escalate', event.action, reason);
-            event.effect = 'ask';
-            event.message = `[Behavior-OS:role-policy] ${roleDecision.reason}`;
-            await notify(
-              event.sessionID,
-              `[Behavior-OS] ⚠️ Role policy: "${event.action}" needs approval — ${roleDecision.reason}`,
-              { kind: 'escalate', action: event.action, reason },
-            );
-          } else if (roleDecision.action === 'warn') {
-            recordLog(
-              'permission',
-              'info',
-              event.action,
-              `role-policy warn: ${roleDecision.reason}`,
-            );
           }
+        } catch (dnaError) {
+          // If DNA evaluation throws, fall back to role-only enforcement so we
+          // don't silently allow. The pre-evaluate already ran above; we just
+          // don't have a DNA verdict to layer on top.
+          recordLog('permission', 'error', event.action, describeError(dnaError));
+          console.warn(`[Behavior-OS] DNA evaluation error: ${describeError(dnaError)}`);
         }
       } catch (error) {
         // A governance failure must never be invisible: record it as well.
@@ -2173,16 +3447,60 @@ export default Plugin.define({
       }
     });
 
-    // Observability hook: advise on escalations before a governed tool runs.
-    // It never throws — enforcement is the permission hook's responsibility.
+    // --- Tool execution enforcement ------------------------------------------
+    // In normal (human-in-the-loop) mode this is advisory: it logs escalation
+    // warnings but defers enforcement to the permission hook. In autonomous
+    // mode (BEHAVIOROS_AUTONOMOUS=true) it becomes a hard veto — throwing an
+    // error cancels the tool call immediately, before it executes.
     await ctx.tool.hook('execute.before', async (event: unknown): Promise<void> => {
-      const eventTyped = event as { tool?: string; agent?: string; input?: unknown };
+      const eventTyped = event as {
+        tool?: string;
+        agent?: string;
+        input?: unknown;
+        sessionID?: string;
+      };
       const currentState = bos.getState();
       if (!currentState.selectedDna) return;
 
       const toolName = typeof eventTyped.tool === 'string' ? eventTyped.tool.toLowerCase() : '';
       if (!GOVERNED_TOOL.test(toolName)) return;
 
+      // ── Autonomous mode: pre-decision hardening ──────────────────────────
+      // These checks run before the DNA evaluation and throw to cancel the
+      // call outright. This is the "veto" layer of defense in headless mode.
+      if (quotaBreaker || doomLoopGuard) {
+        const sessionID = eventTyped.sessionID ?? 'unknown';
+
+        // 1. Doom loop detection — permanent block on repeated failures
+        if (doomLoopGuard) {
+          const blockedReason = doomLoopGuard.isBlocked(sessionID, toolName)
+            ? doomLoopGuard.getBlockReason(sessionID, toolName)
+            : undefined;
+          if (blockedReason) {
+            recordLog('tool', 'deny', toolName, blockedReason);
+            throw new Error(`[Behavior-OS:guard] ${blockedReason}`);
+          }
+        }
+
+        // 2. Deny-list — veto dangerous patterns (bash -c, node -e, etc.)
+        const denyMatch = evaluateDenyList(toolName, eventTyped.input);
+        if (denyMatch) {
+          if (doomLoopGuard) doomLoopGuard.recordDenial(sessionID, toolName, denyMatch);
+          recordLog('tool', 'deny', toolName, `deny-list: ${denyMatch}`);
+          throw new Error(`[Behavior-OS:guard] Blocked by deny-list: ${denyMatch}`);
+        }
+
+        // 3. Quota circuit breaker — limit shell calls per session
+        if (quotaBreaker) {
+          const quotaReason = await quotaBreaker.check(sessionID, toolName);
+          if (quotaReason) {
+            recordLog('tool', 'deny', toolName, quotaReason);
+            throw new Error(`[Behavior-OS:guard] ${quotaReason}`);
+          }
+        }
+      }
+
+      // ── DNA evaluation (advisory in normal mode, hard in autonomous if escalated) ─
       try {
         const context = buildGovernanceContext({
           tool: toolName,
@@ -2195,8 +3513,30 @@ export default Plugin.define({
         if (decision.verdict === 'escalate') {
           recordLog('advisory', 'warn', toolName, decision.reason);
           console.warn(`[Behavior-OS] Escalation advised: ${decision.reason}`);
+
+          // In autonomous mode, escalation is treated as a hard deny —
+          // there is no human to ask.
+          if (quotaBreaker || doomLoopGuard) {
+            const sessionID = eventTyped.sessionID ?? 'unknown';
+            if (doomLoopGuard) doomLoopGuard.recordDenial(sessionID, toolName, decision.reason);
+            recordLog(
+              'tool',
+              'deny',
+              toolName,
+              `autonomous-escalation-to-deny: ${decision.reason}`,
+            );
+            throw new Error(
+              `[Behavior-OS:guard] Autonomous mode: escalation treated as deny — ${decision.reason}`,
+            );
+          }
         }
       } catch (error) {
+        if (quotaBreaker || doomLoopGuard) {
+          // In autonomous mode, governance errors are deny-by-default, not advisory
+          console.warn(`[Behavior-OS] Governance error: ${describeError(error)}`);
+          throw error;
+        }
+        // In normal mode, advisory errors are just logged
         console.warn(`[Behavior-OS] Governance error: ${describeError(error)}`);
       }
     });
@@ -2285,6 +3625,11 @@ export default Plugin.define({
             // Auto-missions must not advance the protocol: progress still
             // reflects the steps the agent performs explicitly.
             advanceProtocol: false,
+            // Default required checks so auto-created missions cannot complete
+            // without real evidence. Without this, a prompt like "fix the bug"
+            // would spawn a mission that `bos_complete_mission` closes with
+            // `no-required-checks` — effectively no audit trail.
+            requiredChecks: ['governance', 'audit'],
           });
           bos.startMission(mission.id, { advanceProtocol: false });
           behavioros.autoMission = mission.id;
@@ -2346,5 +3691,23 @@ export default Plugin.define({
         ].join('\n'),
       });
     });
+
+    // --- Real-time event monitoring (Ring 2: Detect) ---------------------------
+    // Subscribes to the OpenCode V2 event bus and routes governance events to
+    // the Behavior-OS engines (anomaly detection, temporal patterns, circuit
+    // breaker intelligence, compliance re-checks, etc.). Best-effort: a host
+    // without `ctx.event` simply disables real-time monitoring.
+    let eventCleanup: (() => void) | undefined;
+    try {
+      eventCleanup = await subscribeToGovernanceEvents(ctx, bos, (name) =>
+        loadedDnaPatterns.get(name),
+      );
+    } catch (error) {
+      console.warn(`[Behavior-OS] Event subscription failed: ${describeError(error)}`);
+    }
+
+    return async () => {
+      eventCleanup?.();
+    };
   },
 });

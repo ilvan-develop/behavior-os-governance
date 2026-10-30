@@ -89,7 +89,9 @@ describe('AuditEngine', () => {
       stages: ['lint', 'typecheck', 'security'],
     });
     expect(report.stages).toHaveLength(3);
-    expect(report.overall).toBe('pass');
+    // Simulated audits are forced to 'warning' by the engine itself.
+    expect(report.overall).toBe('warning');
+    expect(report.simulated).toBe(true);
   });
 });
 

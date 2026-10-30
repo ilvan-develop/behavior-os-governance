@@ -268,4 +268,111 @@ export class DynamicDNAManager {
   removeDynamicDNA(dnaName: string): boolean {
     return this.dynamicDNAs.delete(dnaName);
   }
+
+  /**
+   * Suggest cross-DNA pattern transfer based on similarity analysis.
+   * Analyzes two DNA patterns and suggests rules from one that could benefit the other.
+   *
+   * @param dnaAName Name of the source DNA pattern
+   * @param dnaBName Name of the target DNA pattern
+   * @param similarityThreshold Minimum similarity score (0-1) for rule recommendation
+   * @returns Suggestion results with confidence scores and rationale
+   */
+  suggestCrossDNATransfer(
+    dnaAName: string,
+    dnaBName: string,
+    similarityThreshold: number = 0.5,
+  ): {
+    sourceDna: DNA;
+    targetDna: DNA;
+    suggestions: Array<{
+      ruleId: string;
+      confidence: number;
+      rationale: string;
+      suggestedAction: 'block' | 'escalate' | 'warn' | 'log' | 'transform';
+      suggestedConditions?: Array<{ type: string; value: unknown }>;
+    }>;
+    overallSimilarity: number;
+    recommendation: 'adopt' | 'adapt' | 'reject';
+  } {
+    // Get both DNAs
+    const dnaA = this.dynamicDNAs.get(dnaAName);
+    const dnaB = this.dynamicDNAs.get(dnaBName);
+    if (!dnaA || !dnaB) {
+      return {
+        sourceDna: {} as DNA,
+        targetDna: {} as DNA,
+        suggestions: [],
+        overallSimilarity: 0,
+        recommendation: 'reject',
+      };
+    }
+
+    const baseA = dnaA.baseDna;
+    const baseB = dnaB.baseDna;
+
+    // Calculate similarity based on governance rules overlap
+    const sourceGov = baseA.governance.map((g) => g.id);
+    const targetGov = baseB.governance.map((g) => g.id);
+    const commonRules = sourceGov.filter((id) => targetGov.includes(id));
+    const uniqueToA = sourceGov.filter((id) => !targetGov.includes(id));
+    const uniqueToB = targetGov.filter((id) => !sourceGov.includes(id));
+    void uniqueToA;
+    void uniqueToB;
+
+    const totalRules = sourceGov.length + targetGov.length;
+    const similarRules = commonRules.length;
+    const overlapRatio = totalRules > 0 ? similarRules / totalRules : 0;
+
+    const overallSimilarity = Math.min(overlapRatio + 0.2, 1);
+
+    const suggestions: Array<{
+      ruleId: string;
+      confidence: number;
+      rationale: string;
+      suggestedAction: 'block' | 'escalate' | 'warn' | 'log' | 'transform';
+      suggestedConditions?: Array<{ type: string; value: unknown }>;
+    }> = [];
+
+    // Generate suggestions from DNA A rules not in DNA B
+    for (const rule of baseA.governance) {
+      if (!targetGov.includes(rule.id)) {
+        const confidence = Math.max(0, overlapRatio + 0.2 * (1 - overlapRatio));
+        if (confidence >= similarityThreshold) {
+          suggestions.push({
+            ruleId: rule.id,
+            confidence: Math.round(confidence * 100) / 100,
+            rationale: rule.description
+              ? `Rule "${rule.id}" from ${dnaAName} could strengthen ${dnaBName} governance. ${rule.description}`
+              : `Rule "${rule.id}" from ${dnaAName} could strengthen ${dnaBName} governance.`,
+            suggestedAction: rule.action,
+            suggestedConditions: rule.conditions,
+          });
+        }
+      }
+    }
+
+    // Sort by confidence descending
+    suggestions.sort((a, b) => b.confidence - a.confidence);
+
+    // Limit to top 5 suggestions
+    const topSuggestions = suggestions.slice(0, 5);
+
+    let recommendation: 'adopt' | 'adapt' | 'reject';
+    if (overallSimilarity > 0.7 && topSuggestions.length > 0) {
+      recommendation = 'adopt';
+    } else if (overallSimilarity > 0.3) {
+      recommendation = 'adapt';
+    } else {
+      recommendation = 'reject';
+    }
+
+    return {
+      sourceDna: baseA,
+      targetDna: baseB,
+      suggestions: topSuggestions,
+      overallSimilarity: Math.round(overallSimilarity * 100) / 100,
+      recommendation,
+    };
+  }
 }

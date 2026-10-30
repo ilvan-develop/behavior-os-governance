@@ -93,4 +93,97 @@ export class QualityEngine {
   getGates(): QualityGate[] {
     return this.gates;
   }
+
+  /**
+   * Avalia se as mudanças têm valor pragmático real.
+   * Uma feature é considerada "pragmática" se:
+   - Remove mais código do que adiciona (redução líquida)
+   - Reduz complexidade cíclomática
+   - Aumenta ou mantém a cobertura de teste
+   - Não introduz duplicação de regras de negócio
+   
+   @param changes - Diff das alterações (adicionadas/removidas)
+   @param metrics - Métricas antes/depois das mudanças
+   @returns Assessment with score, strengths, warnings and recommendations
+   */
+  assessPragmaticValue(
+    changes: Array<{ addedLines: number; removedLines: number }>,
+    metrics: {
+      before: { complexity: number; testCoverage: number; rulesCount: number };
+      after: { complexity: number; testCoverage: number; rulesCount: number };
+    },
+  ): {
+    score: number; // 0 a 1 (1 = totalmente pragmático)
+    strengths: string[];
+    warnings: string[];
+    recommendations: string[];
+  } {
+    const strengths: string[] = [];
+    const warnings: string[] = [];
+    const recommendations: string[] = [];
+
+    // 1. Calcular redução líquida de código
+    let netCodeChange = 0;
+    for (const change of changes) {
+      netCodeChange += change.removedLines - change.addedLines;
+    }
+
+    if (netCodeChange > 0) {
+      strengths.push(`Removed ${netCodeChange} lines of code net`);
+    } else if (netCodeChange < 0) {
+      warnings.push(`Added ${-netCodeChange} lines net; consider if removal is possible`);
+    } else {
+      strengths.push('Code volume maintained at current level');
+    }
+
+    // 2. Verificar mudança de complexidade
+    const complexityChange = metrics.after.complexity - metrics.before.complexity;
+    if (complexityChange < 0) {
+      strengths.push(`Complexidade reduzida em ${-complexityChange} pontos`);
+    } else if (complexityChange > 0) {
+      warnings.push(`Complexidade aumentou em ${complexityChange} pontos; considerar refatoração`);
+    } else {
+      strengths.push('Complexidade mantida em nível atual');
+    }
+
+    // 3. Verificar mudança na cobertura de teste
+    const coverageChange = metrics.after.testCoverage - metrics.before.testCoverage;
+    if (coverageChange >= 0) {
+      strengths.push(`Cobertura de teste mantida ou aumentada em ${coverageChange}%`);
+    } else {
+      warnings.push(
+        `Cobertura de teste diminuiu em ${-coverageChange}%; considerar adicionar testes`,
+      );
+    }
+
+    // 4. Verificar duplicação de regras
+    const rulesChange = metrics.after.rulesCount - metrics.before.rulesCount;
+    if (rulesChange <= 0) {
+      strengths.push(`Nenhuma nova regra de negócio adicionada; duplicidade evitada`);
+    } else if (rulesChange <= 5) {
+      warnings.push(
+        `${rulesChange} nova(s) regra(s) de negócio adicionada(s); verificar se são necessárias`,
+      );
+    } else {
+      warnings.push(
+        `${rulesChange} nova(s) regra(s) de negócio adicionada(s); alto risco de duplicidade`,
+      );
+      recommendations.push('Revisar regras novas em busca de oportunidades de consolidamento');
+    }
+
+    // 5. Score composto pragmático (peso diferentes fatores)
+    let score = 0.5; // base neutral
+    if (netCodeChange > 0) score += 0.2;
+    if (complexityChange < 0) score += 0.2;
+    if (coverageChange >= 0) score += 0.2;
+    if (rulesChange <= 0) score += 0.1;
+    score = Math.max(0, Math.min(1, score));
+
+    return {
+      score,
+      strengths,
+      warnings,
+      recommendations,
+    };
+  }
 }

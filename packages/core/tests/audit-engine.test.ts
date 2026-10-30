@@ -14,7 +14,11 @@ describe('AuditEngine', () => {
     expect(report.missionId).toBe('mission-1');
     expect(report.agentId).toBe('agent-1');
     expect(report.stages).toHaveLength(4); // lint, typecheck, security, coverage
-    expect(report.overall).toBe('pass');
+    // Simulated audits are forced to 'warning' by the engine itself (R5 guard),
+    // so they can never satisfy mission completion gates even when called
+    // directly through AuditEngine without the BehaviorOS facade.
+    expect(report.overall).toBe('warning');
+    expect(report.simulated).toBe(true);
   });
 
   it('should run audit with custom stages', async () => {

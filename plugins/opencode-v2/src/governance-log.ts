@@ -89,8 +89,10 @@ export type GovernanceLogInput = Omit<
   'seq' | 'at' | 'instance' | 'prevHash' | 'hash'
 >;
 
-/** Maximum number of events kept in memory (ring buffer). */
-export const GOVERNANCE_LOG_MAX = 200;
+/** Maximum number of events kept in memory (ring buffer). Increased from 200 to 1000
+ * so that a typical long session retains enough history for `bos_get_log` to be
+ * useful without requiring the durable JSONL sink for every check. */
+export const GOVERNANCE_LOG_MAX = 1000;
 
 /**
  * Environment variable that points at a durable, append-only JSONL sink for the

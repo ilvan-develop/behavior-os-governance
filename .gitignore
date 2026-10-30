@@ -40,6 +40,8 @@ coverage/
 .roo/
 .husky/_
 .behavioros/baseline.json
+# Control-loop runtime state (plan + state JSON written by bos_start_loop).
+.behavioros/loops/
 # Session logs are local evidence, not source.
 .behavioros/*.log
 # Pipeline-loop artefacts (SPEC/DOD/TRACE/STATE, evidence logs and captures) are
@@ -64,3 +66,24 @@ docs/api/
 **/tests/**/*.js.map
 **/tests/**/*.d.ts
 **/tests/**/*.d.ts.map
+# Vitest config type-check artifacts (generated next to vitest.config.ts).
+**/vitest.config.d.ts
+**/vitest.config.d.ts.map
+**/vitest.config.js
+**/vitest.config.js.map
+# Local agent session artifacts — temporary scripts, outputs, and generated summaries.
+temp.txt
+*.txt
+*.bat
+check-*.js
+check-*.bat
+FINAL_*.md
+IMPLEMENTATION_PLAN.md
+IMPLEMENTATION_SUMMARY.md
+REQUIREMENTS.md
+TASKS.md
+fix-*.cjs
+run-*.bat
+run-*.cjs
+test-governance*.cjs
+npm-lock.yaml

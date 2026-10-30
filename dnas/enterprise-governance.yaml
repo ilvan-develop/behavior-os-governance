@@ -34,3 +34,116 @@ quality:
   - id: lint
     type: lint
     threshold: 0
+
+pipelines:
+  - id: enterprise-construction
+    name: Enterprise Construction Pipeline
+    description: "Compliance-focused pipeline with architecture review and security gates"
+    appliesTo: ["web-app", "api", "microservice"]
+    phases:
+      - id: arch
+        name: Architecture & Compliance Review
+        type: architecture
+        order: 0
+        requiredAgents: ["architect"]
+        requiredSkills: ["engineering-cycle", "docs-research"]
+        gates:
+          - id: adr-required
+            name: ADR with compliance mapping
+            phaseType: architecture
+            blocking: true
+            condition:
+              type: file-exists
+              value: adr/
+              description: "ADR with compliance mapping required"
+        readinessArtifact: adr/
+        blocking: true
+      - id: deps
+        name: Secure Dependency Management
+        type: dependencies
+        order: 1
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle", "verification-first"]
+        gates:
+          - id: dep-compliance
+            name: Dependency compliance audit
+            phaseType: dependencies
+            blocking: true
+            condition:
+              type: security
+              value: 0
+              description: "Zero vulnerabilities, license compliance verified"
+        readinessArtifact: package.json
+        blocking: true
+      - id: frontend
+        name: Frontend Construction
+        type: frontend
+        order: 2
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: design-system
+            name: Design system enforcement
+            phaseType: frontend
+            blocking: false
+            condition:
+              type: lint
+              value: 0
+              description: "Components must follow enterprise design system"
+        blocking: true
+      - id: backend
+        name: Backend Construction
+        type: backend
+        order: 3
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: api-contract
+            name: API contract + security review
+            phaseType: backend
+            blocking: true
+            condition:
+              type: api-contract
+              value: true
+              description: "API contract + security review validated"
+        blocking: true
+      - id: test
+        name: Testing & Security Validation
+        type: testing
+        order: 4
+        requiredAgents: ["analyst"]
+        requiredSkills: ["verification-first"]
+        gates:
+          - id: coverage
+            name: Test coverage
+            phaseType: testing
+            blocking: true
+            condition:
+              type: test_coverage
+              value: 80
+              description: "Minimum 80% coverage"
+          - id: security
+            name: Security scan
+            phaseType: testing
+            blocking: true
+            condition:
+              type: security
+              value: 0
+              description: "Zero security findings"
+        blocking: true
+      - id: deploy
+        name: Compliance-Gated Deployment
+        type: deployment
+        order: 5
+        requiredAgents: ["operator"]
+        requiredSkills: ["release"]
+        gates:
+          - id: deploy-compliance
+            name: Deployment compliance check
+            phaseType: deployment
+            blocking: true
+            condition:
+              type: pii-access
+              value: false
+              description: "No PII access in deployment artifacts"
+        blocking: true

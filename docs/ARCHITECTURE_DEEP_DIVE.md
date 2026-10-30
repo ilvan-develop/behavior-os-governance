@@ -70,6 +70,7 @@ Behavior-OS is a behavioral governance platform that provides:
 ## Engine Details
 
 ### Governance Engine
+
 Evaluates agent actions against DNA rules:
 1. Loads matching DNA pattern
 2. Evaluates each governance rule against action context
@@ -83,6 +84,7 @@ Evaluates agent actions against DNA rules:
 - `transform`: Action modified before execution
 
 ### Quality Engine
+
 Enforces quality gates:
 - `test_coverage`: Minimum test coverage percentage
 - `lint`: Maximum allowed lint errors
@@ -91,6 +93,7 @@ Enforces quality gates:
 - Custom operators: `gte`, `lte`, `eq`
 
 ### Audit Engine
+
 Generates audit reports with a per-stage result:
 - Records governance decisions and quality-gate evaluations
 - Persisted reports are listed with `bos_list_audit_reports` (requires persistence)
@@ -98,6 +101,7 @@ Generates audit reports with a per-stage result:
   storage (see [`CLAIMS.md`](CLAIMS.md#cadeia-de-auditoria-tamper-evidence))
 
 ### Learning Engine
+
 Improves the system over time:
 - Records insights, patterns, fixes, failures and optimizations
 - Detects recurring patterns and scores recommendations by recency, frequency and impact
@@ -105,6 +109,7 @@ Improves the system over time:
   an explicit `apply: true` (plus approved votes when votes are supplied)
 
 ### Mission Engine
+
 Manages mission lifecycle:
 - State machine: pending → active → completed/failed
 - Progress tracking
@@ -123,10 +128,12 @@ All data is validated through Zod v4.4.3 schemas:
 ## Integration Points
 
 ### MCP Server (standalone for external clients)
-- 57 registered tools + 2 resources (`behavioros://protocol/steps`, `behavioros://dna/catalog`)
+
+- 81 registered tools + 2 resources (`behavioros://protocol/steps`, `behavioros://dna/catalog`)
 - JSON-RPC over stdio
 
 ### OpenCode v2 Plugin (single native channel)
+
 - 32 `bos_*` tools registered via `ctx.tool.transform()` as **direct** tools (`options.codemode: false`)
 - `permission:evaluate` hook is the only typed denial path (mutating actions are refused here)
 - `tool:execute.before` / `tool:execute.after` hooks are advisory telemetry (they never throw)
@@ -135,6 +142,7 @@ All data is validated through Zod v4.4.3 schemas:
 - Native TypeScript integration: `.opencode/plugins/behavioros.ts` re-exports the built package
 
 ### IDE Integrations
+
 - **Claude Code**: MCP server via `.mcp.json`
 - **Cursor**: Protocol rules via `.cursor/rules/`
 - **Windsurf**: Rules via `.windsurfrules`
@@ -184,34 +192,37 @@ session.
 `new BehaviorOS(config)` accepts the keys declared in
 `packages/core/src/engine/behavior-os.ts`:
 
-| Config | Values | Notes |
-|---|---|---|
-| `dnaPath` | string | Path to the DNA YAML to load at construction |
-| `governance` | `{ enabled?, level?: 'strict' \| 'moderate' \| 'lenient' }` | Rule evaluation |
-| `quality` | `{ enabled?, minCoverage? }` | Quality gates |
-| `audit` | `{ enabled? }` | Audit pipeline |
-| `learning` | `{ enabled? }` | Learning events |
-| `persistence` | `{ path?, store?, autoHydrate? }` | SQLite by `path`, or any injected `Store` |
-| `pipeline` | `{ enabled?, gates? }` | Synchronous gate pipeline (default: 1 `pre` + N `post`) |
-| `decision` | `{ policy?, quorum? }` | Defaults for `decide()` |
-| `evolution` | `{ enabled?, minConfidence? }` | Applying proposals also needs `apply: true` |
-| `codeEdit` | `{ enabled?, root?, extensions? }` | Writing also needs `apply: true` |
+| Config        | Values                                                      | Notes                                                   |
+| ------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| `dnaPath`     | string                                                      | Path to the DNA YAML to load at construction            |
+| `governance`  | `{ enabled?, level?: 'strict' \| 'moderate' \| 'lenient' }` | Rule evaluation                                         |
+| `quality`     | `{ enabled?, minCoverage? }`                                | Quality gates                                           |
+| `audit`       | `{ enabled? }`                                              | Audit pipeline                                          |
+| `learning`    | `{ enabled? }`                                              | Learning events                                         |
+| `persistence` | `{ path?, store?, autoHydrate? }`                           | SQLite by `path`, or any injected `Store`               |
+| `pipeline`    | `{ enabled?, gates? }`                                      | Synchronous gate pipeline (default: 1 `pre` + N `post`) |
+| `decision`    | `{ policy?, quorum? }`                                      | Defaults for `decide()`                                 |
+| `evolution`   | `{ enabled?, minConfidence? }`                              | Applying proposals also needs `apply: true`             |
+| `codeEdit`    | `{ enabled?, root?, extensions? }`                          | Writing also needs `apply: true`                        |
 
 There is no dashboard, no `port` and no `dataDir` option.
 
 ## Extensibility
 
 ### Adding New DNA Patterns
+
 1. Add `dnas/<name>.yaml`
 2. Validate it against `DNASchema` (the `packages/core/tests/dnas.test.ts` suite fails otherwise)
 3. Update the pattern lists/counts that mention 21 (README, `docs/CLAIMS.md`, …)
 
 ### Adding New MCP Tools
+
 1. Register the tool in `packages/mcp-server/src/server.ts` (`server.registerTool`)
 2. Add its Zod `inputSchema` in the same call
 3. Update the tool-count assertions in `packages/mcp-server/tests/mcp.test.ts`
 
 ### Adding New Engines
+
 1. Implement engine class in `packages/core/src/engine/`
 2. Export from `packages/core/src/engine/index.ts`
 3. Add it to the `BehaviorOS` facade (`behavior-os.ts`)

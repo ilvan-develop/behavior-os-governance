@@ -13,50 +13,103 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 57 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 81 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
+  'bos_add_conversation_turn',
+  'bos_add_knowledge_edge',
+  'bos_add_knowledge_node',
+  'bos_add_temporal_rule',
+  'bos_analyze_workload',
+  'bos_antipattern_report',
   'bos_apply_code_fixes',
+  'bos_apply_natural_language_rules',
+  'bos_assign_task',
+  'bos_assess_pragmatic_value',
+  'bos_behavior_diff',
+  'bos_behavior_profile',
+  'bos_behavior_report',
+  'bos_behavior_summary',
+  'bos_behavior_timeline',
   'bos_cancel_mission',
   'bos_check_quality',
+  'bos_check_temporal',
   'bos_code_edit',
   'bos_code_fixes',
   'bos_complete_mission',
+  'bos_complete_task',
+  'bos_consolidate_memory',
+  'bos_create_brainstorm',
+  'bos_create_dynamic_dna',
   'bos_create_mission',
+  'bos_create_meta_decision',
   'bos_decide',
   'bos_define_policy',
   'bos_drift',
+  'bos_evaluate_dna_temporal',
   'bos_evaluate_governance',
   'bos_evaluate_role_action',
   'bos_evolution',
   'bos_fail_mission',
+  'bos_fix_antipatterns',
   'bos_get_insights',
+  'bos_get_knowledge_graph_stats',
+  'bos_get_log',
+  'bos_get_meta_cognition_stats',
   'bos_get_metrics',
   'bos_get_state',
   'bos_get_status',
   'bos_list_audit_reports',
+  'bos_list_brainstorms',
   'bos_list_code_edits',
-  'bos_override_rule',
-  'bos_reset_metrics',
   'bos_list_code_fixes',
+  'bos_list_conversations',
   'bos_list_decisions',
   'bos_list_dna',
   'bos_list_missions',
   'bos_list_pipeline_runs',
   'bos_list_roles',
+  'bos_override_rule',
+  'bos_parse_rule',
+  'bos_parse_rules_batch',
+  'bos_predict_governance',
   'bos_preflight',
+  'bos_propose_idea',
+  'bos_query_knowledge_graph',
+  'bos_recall_memory',
+  'bos_recall_relevant',
+  'bos_reconstruct_context',
+  'bos_recommend_assignment',
   'bos_recommendations',
   'bos_record_learning',
+  'bos_register_agent_capacity',
   'bos_register_role',
+  'bos_reset_metrics',
+  'bos_resolve_conversation',
   'bos_role_policy_report',
   'bos_run_audit',
+  'bos_save_memory',
+  'bos_scan_antipatterns',
   'bos_select_dna',
   'bos_set_agent',
+  'bos_start_conversation',
   'bos_start_mission',
+  'bos_teach_behavior',
+  'bos_vote_idea',
   'bos_whoami',
 ];
+// MCP_TOOLS count: 81
 
 /** Extra tools registered by the OpenCode plugin (`plugins/opencode-v2`). */
-const PLUGIN_ONLY_TOOLS = ['bos_get_log', 'bos_verify_audit_trail'];
+const PLUGIN_ONLY_TOOLS = [
+  'bos_approve_loop',
+  'bos_get_log',
+  'bos_loop_status',
+  'bos_resolve_consensus',
+  'bos_resume_loop',
+  'bos_start_loop',
+  'bos_suggest_cross_dna_transfer',
+  'bos_verify_audit_trail',
+];
 
 const KNOWN_TOOLS = new Set([...MCP_TOOLS, ...PLUGIN_ONLY_TOOLS]);
 
@@ -73,6 +126,13 @@ const WITHDRAWN_TOOLS = [
   'bos_list_dna_patterns',
   'bos_resolve_truth',
   'bos_validate_dna',
+  'bos_load',
+  'bos_get',
+  'bos_evaluate',
+  'bos_create',
+  'bos_start',
+  'bos_run',
+  'bos_record',
 ];
 
 /** Scripts that current docs deliberately record as removed. */
@@ -511,12 +571,12 @@ describe('documented counts match the code', () => {
   it('derives the counts it is supposed to guard', () => {
     // A broken derivation would silently compare wrong numbers with wrong
     // numbers, so the derivation itself is pinned to the measured reality.
-    expect(measured.mcpTools).toBe(57);
+    expect(measured.mcpTools).toBe(81);
     expect(measured.mcpResources).toBe(2);
-    expect(measured.pluginTools).toBe(37);
+    expect(measured.pluginTools).toBe(70);
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
-    expect(measured.engines).toBe(21);
+    expect(measured.engines).toBe(47);
   });
 
   it('states the tool, resource, engine, DNA and table counts the code has', () => {

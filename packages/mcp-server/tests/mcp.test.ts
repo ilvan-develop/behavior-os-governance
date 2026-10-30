@@ -31,8 +31,30 @@ describe('MCP server structure', () => {
     expect(serverSource).toContain("actor: 'mcp'");
   });
 
-  it('registers exactly 57 tools', () => {
-    expect(toolNames).toHaveLength(57);
+  it('registers exactly 81 tools', () => {
+    expect(toolNames).toHaveLength(81);
+  });
+
+  it('exposes the pragmatic value assessment tool', () => {
+    expect(toolNames).toContain('bos_assess_pragmatic_value');
+  });
+
+  it('exposes the prediction tool', () => {
+    expect(toolNames).toContain('bos_predict_governance');
+  });
+
+  it('exposes the cognitive load balancer tools', () => {
+    expect(toolNames).toContain('bos_register_agent_capacity');
+    expect(toolNames).toContain('bos_assign_task');
+    expect(toolNames).toContain('bos_complete_task');
+    expect(toolNames).toContain('bos_analyze_workload');
+    expect(toolNames).toContain('bos_recommend_assignment');
+  });
+
+  it('exposes the natural language rules tools', () => {
+    expect(toolNames).toContain('bos_parse_rule');
+    expect(toolNames).toContain('bos_parse_rules_batch');
+    expect(toolNames).toContain('bos_apply_natural_language_rules');
   });
 
   it('registers exactly 2 resources', () => {

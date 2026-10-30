@@ -1,6 +1,7 @@
 name: "DevOps Pipeline"
 version: "2.0.0"
 description: "CI/CD governance with deployment gates and rollback protocols"
+
 personas:
   - role: operator
     name: "Release Engineer"
@@ -10,6 +11,7 @@ personas:
       - "deployment-strategies"
       - "rollback-procedures"
       - "infrastructure-as-code"
+
 governance:
   - id: "deployment-approval"
     level: "critical"
@@ -32,6 +34,7 @@ governance:
       - type: "pipeline-change"
         value: true
     description: "Block unauthorized pipeline configuration changes"
+
 quality:
   - id: "test-passing"
     type: "test_coverage"
@@ -42,3 +45,116 @@ quality:
   - id: "lint-clean"
     type: "lint"
     threshold: 0
+
+pipelines:
+  - id: devops-construction
+    name: DevOps Construction Pipeline
+    description: "CI/CD-oriented pipeline with deployment gates and rollback protocols"
+    appliesTo: ["web-app", "api", "microservice"]
+    phases:
+      - id: arch
+        name: Architecture Definition
+        type: architecture
+        order: 0
+        requiredAgents: ["architect"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: adr-required
+            name: ADR required
+            phaseType: architecture
+            blocking: true
+            condition:
+              type: file-exists
+              value: adr/
+              description: "Architecture Decision Record required"
+        readinessArtifact: adr/
+        blocking: true
+      - id: deps
+        name: Dependency Management
+        type: dependencies
+        order: 1
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: dep-policy
+            name: Dependency policy
+            phaseType: dependencies
+            blocking: true
+            condition:
+              type: dep-policy-checked
+              value: true
+              description: "No vulnerable dependencies"
+        readinessArtifact: package.json
+        blocking: true
+      - id: frontend
+        name: Frontend Construction
+        type: frontend
+        order: 2
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: component-check
+            name: Component consistency
+            phaseType: frontend
+            blocking: false
+            condition:
+              type: component-library
+              value: true
+              description: "Components match design system"
+        blocking: true
+      - id: backend
+        name: Backend Construction
+        type: backend
+        order: 3
+        requiredAgents: ["developer"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: api-contract
+            name: API contract
+            phaseType: backend
+            blocking: true
+            condition:
+              type: api-contract
+              value: true
+              description: "API contract matches expectations"
+        blocking: true
+      - id: test
+        name: Testing & Quality
+        type: testing
+        order: 4
+        requiredAgents: ["analyst"]
+        requiredSkills: ["verification-first"]
+        gates:
+          - id: coverage
+            name: Test coverage
+            phaseType: testing
+            blocking: true
+            condition:
+              type: test_coverage
+              value: 80
+              description: "Minimum 80% coverage"
+          - id: lint
+            name: Lint clean
+            phaseType: testing
+            blocking: true
+            condition:
+              type: lint
+              value: 0
+              description: "Zero lint errors"
+        blocking: true
+      - id: deploy
+        name: Deployment
+        type: deployment
+        order: 5
+        requiredAgents: ["operator"]
+        requiredSkills: ["release"]
+        gates:
+          - id: deploy-approval
+            name: Deployment approval
+            phaseType: deployment
+            blocking: true
+            condition:
+              type: deployment
+              value: true
+              description: "All deployments require approval"
+        blocking: true

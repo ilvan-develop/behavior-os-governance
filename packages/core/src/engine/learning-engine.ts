@@ -193,6 +193,8 @@ export class LearningEngine {
       proposals.push({
         id: `evo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         dnaName,
+        // Default: add-warn proposals (safe, no vote required).
+        changeType: 'add-warn',
         kind: 'governance-warn',
         pattern: `${type}@${token}`,
         condition: { type: 'tool', value: token },
@@ -202,7 +204,52 @@ export class LearningEngine {
         occurrences: events.length,
         evidence: events.slice(-5).map((e) => e.content),
         timestamp: new Date().toISOString(),
+        requiresVote: false,
+        voteThreshold: 0,
       });
+
+      // For high-impact failures with strong confidence, propose a vote-gated
+      // block rule (requires 0.90 supermajority).
+      const hasCritical = events.some((e) => e.impact === 'critical');
+      if (hasCritical && confidence >= 0.9) {
+        proposals.push({
+          id: `evo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          dnaName,
+          changeType: 'add-block',
+          kind: 'governance-warn',
+          pattern: `${type}@${token}`,
+          condition: { type: 'tool', value: token },
+          ruleId: `evo-block-${type}-${token}`,
+          description: `Add a block rule for recurring critical "${type}" events from tool "${token}" (confidence ${confidence})`,
+          confidence,
+          occurrences: events.length,
+          evidence: events.slice(-5).map((e) => e.content),
+          timestamp: new Date().toISOString(),
+          requiresVote: true,
+          voteThreshold: 0.9,
+        });
+      }
+
+      // For high-confidence failures on already-blocked tools, propose relaxing
+      // the block (requires 0.67 supermajority).
+      if (hasCritical && confidence >= 0.75) {
+        proposals.push({
+          id: `evo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          dnaName,
+          changeType: 'relax-block',
+          kind: 'governance-warn',
+          pattern: `${type}@${token}`,
+          condition: { type: 'tool', value: token },
+          ruleId: `evo-relax-${type}-${token}`,
+          description: `Relax existing block rule for tool "${token}" to escalate (confidence ${confidence})`,
+          confidence,
+          occurrences: events.length,
+          evidence: events.slice(-5).map((e) => e.content),
+          timestamp: new Date().toISOString(),
+          requiresVote: true,
+          voteThreshold: 0.67,
+        });
+      }
     }
 
     return proposals.sort((a, b) => b.confidence - a.confidence);

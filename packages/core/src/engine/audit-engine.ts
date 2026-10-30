@@ -399,6 +399,11 @@ export class AuditEngine {
       timestamp: new Date().toISOString(),
     }));
 
+    // A simulated audit must never report 'pass' — even when called directly
+    // through AuditEngine (bypassing BehaviorOS.runAudit), the report is
+    // marked simulated and downgraded to 'warning' so it cannot satisfy
+    // mission completion gates. The facade's annotation is a second safety
+    // net; the engine itself owns the invariant.
     const overall: 'pass' | 'fail' | 'warning' = this.determineOverall(stages);
 
     const report: AuditReport = {
@@ -408,8 +413,9 @@ export class AuditEngine {
       dnaPattern: options.dnaPattern ?? null,
       persona: options.persona ?? null,
       stages,
-      overall,
-      summary: this.generateSummary(stages, overall),
+      overall: 'warning',
+      simulated: true,
+      summary: `SIMULATED — no verification executed. ${this.generateSummary(stages, overall)}`,
       timestamp: new Date().toISOString(),
     };
 

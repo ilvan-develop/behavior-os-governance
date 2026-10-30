@@ -17,14 +17,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "node ../../scripts/clean.mjs"
   },
-  "dependencies": {
-    "zod": "^4.4.3"
-  },
   "files": [
     "dist/"
   ],
   "devDependencies": {
     "typescript": "~5.9.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "zod": "^4.6.7"
   }
 }

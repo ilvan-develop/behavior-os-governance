@@ -5,7 +5,6 @@
 ### Patch Changes
 
 - c95526d: Role/policy governance, now with a persistent and automatic surface:
-  
   - New `RolePolicyEngine` (21st engine): deterministic per-role decisions
     (actor resolved by role → persona → agentId, condition prefix/wildcard
     matching, `effectiveUntil` window, strictest-match-wins, fail-safe
@@ -16,7 +15,7 @@
     blocks startup.
   - 5 new MCP tools: `bos_register_role`, `bos_define_policy`,
     `bos_evaluate_role_action`, `bos_role_policy_report`, `bos_list_roles`
-    (57 total, protected by the `registers exactly 57 tools` test).
+    (67 total, protected by the `registers exactly 67 tools` test).
   - `loadDNA` and `setActiveAgent` auto-register the active persona as an
     unprivileged role (no policies, no capabilities) so role attribution works
     out of the box for every DNA; an explicit registration always wins.
@@ -24,7 +23,6 @@
     persisted on pragmatic conversations and 13 `as any` casts were replaced by
     typed facade getters.
 - 2fe6d18: Evolution loop closed end to end:
-  
   - `EvolutionProposalSchema` gains `condition`; the learning engine buckets
     events by `source: tool:<x>` so proposals only exist for a real host tool
     (`{type:'tool', value:<x>}` matches the real context bags). Proposals

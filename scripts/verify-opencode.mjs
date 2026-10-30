@@ -387,12 +387,12 @@ check('plugin loader points at the versioned build', () => {
   return 'auto-discovered loader';
 });
 
-check('plugin exposes 37 unique bos_* tools', () => {
+check('plugin exposes 70 unique bos_* tools', () => {
   const source = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
   const names = [...source.matchAll(/name:\s*'([a-z0-9_]+)'/g)]
     .map((match) => match[1])
     .filter((name) => name.startsWith('bos_'));
-  if (names.length !== 37) fail(`expected 37 bos_* tools, found ${names.length}`);
+  if (names.length !== 70) fail(`expected 70 bos_* tools, found ${names.length}`);
   if (new Set(names).size !== names.length) fail('duplicate bos_* tool names');
   return `${names.length} tools`;
 });
@@ -481,14 +481,14 @@ check('control-plane files are not git-ignored', () => {
   if (files.length === 0) fail('no control-plane files found to check');
   // Batch all checks into a single `git check-ignore` call: one hidden spawn
   // instead of one per file. git exits 0 when at least one listed path is
-  // ignored, and 1 when none are — so exit 1 is the expected green result.
+  // ignored, and 1 when none are â€” so exit 1 is the expected green result.
   const batch = spawnSync('git', ['check-ignore', '--quiet', ...files], {
     cwd: repoRoot,
     stdio: 'ignore',
     windowsHide: true,
   });
   if (batch.status === 0) {
-    // At least one file is (wrongly) ignored — identify which with per-file calls.
+    // At least one file is (wrongly) ignored â€” identify which with per-file calls.
     for (const file of files) {
       const ignored =
         spawnSync('git', ['check-ignore', '--quiet', file], {
@@ -508,7 +508,7 @@ check('control-plane files are not git-ignored', () => {
 console.log('OpenCode V2 control plane');
 for (const result of results) {
   console.log(
-    `  ${result.ok ? 'PASS' : 'FAIL'}  ${result.name}${result.detail ? ` — ${result.detail}` : ''}`,
+    `  ${result.ok ? 'PASS' : 'FAIL'}  ${result.name}${result.detail ? ` â€” ${result.detail}` : ''}`,
   );
 }
 

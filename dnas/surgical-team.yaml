@@ -42,6 +42,63 @@ quality:
     type: security
     threshold: 0
 
+pipelines:
+  - id: surgical-construction
+    name: Surgical Construction Pipeline
+    description: "Minimal pipeline with maximum safety — architecture required before any construction"
+    appliesTo: ["web-app", "api", "mobile", "microservice", "library"]
+    phases:
+      - id: arch
+        name: Pre-operative Architecture
+        type: architecture
+        order: 0
+        requiredAgents: ["architect"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: adr-required
+            name: ADR before any code
+            phaseType: architecture
+            blocking: true
+            condition:
+              type: file-exists
+              value: adr/
+              description: "At least one Architecture Decision Record required"
+        readinessArtifact: adr/
+        blocking: true
+      - id: deps
+        name: Sterile Dependency Check
+        type: dependencies
+        order: 1
+        requiredAgents: ["operator"]
+        requiredSkills: ["verification-first"]
+        gates:
+          - id: dep-vulnerability
+            name: No vulnerable dependencies
+            phaseType: dependencies
+            blocking: true
+            condition:
+              type: security
+              value: 0
+              description: "Zero known vulnerabilities in dependencies"
+        readinessArtifact: package.json
+        blocking: true
+      - id: build
+        name: Controlled Construction
+        type: backend
+        order: 2
+        requiredAgents: ["architect"]
+        requiredSkills: ["engineering-cycle"]
+        gates:
+          - id: test-coverage
+            name: 100% coverage enforced
+            phaseType: testing
+            blocking: true
+            condition:
+              type: test_coverage
+              value: 100
+              description: "100% test coverage required"
+        blocking: true
+
 workflows:
   - id: surgery
     name: Surgical Protocol

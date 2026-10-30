@@ -24,7 +24,13 @@
   },
   "overrides": [
     {
-      "includes": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "**/.turbo/**"],
+      "includes": [
+        "**/dist/**",
+        "**/coverage/**",
+        "**/node_modules/**",
+        "**/.turbo/**",
+        "**/.behavioros/**"
+      ],
       "linter": {
         "enabled": false
       },

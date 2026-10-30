@@ -438,4 +438,872 @@ describe('Real-World Scenarios', () => {
       expect(unreviewed.verdict).toBe('deny');
     });
   });
+
+  // ==========================================
+  // NEW: Enterprise Governance
+  // ==========================================
+  describe('Enterprise Governance (SOX)', () => {
+    it('should enforce change management controls', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Enterprise Governance',
+        version: '2.0.0',
+        description: 'Enterprise compliance',
+        personas: [
+          {
+            role: 'manager',
+            name: 'Ops Manager',
+            authority: 'manager',
+            skills: ['change-management'],
+          },
+        ],
+        governance: [
+          {
+            id: 'change-management',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'production_change', value: true },
+              { type: 'approval_granted', value: false },
+            ],
+            description: 'Production changes require approval',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 80 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Unapproved production change - blocked
+      const unapproved = bos.evaluateGovernance('production_change', {
+        agent: 'operator',
+        context: { production_change: true, approval_granted: false },
+      });
+      expect(unapproved.verdict).toBe('deny');
+      expect(unapproved.rulesEvaluated).toContain('change-management');
+
+      // Approved change - allowed
+      const approved = bos.evaluateGovernance('production_change', {
+        agent: 'operator',
+        context: { production_change: true, approval_granted: true },
+      });
+      expect(approved.verdict).toBe('allow');
+    });
+
+    it('should escalate unauthorized data access', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Enterprise Governance',
+        version: '2.0.0',
+        description: 'Enterprise compliance',
+        personas: [
+          {
+            role: 'security',
+            name: 'Sec Officer',
+            authority: 'security',
+            skills: ['data-protection'],
+          },
+        ],
+        governance: [
+          {
+            id: 'data-protection',
+            level: 'high',
+            action: 'escalate',
+            conditions: [
+              { type: 'unauthorized_access', value: true },
+              { type: 'sensitivity', value: 'confidential' },
+            ],
+            description: 'Escalate unauthorized confidential access',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('access_sensitive_data', {
+        agent: 'intern',
+        context: { unauthorized_access: true, sensitivity: 'confidential' },
+      });
+      expect(decision.verdict).toBe('escalate');
+      expect(decision.rulesEvaluated).toContain('data-protection');
+    });
+  });
+
+  // ==========================================
+  // NEW: Financial Compliance (KYC/AML)
+  // ==========================================
+  describe('Financial Compliance (KYC/AML)', () => {
+    it('should block transactions without KYC verification', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Financial Compliance',
+        version: '2.0.0',
+        description: 'KYC/AML compliance',
+        personas: [
+          {
+            role: 'compliance-officer',
+            name: 'Compliance Officer',
+            authority: 'compliance',
+            skills: ['kyc'],
+          },
+        ],
+        governance: [
+          {
+            id: 'kyc-required',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'transaction_initiated', value: true },
+              { type: 'kyc_verified', value: false },
+            ],
+            description: 'Transactions require KYC verification',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 90 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Transaction without KYC - blocked
+      const noKyc = bos.evaluateGovernance('transaction_initiated', {
+        agent: 'customer',
+        context: { transaction_initiated: true, kyc_verified: false },
+      });
+      expect(noKyc.verdict).toBe('deny');
+      expect(noKyc.rulesEvaluated).toContain('kyc-required');
+
+      // Transaction with KYC - allowed
+      const withKyc = bos.evaluateGovernance('transaction_initiated', {
+        agent: 'customer',
+        context: { transaction_initiated: true, kyc_verified: true },
+      });
+      expect(withKyc.verdict).toBe('allow');
+    });
+
+    it('should monitor large financial transactions', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Financial Compliance',
+        version: '2.0.0',
+        description: 'KYC/AML compliance',
+        personas: [
+          {
+            role: 'analyst',
+            name: 'Risk Analyst',
+            authority: 'compliance',
+            skills: ['monitoring'],
+          },
+        ],
+        governance: [
+          {
+            id: 'large-transaction',
+            level: 'high',
+            action: 'escalate',
+            conditions: [
+              { type: 'transaction_above_threshold', value: true },
+              { type: 'currency', value: 'USD' },
+            ],
+            description: 'Transactions over $10k require monitoring',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('transaction_above_threshold', {
+        agent: 'analyst',
+        context: { transaction_above_threshold: true, currency: 'USD' },
+      });
+      expect(decision.verdict).toBe('escalate');
+      expect(decision.rulesEvaluated).toContain('large-transaction');
+    });
+  });
+
+  // ==========================================
+  // NEW: Lean Factory
+  // ==========================================
+  describe('Lean Factory (Kaizen)', () => {
+    it('should enforce waste reduction procedures', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Lean Factory',
+        version: '2.0.0',
+        description: 'Kaizen compliance',
+        personas: [
+          { role: 'manager', name: 'Process Manager', authority: 'manager', skills: ['kaizen'] },
+        ],
+        governance: [
+          {
+            id: 'waste-reduction',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'process_optimization', value: true },
+              { type: 'waste_identified', value: false },
+            ],
+            description: 'Process optimization requires waste identification',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 85 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Optimization without waste identification - blocked
+      const noWaste = bos.evaluateGovernance('process_optimization', {
+        agent: 'manager',
+        context: { process_optimization: true, waste_identified: false },
+      });
+      expect(noWaste.verdict).toBe('deny');
+      expect(noWaste.rulesEvaluated).toContain('waste-reduction');
+
+      // Optimization with waste identification - allowed
+      const withWaste = bos.evaluateGovernance('process_optimization', {
+        agent: 'manager',
+        context: { process_optimization: true, waste_identified: true },
+      });
+      expect(withWaste.verdict).toBe('allow');
+    });
+
+    it('should support continuous improvement cycles', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Lean Factory CI',
+        version: '2.0.0',
+        description: 'Kaizen continuous improvement',
+        personas: [
+          { role: 'manager', name: 'Process Manager', authority: 'manager', skills: ['kaizen'] },
+        ],
+        governance: [
+          {
+            id: 'waste-reduction',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'process_optimization', value: true },
+              { type: 'waste_identified', value: false },
+            ],
+            description: 'Process optimization requires waste identification',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 85 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      const iterations = 10;
+
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        const decision = bos.evaluateGovernance('process_optimization', {
+          agent: 'manager',
+          context: { process_optimization: true, waste_identified: true },
+        });
+        expect(decision.verdict).toBe('allow');
+      }
+      const duration = performance.now() - start;
+
+      expect(duration).toBeLessThan(2000);
+    });
+  });
+
+  // ==========================================
+  // NEW: Military Operations
+  // ==========================================
+  describe('Military Operations', () => {
+    it('should enforce chain of command for orders', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Military Operations',
+        version: '2.0.0',
+        description: 'Chain of command compliance',
+        personas: [
+          {
+            role: 'commander',
+            name: 'Commander',
+            authority: 'commander',
+            skills: ['military-strategy'],
+          },
+          { role: 'officer', name: 'Officer', authority: 'officer', skills: ['tactics'] },
+        ],
+        governance: [
+          {
+            id: 'chain-of-command',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'direct_order', value: true },
+              { type: 'proper_channel', value: false },
+            ],
+            description: 'Orders must go through proper chain of command',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 90 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Direct order without proper chain - blocked
+      const badOrder = bos.evaluateGovernance('direct_order', {
+        agent: 'soldier',
+        context: { direct_order: true, proper_channel: false },
+      });
+      expect(badOrder.verdict).toBe('deny');
+      expect(badOrder.rulesEvaluated).toContain('chain-of-command');
+
+      // Order through proper chain - allowed
+      const goodOrder = bos.evaluateGovernance('direct_order', {
+        agent: 'soldier',
+        context: { direct_order: true, proper_channel: true },
+      });
+      expect(goodOrder.verdict).toBe('allow');
+    });
+
+    it('should enforce OPSEC for sensitive information', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Military Operations',
+        version: '2.0.0',
+        description: 'OPSEC compliance',
+        personas: [
+          { role: 'operator', name: 'Special Ops', authority: 'operator', skills: ['opsec'] },
+        ],
+        governance: [
+          {
+            id: 'opsec-protocol',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'phi_disclosure', value: true },
+              { type: 'authorized', value: false },
+            ],
+            description: 'PHI must not be disclosed without authorization',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('phi_disclosure', {
+        agent: 'analyst',
+        context: { phi_disclosure: true, authorized: false },
+      });
+      expect(decision.verdict).toBe('deny');
+      expect(decision.rulesEvaluated).toContain('opsec-protocol');
+    });
+  });
+
+  // ==========================================
+  // NEW: Mobile App
+  // ==========================================
+  describe('Mobile App', () => {
+    it('should enforce app store guidelines', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Mobile App',
+        version: '2.0.0',
+        description: 'App store compliance',
+        personas: [
+          {
+            role: 'app-dev',
+            name: 'App Developer',
+            authority: 'developer',
+            skills: ['mobile-dev'],
+          },
+        ],
+        governance: [
+          {
+            id: 'app-store-compliance',
+            level: 'high',
+            action: 'block',
+            conditions: [
+              { type: 'app_submission', value: true },
+              { type: 'guideline_compliant', value: false },
+            ],
+            description: 'App must comply with store guidelines',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 80 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Non-compliant app submission - blocked
+      const nonCompliant = bos.evaluateGovernance('app_submission', {
+        agent: 'developer',
+        context: { app_submission: true, guideline_compliant: false },
+      });
+      expect(nonCompliant.verdict).toBe('deny');
+      expect(nonCompliant.rulesEvaluated).toContain('app-store-compliance');
+
+      // Compliant app submission - allowed
+      const compliant = bos.evaluateGovernance('app_submission', {
+        agent: 'developer',
+        context: { app_submission: true, guideline_compliant: true },
+      });
+      expect(compliant.verdict).toBe('allow');
+    });
+
+    it('should enforce permission requirements', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Mobile App',
+        version: '2.0.0',
+        description: 'App store compliance',
+        personas: [
+          {
+            role: 'app-dev',
+            name: 'App Developer',
+            authority: 'developer',
+            skills: ['mobile-dev'],
+          },
+        ],
+        governance: [
+          {
+            id: 'permission-required',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'permission_request', value: true },
+              { type: 'user_consent', value: false },
+            ],
+            description: 'Permission requests require user consent',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Permission without consent - blocked
+      const noConsent = bos.evaluateGovernance('permission_request', {
+        agent: 'developer',
+        context: { permission_request: true, user_consent: false },
+      });
+      expect(noConsent.verdict).toBe('deny');
+      expect(noConsent.rulesEvaluated).toContain('permission-required');
+
+      // Permission with consent - allowed
+      const withConsent = bos.evaluateGovernance('permission_request', {
+        agent: 'developer',
+        context: { permission_request: true, user_consent: true },
+      });
+      expect(withConsent.verdict).toBe('allow');
+    });
+  });
+
+  // ==========================================
+  // NEW: Open Source
+  // ==========================================
+  describe('Open Source', () => {
+    it('should enforce DCO for contributions', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Open Source',
+        version: '2.0.0',
+        description: 'Open source compliance',
+        personas: [
+          {
+            role: 'contributor',
+            name: 'Contributor',
+            authority: 'contributor',
+            skills: ['coding'],
+          },
+        ],
+        governance: [
+          {
+            id: 'dco-required',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'code_contribution', value: true },
+              { type: 'dco_signed', value: false },
+            ],
+            description: 'Code contributions require DCO signature',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 70 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Contribution without DCO - blocked
+      const noDco = bos.evaluateGovernance('code_contribution', {
+        agent: 'contributor',
+        context: { code_contribution: true, dco_signed: false },
+      });
+      expect(noDco.verdict).toBe('deny');
+      expect(noDco.rulesEvaluated).toContain('dco-required');
+
+      // Contribution with DCO - allowed
+      const withDco = bos.evaluateGovernance('code_contribution', {
+        agent: 'contributor',
+        context: { code_contribution: true, dco_signed: true },
+      });
+      expect(withDco.verdict).toBe('allow');
+    });
+
+    it('should enforce license compliance', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Open Source',
+        version: '2.0.0',
+        description: 'Open source compliance',
+        personas: [
+          {
+            role: 'maintainer',
+            name: 'Project Maintainer',
+            authority: 'maintainer',
+            skills: ['maintenance'],
+          },
+        ],
+        governance: [
+          {
+            id: 'license-compliance',
+            level: 'high',
+            action: 'escalate',
+            conditions: [
+              { type: 'license_violation', value: true },
+              { type: 'project', value: 'open-source' },
+            ],
+            description: 'License violations must be escalated',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('license_violation', {
+        agent: 'contributor',
+        context: { license_violation: true, project: 'open-source' },
+      });
+      expect(decision.verdict).toBe('escalate');
+      expect(decision.rulesEvaluated).toContain('license-compliance');
+    });
+  });
+
+  // ==========================================
+  // NEW: Quantum Computing
+  // ==========================================
+  describe('Quantum Computing', () => {
+    it('should enforce qubit coherence requirements', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Quantum Computing',
+        version: '2.0.0',
+        description: 'Quantum pipeline safety',
+        personas: [
+          {
+            role: 'quantum-engineer',
+            name: 'Q Engineer',
+            authority: 'technical',
+            skills: ['quantum'],
+          },
+        ],
+        governance: [
+          {
+            id: 'coherence-required',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'deploy_quantum', value: true },
+              { type: 'coherence_time', value: '< 1ms' },
+            ],
+            description: 'Quantum operations require minimum coherence time',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 95 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Deploy with insufficient coherence - blocked
+      const lowCoherence = bos.evaluateGovernance('deploy_quantum', {
+        agent: 'q-engineer',
+        context: { deploy_quantum: true, coherence_time: '< 1ms' },
+      });
+      expect(lowCoherence.verdict).toBe('deny');
+      expect(lowCoherence.rulesEvaluated).toContain('coherence-required');
+
+      // Deploy with sufficient coherence - allowed
+      const goodCoherence = bos.evaluateGovernance('deploy_quantum', {
+        agent: 'q-engineer',
+        context: { deploy_quantum: true, coherence_time: '>= 1ms' },
+      });
+      expect(goodCoherence.verdict).toBe('allow');
+    });
+
+    it('should enforce error correction requirements', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Quantum Computing',
+        version: '2.0.0',
+        description: 'Quantum pipeline safety',
+        personas: [
+          {
+            role: 'quantum-engineer',
+            name: 'Q Engineer',
+            authority: 'technical',
+            skills: ['quantum'],
+          },
+        ],
+        governance: [
+          {
+            id: 'error-correction',
+            level: 'high',
+            action: 'escalate',
+            conditions: [
+              { type: 'quantum_error_rate', value: '> 1%' },
+              { type: 'code_distance', value: '< 5' },
+            ],
+            description: 'High error rate requires error correction',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('quantum_error_rate', {
+        agent: 'q-engineer',
+        context: { quantum_error_rate: '> 1%', code_distance: '< 5' },
+      });
+      expect(decision.verdict).toBe('escalate');
+      expect(decision.rulesEvaluated).toContain('error-correction');
+    });
+  });
+
+  // ==========================================
+  // NEW: Research Lab
+  // ==========================================
+  describe('Research Lab', () => {
+    it('should enforce reproducibility requirements', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Research Lab',
+        version: '2.0.0',
+        description: 'Research reproducibility',
+        personas: [
+          {
+            role: 'researcher',
+            name: 'Lead Researcher',
+            authority: 'admin',
+            skills: ['experimentation'],
+          },
+        ],
+        governance: [
+          {
+            id: 'reproducibility',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'experiment_publish', value: true },
+              { type: 'data_available', value: false },
+            ],
+            description: ' Experiments must have data available for reproducibility',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 90 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Publish without data - blocked
+      const noData = bos.evaluateGovernance('experiment_publish', {
+        agent: 'researcher',
+        context: { experiment_publish: true, data_available: false },
+      });
+      expect(noData.verdict).toBe('deny');
+      expect(noData.rulesEvaluated).toContain('reproducibility');
+
+      // Publish with data - allowed
+      const withData = bos.evaluateGovernance('experiment_publish', {
+        agent: 'researcher',
+        context: { experiment_publish: true, data_available: true },
+      });
+      expect(withData.verdict).toBe('allow');
+    });
+
+    it('should enforce ethics review', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Research Lab',
+        version: '2.0.0',
+        description: 'Research reproducibility',
+        personas: [
+          { role: 'ethicist', name: 'Ethics Reviewer', authority: 'admin', skills: ['ethics'] },
+        ],
+        governance: [
+          {
+            id: 'ethics-review',
+            level: 'critical',
+            action: 'block',
+            conditions: [
+              { type: 'human_subjects', value: true },
+              { type: 'irb_approved', value: false },
+            ],
+            description: 'Human subjects research requires IRB approval',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Human subjects without IRB - blocked
+      const noIRB = bos.evaluateGovernance('human_subjects', {
+        agent: 'researcher',
+        context: { human_subjects: true, irb_approved: false },
+      });
+      expect(noIRB.verdict).toBe('deny');
+      expect(noIRB.rulesEvaluated).toContain('ethics-review');
+    });
+  });
+
+  // ==========================================
+  // NEW: Startup Agile (additional tests)
+  // ==========================================
+  describe('Startup Agile - Advanced', () => {
+    it('should support mission lifecycle management', async () => {
+      const bos = new BehaviorOS();
+      const missions: string[] = [];
+
+      for (let i = 0; i < 30; i++) {
+        const mission = bos.createMission({
+          title: `Feature ${i}`,
+          type: 'feature',
+          priority: 'high',
+        });
+        bos.startMission(mission.id);
+        bos.completeMission(mission.id);
+        missions.push(mission.id);
+      }
+
+      const listed = bos.listMissions();
+      expect(listed).toHaveLength(30);
+    });
+
+    it('should learning record promotion sequences', async () => {
+      const bos = new BehaviorOS();
+
+      // Create a mission
+      const mission = bos.createMission({
+        title: 'Test Learning',
+        type: 'research',
+        priority: 'medium',
+      });
+
+      // Record observation
+      const obs = bos.recordLearning({
+        type: 'observation',
+        source: 'test',
+        content: 'Test observation',
+        impact: 'low',
+        relatedMission: mission.id,
+      });
+      expect(obs.type).toBe('observation');
+
+      // Promote to lesson
+      const lesson = await bos.recordLearning({
+        type: 'lesson',
+        source: 'test',
+        content: 'Test lesson',
+        impact: 'medium',
+        relatedMission: mission.id,
+      });
+      expect(lesson.type).toBe('lesson');
+
+      // Promote to candidate
+      const candidate = await bos.recordLearning({
+        type: 'pattern',
+        source: 'test',
+        content: 'Test pattern',
+        impact: 'high',
+        relatedMission: mission.id,
+      });
+      expect(candidate.type).toBe('pattern');
+    });
+  });
+
+  // ==========================================
+  // NEW: Surgical Team
+  // ==========================================
+  describe('Surgical Team', () => {
+    it('should block production changes (sterile-field)', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Surgical Team',
+        version: '2.0.0',
+        description: 'Zero-defect governance',
+        personas: [
+          {
+            role: 'surgeon',
+            name: 'Lead Surgeon',
+            authority: 'surgeon',
+            skills: ['surgical-procedure'],
+          },
+        ],
+        governance: [
+          {
+            id: 'sterile-field',
+            level: 'critical',
+            action: 'block',
+            conditions: [{ type: 'production_change', value: true }],
+            description: 'Block any non-approved production changes',
+          },
+        ],
+        quality: [{ id: 'q1', type: 'test_coverage', threshold: 100 }],
+      };
+
+      await bos.loadDNA(dna);
+
+      // Production change without approval - blocked
+      const change = bos.evaluateGovernance('production_change', {
+        agent: 'surgeon',
+        context: { production_change: true },
+      });
+      expect(change.verdict).toBe('deny');
+      expect(change.rulesEvaluated).toContain('sterile-field');
+    });
+
+    it('should enforce sterile procedure compliance', async () => {
+      const bos = new BehaviorOS();
+      const dna: DNA = {
+        name: 'Surgical Team',
+        version: '2.0.0',
+        description: 'Zero-defect governance',
+        personas: [
+          {
+            role: 'surgeon',
+            name: 'Lead Surgeon',
+            authority: 'surgeon',
+            skills: ['surgical-procedure'],
+          },
+        ],
+        governance: [
+          {
+            id: 'sterile-procedure',
+            level: 'critical',
+            action: 'block',
+            conditions: [{ type: 'instrument_handling', value: true }],
+            description: 'Block non-sterile instrument handling',
+          },
+        ],
+        quality: [],
+      };
+
+      await bos.loadDNA(dna);
+
+      const decision = bos.evaluateGovernance('instrument_handling', {
+        agent: 'nurse',
+        context: { instrument_handling: true },
+      });
+      expect(decision.verdict).toBe('deny');
+      expect(decision.rulesEvaluated).toContain('sterile-procedure');
+    });
+  });
 });

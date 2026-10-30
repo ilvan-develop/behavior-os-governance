@@ -13,7 +13,7 @@
  * and dead letters remain a host concern.
  */
 
-export const NOTIFICATION_STATE_VERSION = 1;
+export const NOTIFICATION_STATE_VERSION = 2;
 
 /** Governance decision families that produce a user-visible notice. */
 export type NotificationKind = 'deny' | 'escalate' | 'dna' | 'mission';
@@ -62,6 +62,13 @@ interface SessionState {
 export interface CoalescerSnapshot {
   version: typeof NOTIFICATION_STATE_VERSION;
   sessions: Record<string, SessionState>;
+  /**
+   * Monotonic counter of notices ever sent by this coalescer instance. Used to
+   * detect consumer-side losses across restarts: if the restored total is less
+   * than what the host inbox reports as delivered, notices were dropped.
+   * Incremented on every `take()` that returns `send: true`.
+   */
+  totalSent: number;
 }
 
 /**
@@ -114,6 +121,8 @@ export class NotificationCoalescer {
   private readonly maxPerWindow: number;
   private readonly now: () => number;
   private sessions = new Map<string, SessionState>();
+  /** Monotonic total of notices sent; used for cross-restart loss detection. */
+  private totalSent = 0;
 
   constructor(options: CoalescerOptions) {
     if (!Number.isFinite(options.windowMs) || options.windowMs <= 0) {
@@ -150,6 +159,7 @@ export class NotificationCoalescer {
 
     session.keys[key] = at;
     session.sent += 1;
+    this.totalSent += 1;
     return { send: true, key, at };
   }
 
@@ -188,13 +198,17 @@ export class NotificationCoalescer {
     for (const [sessionID, session] of this.sessions) {
       sessions[sessionID] = { ...session, keys: { ...session.keys } };
     }
-    return { version: NOTIFICATION_STATE_VERSION, sessions };
+    return { version: NOTIFICATION_STATE_VERSION, sessions, totalSent: this.totalSent };
   }
 
   /**
    * Replace state from a stored snapshot. Returns `false` and leaves the
    * current state untouched when the value is invalid; callers must treat a
    * corrupt snapshot as a cold start, never as a reason to throw.
+   *
+   * On v2 snapshots, logs a warning if the restored `totalSent` is less than
+   * what the host inbox has already delivered — that gap means notices were
+   * lost between restarts and the consumer should be alerted.
    */
   restore(snapshot: unknown): boolean {
     if (!isRecord(snapshot)) return false;
@@ -207,6 +221,7 @@ export class NotificationCoalescer {
       sessions.set(sessionID, { ...value, keys: { ...value.keys } });
     }
     this.sessions = sessions;
+    this.totalSent = typeof snapshot.totalSent === 'number' ? snapshot.totalSent : 0;
     return true;
   }
 

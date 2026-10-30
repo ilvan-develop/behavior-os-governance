@@ -19,7 +19,7 @@ Equipes de IA estão ficando cada vez mais comuns no desenvolvimento de software
 
 **Behavior-OS é o sistema operacional para equipes autônomas de agentes de IA.**
 
-Ele define *como* os agentes pensam, decidem, colaboram e aprendem — usando padrões comportamentais baseados em DNA (YAML-driven), pipelines determinísticos e orquestração autônoma.
+Ele define _como_ os agentes pensam, decidem, colaboram e aprendem — usando padrões comportamentais baseados em DNA (YAML-driven), pipelines determinísticos e orquestração autônoma.
 
 > Pense no Behavior-OS como o Kubernetes para agentes de IA: governança, orquestração e observabilidade prontas para uso.
 
@@ -28,6 +28,7 @@ Ele define *como* os agentes pensam, decidem, colaboram e aprendem — usando pa
 ## Como Funciona
 
 ### 1. **DNA Patterns** — O Código Comportamental
+
 Padrões YAML que definem roles, regras de governança, gates de qualidade e workflows. Escolha um padrão pronto ou crie o seu:
 
 ```
@@ -43,22 +44,24 @@ Padrões YAML que definem roles, regras de governança, gates de qualidade e wor
 ```
 
 ### 2. **Governança em Camadas**
+
 Cada ação é avaliada automaticamente:
 
-| Camada | Função |
-|--------|--------|
-| Governance | Avalia regras (block/escalate/warn/log/transform) |
-| Quality | Gates automáticos (coverage ≥ 80%, lint=0, security=0) |
-| Audit | Pipeline multi-estágio (lint → typecheck → security → coverage; simulado por padrão) |
-| Learning | Deteção de padrões recorrentes; edições de código só com opt-in + `apply:true` (dry-run por padrão) |
-| Decision | Votação ponderada + quorum (majority/supermajority/unanimous) |
-| Mission | Ciclo de vida completo (criar → executar → completar) |
-| DNA (DNALoader) | Carrega e valida padrões YAML com Zod |
+| Camada          | Função                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Governance      | Avalia regras (block/escalate/warn/log/transform)                                                   |
+| Quality         | Gates automáticos (coverage ≥ 80%, lint=0, security=0)                                              |
+| Audit           | Pipeline multi-estágio (lint → typecheck → security → coverage; simulado por padrão)                |
+| Learning        | Deteção de padrões recorrentes; edições de código só com opt-in + `apply:true` (dry-run por padrão) |
+| Decision        | Votação ponderada + quorum (majority/supermajority/unanimous)                                       |
+| Mission         | Ciclo de vida completo (criar → executar → completar)                                               |
+| DNA (DNALoader) | Carrega e valida padrões YAML com Zod                                                               |
 
 > O `PipelineEngine` (core) executa gates ordenados de forma síncrona: um gate
 > `pre` bloqueante veta a ação **antes** de ela correr, em qualquer host.
 
 ### 3. **Protocolo de 7 Passos**
+
 Processo determinístico para qualquer tarefa:
 
 ```
@@ -81,13 +84,13 @@ Cada passo só avança quando a ferramenta correspondente corre
 
 Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**:
 
-| Ferramenta | Status |
-|------------|--------|
-| Claude Code | ✅ Pronto |
-| Cursor | ✅ Pronto |
-| VS Code + GitHub Copilot | ✅ Pronto |
-| OpenCode v2 | ✅ Plugin nativo |
-| Windsurf | ✅ Pronto |
+| Ferramenta               | Status           |
+| ------------------------ | ---------------- |
+| Claude Code              | ✅ Pronto        |
+| Cursor                   | ✅ Pronto        |
+| VS Code + GitHub Copilot | ✅ Pronto        |
+| OpenCode v2              | ✅ Plugin nativo |
+| Windsurf                 | ✅ Pronto        |
 
 **30 ferramentas MCP** para clientes externos (criação de missões, avaliação de governança, pre-flight de ações, votação/quorum, evolução de DNA, propostas e aplicação de correções de código, edição governada de ficheiros (dry-run por omissão), listagem de resultados, recomendações, drift entre DNAs, execução de auditorias, registro de aprendizados e mais) + **32 tools nativas `bos_*`** no OpenCode v2 via plugin.
 
@@ -95,14 +98,14 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 
 ## Por Que Usar Behavior-OS?
 
-| Sem Behavior-OS | Com Behavior-OS |
-|-----------------|-----------------|
-| Agentes imprevisíveis | Comportamento determinístico via DNA |
-| Sem rastreamento | Auditoria completa de cada ação |
-| Revisão manual constante | Governança automatizada |
-| Erros se repetem | Engine de aprendizado deteta padrões recorrentes |
-| Coordenação difícil | Protocolo de 7 passos + missões rastreáveis |
-| Infraestrutura ad-hoc | 21 engines + CLI + SDK prontos |
+| Sem Behavior-OS          | Com Behavior-OS                                  |
+| ------------------------ | ------------------------------------------------ |
+| Agentes imprevisíveis    | Comportamento determinístico via DNA             |
+| Sem rastreamento         | Auditoria completa de cada ação                  |
+| Revisão manual constante | Governança automatizada                          |
+| Erros se repetem         | Engine de aprendizado deteta padrões recorrentes |
+| Coordenação difícil      | Protocolo de 7 passos + missões rastreáveis      |
+| Infraestrutura ad-hoc    | 47 engines + CLI + SDK prontos                   |
 
 ---
 
@@ -154,20 +157,20 @@ pnpm test
 Ou experimente o SDK:
 
 ```typescript
-import { BehaviorOS } from '@behavior-os/sdk'
+import { BehaviorOS } from '@behavior-os/sdk';
 
 const bos = new BehaviorOS({
   dnaPath: './dnas/surgical-team.yaml',
   quality: { enabled: true, minCoverage: 80 },
   audit: { enabled: true },
   learning: { enabled: true },
-})
+});
 
 const mission = bos.createMission({
   title: 'Implement payment module',
   type: 'feature',
   priority: 'high',
-})
+});
 ```
 
 ---

@@ -137,7 +137,8 @@ describe('NotificationCoalescer', () => {
     const invalid: unknown[] = [
       null,
       {},
-      { version: 2, sessions: {} },
+      { version: 2 }, // missing sessions
+      { version: 3, sessions: {} }, // future version
       { version: 1, sessions: [] },
       {
         version: 1,

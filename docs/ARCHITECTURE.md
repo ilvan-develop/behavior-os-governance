@@ -7,6 +7,7 @@ Behavior-OS is a behavioral governance framework for autonomous AI agent teams. 
 ## Architecture Layers
 
 ### 1. DNA Layer (YAML Configuration)
+
 The foundation layer where behavioral patterns are defined as YAML files.
 
 ```yaml
@@ -34,6 +35,7 @@ quality:
 ```
 
 ### 2. Schema Layer (Zod v4.4.3)
+
 Type-safe validation for all domain objects.
 
 - `DNASchema` - DNA pattern validation
@@ -44,16 +46,19 @@ Type-safe validation for all domain objects.
 - `LearningEventSchema` - Learning records
 
 ### 3. Behavioral Layer
+
 Loads and validates DNA patterns, composes multi-package behaviors.
 
 ### 4. Governance Layer
+
 Evaluates actions against governance rules.
 - Actions: `block`, `escalate`, `warn`, `log`
 - Levels: `critical`, `high`, `medium`, `low`
 
 ### 5. Gate Pipeline Layer
+
 A real, ordered gate pipeline (`PipelineEngine`, `pipeline-engine.ts`). Gates run
-**synchronously** and may be *blocking*: a blocking `failed` halts the run and
+**synchronously** and may be _blocking_: a blocking `failed` halts the run and
 vetoes the action before it executes. `BehaviorOS.preflightAction()` runs the
 `pre` gates synchronously (a core-level, host-agnostic equivalent of the OpenCode
 plugin's permission hook); `runPipeline()` runs `pre` + `post`.
@@ -64,6 +69,7 @@ quality gate (post, blocking). Callers replace them with `pipeline.gates`, and
 layers — the default pipeline is 1 pre + N post gates (N = DNA quality gates).
 
 ### 6. Decision Layer
+
 Voting/quorum engine (`DecisionEngine`, `decision-engine.ts`). A subject is
 resolved by weighted votes under a policy (`majority`, `supermajority`,
 `unanimous`) with a quorum threshold; ties and all-abstain resolve to `rejected`
@@ -72,6 +78,7 @@ outcome. This is deterministic in-process voting — **not** a distributed
 consensus protocol (no Raft/Paxos).
 
 ### 7. Audit Layer
+
 Multi-stage audit pipeline. `AuditStageSchema` defines **6** stages
 (`lint`, `typecheck`, `security`, `coverage`, `performance`, `governance`); the
 default run uses the first four.
@@ -88,12 +95,14 @@ default run uses the first four.
 > `BehaviorOS`.
 
 ### 8. Quality Layer
+
 Quality gates enforcement:
 - Test coverage ≥ 80%
 - Zero lint errors
 - Zero security vulnerabilities
 
 ### 9. Learning Layer
+
 Pattern detection over recorded events:
 - Record events
 - Detect recurring patterns (an event type seen ≥ 2 times)
@@ -120,6 +129,7 @@ a `warn` rule, so evolution can never block an action. It does **not** edit
 source files; there is no code auto-fix.
 
 ### 10. Mission Layer
+
 Mission lifecycle management:
 - Create → Start → Execute → Complete/Fail
 - Evidence provenance (`executed` / `reported` / `simulated`) and an optional
@@ -131,19 +141,19 @@ These are the only engines that exist in `packages/core/src/engine/`. Earlier
 revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
 only the eleven below are real, and no throughput numbers are claimed.
 
-| Engine | File | Purpose |
-|--------|------|---------|
-| GovernanceEngine | `governance-engine.ts` | Rule evaluation with TTL cache |
-| QualityEngine | `quality-engine.ts` | Quality gate enforcement (gte/lte/eq/neq) |
-| AuditEngine | `audit-engine.ts` | Multi-stage audit (simulated or real) |
-| LearningEngine | `learning-engine.ts` | Pattern detection + confidence-scored DNA evolution proposals + evidence-gated learning lifecycle |
-| MissionEngine | `mission-engine.ts` | In-memory mission lifecycle |
-| PipelineEngine | `pipeline-engine.ts` | Ordered gates with synchronous pre-execution blocking |
-| DecisionEngine | `decision-engine.ts` | Weighted voting/quorum (majority/supermajority/unanimous) |
-| RecommendationEngine | `recommendation-engine.ts` | Scored recommendations from learning events |
-| DriftEngine | `drift-engine.ts` | Behavioral drift between DNA snapshots |
-| CodeEditEngine | `code-edit-engine.ts` | Guarded single-file text edits (dry-run, confinement, hashes) |
-| DNALoader | `dna-loader.ts` | YAML pattern loading with Zod validation |
+| Engine               | File                       | Purpose                                                                                           |
+| -------------------- | -------------------------- | ------------------------------------------------------------------------------------------------- |
+| GovernanceEngine     | `governance-engine.ts`     | Rule evaluation with TTL cache                                                                    |
+| QualityEngine        | `quality-engine.ts`        | Quality gate enforcement (gte/lte/eq/neq)                                                         |
+| AuditEngine          | `audit-engine.ts`          | Multi-stage audit (simulated or real)                                                             |
+| LearningEngine       | `learning-engine.ts`       | Pattern detection + confidence-scored DNA evolution proposals + evidence-gated learning lifecycle |
+| MissionEngine        | `mission-engine.ts`        | In-memory mission lifecycle                                                                       |
+| PipelineEngine       | `pipeline-engine.ts`       | Ordered gates with synchronous pre-execution blocking                                             |
+| DecisionEngine       | `decision-engine.ts`       | Weighted voting/quorum (majority/supermajority/unanimous)                                         |
+| RecommendationEngine | `recommendation-engine.ts` | Scored recommendations from learning events                                                       |
+| DriftEngine          | `drift-engine.ts`          | Behavioral drift between DNA snapshots                                                            |
+| CodeEditEngine       | `code-edit-engine.ts`      | Guarded single-file text edits (dry-run, confinement, hashes)                                     |
+| DNALoader            | `dna-loader.ts`            | YAML pattern loading with Zod validation                                                          |
 
 ## Persistence (pluggable)
 
@@ -156,17 +166,17 @@ built-in SQLite store instead.
 **SQLite (default, zero dependency).** Uses the built-in `node:sqlite` module
 (Node ≥ 22.5). Nine tables keep state across restarts:
 
-| Table | Contents |
-|---|---|
-| `missions` | one row per mission (+ indexed status/type/priority) |
-| `learnings` | one row per learning event |
-| `agents` | one row per registered agent |
-| `audit_log` | one row per audit report (append-only by convention) |
-| `pipeline_runs` | one row per gate-pipeline run / blocked pre-flight |
-| `decisions` | one row per voting/quorum outcome |
-| `code_fix_results` | one row per applied code-fix result (deduped by `pattern`) |
-| `code_edits` | one row per governed code-edit evaluation (dry-runs and refusals included) |
-| `meta` | key/value metadata |
+| Table              | Contents                                                                   |
+| ------------------ | -------------------------------------------------------------------------- |
+| `missions`         | one row per mission (+ indexed status/type/priority)                       |
+| `learnings`        | one row per learning event                                                 |
+| `agents`           | one row per registered agent                                               |
+| `audit_log`        | one row per audit report (append-only by convention)                       |
+| `pipeline_runs`    | one row per gate-pipeline run / blocked pre-flight                         |
+| `decisions`        | one row per voting/quorum outcome                                          |
+| `code_fix_results` | one row per applied code-fix result (deduped by `pattern`)                 |
+| `code_edits`       | one row per governed code-edit evaluation (dry-runs and refusals included) |
+| `meta`             | key/value metadata                                                         |
 
 Enable it with `new BehaviorOS({ persistence: { path: './behavioros.db' } })`, or
 set `BEHAVIOROS_DB_PATH` when running the MCP server. Without a path the engine
@@ -184,7 +194,7 @@ flushes and ends the pool.
 
 Strong consistency for writers is provided by `Store.withTransaction(fn)`: the
 callback runs inside `BEGIN` / `COMMIT` / `ROLLBACK` on a dedicated connection,
-and the mirror is updated *only* after the COMMIT succeeds, so a concurrent
+and the mirror is updated _only_ after the COMMIT succeeds, so a concurrent
 reader sees either all writes or none. `BehaviorOS.persistAll()` already calls
 `withTransaction` automatically.
 
@@ -238,7 +248,7 @@ pending ──▶ active ──▶ completed   (terminal)
   persist → rollback, so a failed write restores only its own transition and can
   never erase a concurrent one. Storage writes additionally remain serialized
   and cross-instance writes are merged by revision. The residual equal-revision
-  race across *separate* plugin instances requires a backend with compare-and-swap;
+  race across _separate_ plugin instances requires a backend with compare-and-swap;
   the core kernel and the SQLite path do not share that limitation.
 
 ### Exposure
@@ -259,7 +269,7 @@ pending ──▶ active ──▶ completed   (terminal)
 mission plan through real adapters. `ControlLoop`
 (`packages/orchestrator/src/control-loop.ts`) adds durable, evidence-driven
 continuation on top of it. Both are libraries, not new tool surfaces: MCP still
-exposes 57 tools and the plugin 37.
+exposes 81 tools and the plugin 38.
 
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
@@ -326,17 +336,20 @@ exposes 57 tools and the plugin 37.
 
 Boundary: the control-loop state file can contain task inputs and must be
 protected like any other execution artifact; `seedEvidence` is trusted caller
-input and must only come from such a protected prior run. The orchestrator
-remains a library; the loop is not yet wired into the MCP/plugin tool surface.
+input and must only come from such a protected prior run. The orchestrator is
+wired into the plugin via `LoopManager`; the plugin does not supply an independent
+auditor so the loop never reports overall `PASS` — it stops as `UNVERIFIED`.
 
 ## Integration Points
 
 ### MCP Server (standalone)
-- 57 tools + 2 resources exposed via Model Context Protocol
+
+- 81 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 
 ### OpenCode v2 Plugin (single native channel)
+
 - 37 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
@@ -371,6 +384,7 @@ delete or replay host inbox records, and it does not guarantee timely
 delivery. Those remain consumer responsibilities in OpenCode.
 
 ### CLI
+
 - Project initialization
 - DNA compilation
 - Validation
@@ -433,15 +447,18 @@ The system ships with **seven** real, measurable algorithms (not synthetic
 ## Extensibility
 
 ### Adding New DNA Patterns
+
 1. Create a YAML file in `dnas/`
 2. It is auto-discovered by the CLI, MCP server and plugin (no central registry file)
 3. Add a test in the relevant package's `tests/` directory
 
 ### Adding MCP Tools
+
 1. Add a `server.registerTool(...)` call in `packages/mcp-server/src/server.ts`
 2. Add a Zod input schema in the same call
 
 ### Adding OpenCode Plugin Tools
+
 1. Use `ctx.tool.transform()` in plugin setup (`plugins/opencode-v2/src/index.ts`)
 2. Register with JSON Schema
 3. Implement the execute handler
@@ -463,3 +480,27 @@ own harness (vitest or a plain `node` script importing the built package).
 - Integration tests: Full pipeline validation
 - E2E tests: MCP server interaction
 - Coverage target: > 80%
+## Known Architectural Boundaries
+
+These are measured gaps, not bugs. They are declared so nothing is mistaken
+for marketing or a hidden defect.
+
+- **Simulated audit via direct AuditEngine**: `runSimulated()` now forces
+  `overall: 'warning'` and `simulated: true`, but a host that introspects the
+  engine's internal `simulate` field could bypass the guard. Always consume
+  reports through `BehaviorOS.runAudit()`.
+- **Cross-instance equal-revision race**: two OpenCode sessions writing the same
+  revision may lose data even after triple-retry. A backend with compare-and-swap
+  would eliminate this; the current get/set storage cannot.
+- **Notification coalescing producer-side only**: the coalescer bounds the
+  producer but never ACKs, expires, or DLQs host inbox records. `totalSent`
+  (v2) enables cross-restart loss detection, but lost notices remain unrecoverable.
+- **ControlLoop ran without an independent auditor**: `bos_start_loop` now
+  dispatches real tasks through `AutonomousOrchestrator` (default `ShellAdapter`)
+  and persists durable state under `.behavioros/loops/`, but the plugin wires no
+  independent auditor. The loop therefore never reports an overall `PASS`; runs
+  stop as `UNVERIFIED` even when every task passes. Hosts that need a terminal
+  `done` must resume the run with their own auditor.
+- **Loop approval gate is now surfaced as a tool**: `bos_approve_loop` records
+  `approved` or `denied` on a loop blocked by `APPROVAL_REQUIRED` and resumes
+  dispatch. A subsequent gate may block again.

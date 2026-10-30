@@ -21,6 +21,13 @@ step after `bos_select_dna` requires a DNA to be selected first — so browsing
 tools cannot fake progress. The current step is surfaced by the plugin's
 `session.context` hook.
 
+> **Note:** `bos_get_state` advances the protocol step even though it is a
+> read-only operation. This is intentional: the protocol tracks *session
+> progression*, not just mutations. Every call to `bos_get_state` consumes one
+> step slot, so repeated state reads before `bos_create_mission` will push the
+> agent past step 3. Design the session flow to call `bos_get_state` once after
+> `bos_list_dna` and then proceed.
+
 ## DNA patterns
 
 The **21** patterns shipped in `dnas/*.yaml` are listed in

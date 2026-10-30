@@ -15,12 +15,12 @@ Monorepo layout:
 
 ```text
 packages/schemas/      Zod schemas for every domain type
-packages/core/         21 engines + BehaviorOS facade + persistence
+packages/core/         47 engines + BehaviorOS facade + persistence
 packages/sdk/          TypeScript SDK
 packages/cli/          CLI (init, validate, status, simulate, deploy, ...)
-packages/mcp-server/   MCP server: 57 tools + 2 resources (stdio)
+packages/mcp-server/   MCP server: 81 tools + 2 resources (stdio)
 packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (64 tests)
-plugins/opencode-v2/   OpenCode V2 plugin: 37 bos_* tools + hooks
+plugins/opencode-v2/   OpenCode V2 plugin: 70 bos_* tools + hooks
 examples/              Workspace example app (4 tests in `pnpm test`)
 dnas/                  21 DNA pattern YAML files
 docs/                  Documentation; docs/CLAIMS.md is the source of truth
@@ -78,15 +78,15 @@ failing output and stop; do not “fix” it by weakening the gate.
 
 Use the right layer for the right concern:
 
-| Layer | Location | Purpose |
-| --- | --- | --- |
-| Permanent rules | `AGENTS.md` | How agents think and verify in this repo |
-| Project config | `opencode.json` | Instructions, permissions, formatter, watcher |
-| Skills | `.opencode/skills/<id>/SKILL.md` | Procedures loaded only when relevant |
-| Agents | `.opencode/agents/<id>.md` | Research, planning, implementation, audit roles |
-| Commands | `.opencode/commands/<id>.md` | Repeatable `/govern`, `/verify`, `/audit` workflows |
-| Plugin | `.opencode/plugins/behavioros.ts` | Native Behavior-OS enforcement and 37 tools |
-| MCP | `packages/mcp-server` (+ local `.mcp.json`) | Integration for external MCP clients |
+| Layer           | Location                                    | Purpose                                             |
+| --------------- | ------------------------------------------- | --------------------------------------------------- |
+| Permanent rules | `AGENTS.md`                                 | How agents think and verify in this repo            |
+| Project config  | `opencode.json`                             | Instructions, permissions, formatter, watcher       |
+| Skills          | `.opencode/skills/<id>/SKILL.md`            | Procedures loaded only when relevant                |
+| Agents          | `.opencode/agents/<id>.md`                  | Research, planning, implementation, audit roles     |
+| Commands        | `.opencode/commands/<id>.md`                | Repeatable `/govern`, `/verify`, `/audit` workflows |
+| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 41 tools         |
+| MCP             | `packages/mcp-server` (+ local `.mcp.json`) | Integration for external MCP clients                |
 
 The native OpenCode integration is the plugin. Do **not** register the same
 Behavior-OS MCP server in `opencode.json`; it would duplicate 30 tools under a

@@ -61,6 +61,104 @@ export const WorkflowSchema = z.object({
   steps: z.array(WorkflowStepSchema),
 });
 
+// ============================================================
+// DNA-Adaptive Construction Pipeline Schemas (G-021)
+// ============================================================
+
+/**
+ * The type of a construction pipeline phase. These mirror the
+ * phases a human software-factory director would mandate.
+ */
+export const PipelinePhaseDefinitionTypeSchema = z.enum([
+  'architecture',
+  'planning',
+  'dependencies',
+  'frontend',
+  'backend',
+  'integration',
+  'testing',
+  'deployment',
+  'documentation',
+]);
+
+/**
+ * A single gate within a construction pipeline phase.
+ * Gates are evaluated by the PipelineEngine and must pass
+ * before the phase (and subsequent phases) can proceed.
+ */
+export const ConstructionPipelineGateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Which pipeline phase this gate belongs to. */
+  phaseType: PipelinePhaseDefinitionTypeSchema,
+  /** Whether a failure halts the pipeline. */
+  blocking: z.boolean().default(true),
+  /**
+   * The gate evaluation condition as a structured key+value.
+   * Evaluated against the phase context and project artifacts.
+   */
+  condition: z.object({
+    type: z.string(),
+    value: z.unknown(),
+    description: z.string(),
+  }),
+});
+
+/**
+ * A phase definition within a construction pipeline. Each phase
+ * is associated with specific agent personas, skills to autoload,
+ * and gates to evaluate before proceeding.
+ */
+export const PipelinePhaseDefinitionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  /** The construction phase type (maps to PipelinePhaseDefinitionType). */
+  type: PipelinePhaseDefinitionTypeSchema,
+  /**
+   * Agent personas that should own this phase (from the DNA personas).
+   * These are resolved against the DNA pattern's personas section.
+   */
+  requiredAgents: z.array(z.string()),
+  /**
+   * Skills to auto-load when this phase begins. The SkillAutoLoader
+   * maps these to .opencode/skills/<id>/SKILL.md files.
+   */
+  requiredSkills: z.array(z.string()),
+  /** Gates evaluated during this phase. */
+  gates: z.array(ConstructionPipelineGateSchema),
+  /** Order determines which gate fails first. */
+  order: z.number().int().nonnegative(),
+  /**
+   * Whether execution is blocked until this phase's gates pass.
+   * When true, the pipeline will refuse to proceed to the next phase.
+   */
+  blocking: z.boolean().default(true),
+  /**
+   * Optional readiness artifact: a file or marker that must exist
+   * before this phase can start (e.g. "adr/0001-architecture.md").
+   */
+  readinessArtifact: z.string().optional(),
+});
+
+/**
+ * A named construction pipeline defined in a DNA pattern.
+ * The PipelinePlanner selects which pipeline to use based on
+ * the project context (web-app, API, mobile, etc.).
+ */
+export const ConstructionPipelineSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  /** Phases in order of execution. */
+  phases: z.array(PipelinePhaseDefinitionSchema),
+  /**
+   * Project types this pipeline is the default for.
+   * Used by PipelinePlanner to auto-select the right pipeline.
+   */
+  appliesTo: z.array(z.string()),
+});
+
 export const DNASchema = z.object({
   name: z.string(),
   version: z.string(),
@@ -69,6 +167,8 @@ export const DNASchema = z.object({
   governance: z.array(GovernanceRuleSchema),
   quality: z.array(QualityGateSchema),
   workflows: z.array(WorkflowSchema).optional(),
+  /** G-021: Construction pipelines — ordered phases with gates, agents, skills. */
+  pipelines: z.array(ConstructionPipelineSchema).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -557,24 +657,29 @@ export const PredictionSchema = z.object({
 export const EvolutionProposalSchema = z.object({
   id: z.string(),
   dnaName: z.string(),
-  /** Only `governance-warn` is ever applied: evolution can only add warnings. */
-  kind: z.enum(['governance-warn']),
-  /** The learning-event type that motivated the proposal. */
-  pattern: z.string(),
   /**
-   * The condition the derived warn rule matches on. Always present on
-   * proposals emitted by the learning engine: a proposal without a real
-   * context key to match would be an inert rule (the request would never
-   * compare equal), so applyEvolution skips such proposals by construction.
+   * The type of change this proposal represents.
+   * - `add-warn`: add a new warn rule (no vote required, safe by construction)
+   * - `relax-block`: relax a `block` or `escalate` rule — requires vote gate (0.67 threshold)
+   * - `add-block`: add a new `block` rule — requires vote gate (0.90 threshold)
    */
+  changeType: z.enum(['add-warn', 'relax-block', 'add-block']),
+  kind: z.enum(['governance-warn']),
+  pattern: z.string(),
   condition: z.object({ type: z.string(), value: z.unknown() }).optional(),
   ruleId: z.string(),
   description: z.string(),
-  /** 0..1; see `LearningEngine.confidenceFor` for the exact formula. */
   confidence: z.number(),
   occurrences: z.number(),
   evidence: z.array(z.string()),
   timestamp: z.string(),
+  /** Whether this proposal requires a vote to be applied. */
+  requiresVote: z.boolean().default(false),
+  /**
+   * Vote threshold (0..1) to approve this proposal when `requiresVote` is true.
+   * Default: 0.67 for relax-block, 0.90 for add-block, 0.0 for add-warn.
+   */
+  voteThreshold: z.number().min(0).max(1).default(0),
 });
 
 export const CodeFixProposalSchema = z.object({
@@ -727,6 +832,10 @@ export type TaskEvent = z.infer<typeof TaskEventSchema>;
 export type AgentType = z.infer<typeof AgentTypeSchema>;
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type Agent = z.infer<typeof AgentSchema>;
+export type PipelinePhaseDefinitionType = z.infer<typeof PipelinePhaseDefinitionTypeSchema>;
+export type ConstructionPipelineGate = z.infer<typeof ConstructionPipelineGateSchema>;
+export type PipelinePhaseDefinition = z.infer<typeof PipelinePhaseDefinitionSchema>;
+export type ConstructionPipeline = z.infer<typeof ConstructionPipelineSchema>;
 export type GovernanceVerdict = z.infer<typeof GovernanceVerdictSchema>;
 export type GovernanceDecision = z.infer<typeof GovernanceDecisionSchema> & {
   warnings?: string[];
@@ -930,3 +1039,439 @@ export type ConversationTurn = z.infer<typeof ConversationTurnSchema>;
 export type PragmaticConversation = z.infer<typeof PragmaticConversationSchema>;
 export type PolicyRule = z.infer<typeof PolicyRuleSchema>;
 export type Role = z.infer<typeof RoleSchema>;
+
+// ============================================================
+// Knowledge Graph Schemas (G-001)
+// ============================================================
+export * from './knowledge-graph.js';
+
+// ============================================================
+// G-009: Behavioral Anomaly Detection
+// ============================================================
+
+export const BehaviorProfileSchema = z.object({
+  /** Action frequency per hour (0..1 normalized). */
+  actionRate: z.number().min(0).max(1),
+  /** Fraction of actions that were denied/blocked. */
+  denialRate: z.number().min(0).max(1),
+  /** Fraction of actions that were escalated. */
+  escalationRate: z.number().min(0).max(1),
+  /** Number of distinct tools used in the window. */
+  toolDiversity: z.number().int().nonnegative(),
+  /** Whether the agent operated outside its normal time window. */
+  offHoursRatio: z.number().min(0).max(1),
+});
+
+export const AnomalyScoreSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  baseline: BehaviorProfileSchema,
+  current: BehaviorProfileSchema,
+  /** 0..1 — higher = more anomalous. */
+  deviation: z.number().min(0).max(1),
+  /** Human-readable explanation. */
+  explanation: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-013: Experiential Learning Loop
+// ============================================================
+
+export const ExperiencePhaseSchema = z.enum(['execute', 'observe', 'reflect', 'abstract', 'apply']);
+
+export const ExperienceRecordSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  /** The action that was executed. */
+  action: z.string(),
+  /** Result of the execution. */
+  outcome: z.enum(['success', 'failure', 'partial']),
+  /** Observation collected after execution. */
+  observation: z.string(),
+  /** Reflection: what was learned. */
+  reflection: z.string(),
+  /** Abstracted principle. */
+  abstraction: z.string(),
+  /** How the abstraction was applied. */
+  application: z.string(),
+  phase: ExperiencePhaseSchema,
+  confidence: z.number().min(0).max(1),
+  createdAt: z.string(),
+});
+
+// ============================================================
+// G-016: Regulatory Compliance Mapper
+// ============================================================
+
+export const ComplianceStatusSchema = z.enum(['compliant', 'at-risk', 'violation']);
+
+export const ComplianceMapSchema = z.object({
+  id: z.string(),
+  /** e.g. "GDPR Article 5", "SOX 302", "HIPAA Privacy Rule". */
+  regulation: z.string(),
+  /** The mapping of governance rules to this regulation. */
+  rules: z.array(z.string()),
+  /** Evidence collected for compliance. */
+  evidence: z.array(z.string()),
+  lastAudit: z.string(),
+  status: ComplianceStatusSchema,
+  /** Score 0..1 — higher = more compliant. */
+  score: z.number().min(0).max(1),
+});
+
+export type BehaviorProfile = z.infer<typeof BehaviorProfileSchema>;
+export type AnomalyScore = z.infer<typeof AnomalyScoreSchema>;
+export type ExperiencePhase = z.infer<typeof ExperiencePhaseSchema>;
+export type ExperienceRecord = z.infer<typeof ExperienceRecordSchema>;
+export type ComplianceStatus = z.infer<typeof ComplianceStatusSchema>;
+export type ComplianceMap = z.infer<typeof ComplianceMapSchema>;
+
+// ============================================================
+// G-004: Symbolic-Neural Hybrid Engine
+// ============================================================
+
+export const HybridEvaluationSchema = z.object({
+  id: z.string(),
+  /** The deterministic symbolic (rule-based) verdict. */
+  symbolicVerdict: z.enum(['allow', 'deny', 'escalate', 'warn']),
+  /** Neural confidence score (0..1). In PoC this is derived from pattern frequency. */
+  neuralConfidence: z.number().min(0).max(1),
+  /** The combined hybrid verdict. */
+  hybridVerdict: z.enum(['allow', 'deny', 'escalate', 'warn']),
+  /** Whether the hybrid diverged from the symbolic result and why. */
+  diverged: z.boolean(),
+  explanation: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-010: Zero-Trust Identity
+// ============================================================
+
+export const AgentIdentitySchema = z.object({
+  agentId: z.string(),
+  /** Decentralized Identifier (DID) for the agent, e.g. "did:bos:abc123". */
+  did: z.string(),
+  /** SHA-256 hash of the public key (hex, 64 chars). */
+  publicKeyHash: z.string().length(64),
+  /** The capabilities this identity is authorized for. */
+  capabilities: z.array(z.string()),
+  /** When this identity was issued. */
+  issuedAt: z.string(),
+  /** When this identity expires, or null for indefinite. */
+  expiresAt: z.string().nullable(),
+});
+
+export const IdentityVerificationResultSchema = z.object({
+  agentId: z.string(),
+  did: z.string(),
+  /** Whether the signature was valid. */
+  valid: z.boolean(),
+  /** Reason when invalid. */
+  reason: z.string().optional(),
+  verifiedAt: z.string(),
+});
+
+// ============================================================
+// G-011: Dynamic Policy Adjustment
+// ============================================================
+
+export const RiskLevelSchema = z.enum(['low', 'medium', 'high', 'critical']);
+
+export const RiskAssessmentSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  /** The risk level assessed. */
+  level: RiskLevelSchema,
+  /** 0..1 risk score. */
+  score: z.number().min(0).max(1),
+  /** Which factors contributed to the risk score. */
+  factors: z.array(z.string()),
+  /** The threshold adjustments applied. */
+  adjustedThresholds: z.record(z.string(), z.number()),
+  timestamp: z.string(),
+});
+
+export const DynamicPolicySchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  /** The base rule ids this policy is derived from. */
+  baseRuleIds: z.array(z.string()),
+  /** The risk level at the time of assessment. */
+  riskLevel: RiskLevelSchema,
+  /** Multiplier applied to enforcement thresholds. */
+  enforcementMultiplier: z.number().positive(),
+  /** Whether elevated scrutiny is in effect. */
+  elevatedScrutiny: z.boolean(),
+  activeSince: z.string(),
+});
+
+// ============================================================
+// G-017: Counterfactual Audit
+// ============================================================
+
+export const CounterfactualResultSchema = z.object({
+  id: z.string(),
+  /** The original decision being replayed. */
+  originalDecisionId: z.string(),
+  /** The hypothetical modification applied. */
+  modification: z.string(),
+  /** The hypothetical result. */
+  hypotheticalVerdict: z.enum(['allow', 'deny', 'escalate', 'warn', 'transform']),
+  /** The actual verdict. */
+  actualVerdict: z.enum(['allow', 'deny', 'escalate', 'warn', 'transform']),
+  /** Whether the hypothetical differs from the actual. */
+  diverged: z.boolean(),
+  /** Human-readable explanation. */
+  explanation: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-018: Explainable Reports
+// ============================================================
+
+export const ExplainableReportSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  /** The agent the report is about. */
+  agentId: z.string(),
+  /** The time window covered. */
+  from: z.string(),
+  to: z.string(),
+  /** Number of decisions summarized. */
+  decisionsAnalyzed: z.number().int().nonnegative(),
+  /** Plain-language summary of what happened. */
+  summary: z.string(),
+  /** Key findings for non-technical stakeholders. */
+  findings: z.array(z.string()),
+  /** Recommendations. */
+  recommendations: z.array(z.string()),
+  /** Severity of the overall posture. */
+  severity: z.enum(['healthy', 'attention', 'critical']),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-005: Temporal Pattern Engine
+// ============================================================
+
+export const TemporalPatternSchema = z.object({
+  id: z.string(),
+  /** Human-readable description of the pattern. */
+  description: z.string(),
+  /** The DNA rule id the pattern relates to. */
+  ruleId: z.string().uuid().optional(),
+  /** ISO cron expression for the recurring window. */
+  cronSchedule: z.string(),
+  /** Days of the week the pattern is active (0=Sun..6=Sat). */
+  activeDays: z.array(z.number().int().min(0).max(6)).optional(),
+  /** Number of times this pattern has been observed. */
+  occurrences: z.number().int().nonnegative(),
+  /** Average deviation when the pattern fires (0..1). */
+  avgDeviation: z.number().min(0).max(1),
+  /** Whether the pattern is flagged as a risk. */
+  isRisk: z.boolean(),
+  /** Detected timestamp (when the pattern was first identified). */
+  detectedAt: z.string(),
+  /** When the pattern was last observed. */
+  lastSeen: z.string(),
+});
+
+export const TemporalPatternSuggestionSchema = z.object({
+  patternId: z.string(),
+  /** The suggested cron schedule for a new temporal rule. */
+  suggestedCron: z.string(),
+  /** Confidence in the suggestion (0..1). */
+  confidence: z.number().min(0).max(1),
+  reason: z.string(),
+});
+
+// ============================================================
+// G-007: Cross-Domain Knowledge Transfer (enhanced)
+// ============================================================
+
+export const CrossDomainTransferSchema = z.object({
+  id: z.string(),
+  /** Source DNA pattern. */
+  sourceDna: z.string(),
+  /** Target DNA pattern. */
+  targetDna: z.string(),
+  /** The rule id transferred. */
+  ruleId: z.string(),
+  /** Structural similarity score (0..1). */
+  similarity: z.number().min(0).max(1),
+  /** Why this transfer is suggested. */
+  justification: z.string(),
+  /** When the transfer was identified. */
+  createdAt: z.string(),
+});
+
+// ============================================================
+// G-008: Memory Consolidation Engine
+// ============================================================
+
+export const SemanticFactSchema = z.object({
+  id: z.string(),
+  /** The factual statement. */
+  fact: z.string(),
+  /** Source episode ids that led to this fact. */
+  sourceEpisodes: z.array(z.string()),
+  /** Confidence in the fact (0..1). */
+  confidence: z.number().min(0).max(1),
+  /** When the fact was consolidated. */
+  createdAt: z.string(),
+  /** When the fact was last validated. */
+  lastValidated: z.string().optional(),
+});
+
+export const ConsolidatedKnowledgeSchema = z.object({
+  /** Semantic facts extracted from episodes. */
+  semanticFacts: z.array(SemanticFactSchema),
+  /** Summary of the consolidation run. */
+  summary: z.string(),
+  /** How many episodes were processed. */
+  episodesProcessed: z.number().int().nonnegative(),
+  /** How many facts were pruned (obsolete). */
+  factsPruned: z.number().int().nonnegative(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-012: Circuit Breaker Intelligence
+// ============================================================
+
+export const FailurePatternSchema = z.object({
+  id: z.string(),
+  /** The operation type that failed. */
+  operationType: z.string(),
+  /** Error signature (normalized error message pattern). */
+  errorPattern: z.string(),
+  /** Number of occurrences. */
+  occurrences: z.number().int().nonnegative(),
+  /** Failure rate (0..1). */
+  failureRate: z.number().min(0).max(1),
+  /** Recommended breaker threshold for this pattern. */
+  recommendedThreshold: z.number().min(0).max(1),
+});
+
+export const BreakerAdjustmentSchema = z.object({
+  id: z.string(),
+  failurePatternId: z.string(),
+  /** The breaker name adjusted. */
+  breakerName: z.string(),
+  /** Previous threshold. */
+  previousThreshold: z.number(),
+  /** New threshold applied. */
+  newThreshold: z.number(),
+  reason: z.string(),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-014: Value Alignment Engine
+// ============================================================
+
+export const ValueDefinitionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  /** Keywords that indicate this value is at stake. */
+  keywords: z.array(z.string()),
+});
+
+export const AlignmentScoreSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  /** The values being scored. */
+  values: z.array(ValueDefinitionSchema),
+  /** Per-value alignment score (0..1). */
+  scores: z.record(z.string(), z.number().min(0).max(1)),
+  /** Overall alignment score (0..1). */
+  overallScore: z.number().min(0).max(1),
+  /** Violations detected (actions that conflict with values). */
+  violations: z.array(z.string()),
+  timestamp: z.string(),
+});
+
+// ============================================================
+// G-015: Collective Intelligence Aggregation
+// ============================================================
+
+export const CollectiveVoteSchema = z.object({
+  id: z.string(),
+  /** The proposal being voted on. */
+  proposal: z.string(),
+  /** Per-agent votes. */
+  votes: z
+    .array(
+      z.object({
+        agentId: z.string(),
+        choice: z.enum(['approve', 'reject', 'abstain']),
+        weight: z.number().nonnegative(),
+        confidence: z.number().min(0).max(1),
+        rationale: z.string().optional(),
+      }),
+    )
+    .min(1),
+  /** Aggregated result. */
+  result: z.enum(['approved', 'rejected', 'tie']),
+  /** Confidence in the collective decision (0..1). */
+  collectiveConfidence: z.number().min(0).max(1),
+});
+
+// ============================================================
+// G-019: External System Adapter Framework
+// ============================================================
+
+export const ExternalEventSchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  type: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  receivedAt: z.string(),
+});
+
+export const ExternalPolicySchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  ruleId: z.string(),
+  action: GovernanceActionSchema,
+  conditions: z.array(ConditionSchema),
+  /** When the policy was imported. */
+  importedAt: z.string(),
+});
+
+// ============================================================
+// G-020: Governance-as-Code Repository
+// ============================================================
+
+export const GovernanceChangeRequestSchema = z.object({
+  id: z.string(),
+  /** The DNA pattern being modified. */
+  dnaName: z.string(),
+  /** The rule id being added/changed/removed. */
+  ruleId: z.string(),
+  changeType: z.enum(['add', 'modify', 'delete']),
+  proposedRule: GovernanceRuleSchema.optional(),
+  /** Rationale for the change. */
+  rationale: z.string(),
+  /** CI status of the change. */
+  ciStatus: z.enum(['pending', 'passing', 'failing', 'approved']),
+  createdAt: z.string(),
+});
+
+export type TemporalPattern = z.infer<typeof TemporalPatternSchema>;
+export type TemporalPatternSuggestion = z.infer<typeof TemporalPatternSuggestionSchema>;
+export type CrossDomainTransfer = z.infer<typeof CrossDomainTransferSchema>;
+export type SemanticFact = z.infer<typeof SemanticFactSchema>;
+export type ConsolidatedKnowledge = z.infer<typeof ConsolidatedKnowledgeSchema>;
+export type FailurePattern = z.infer<typeof FailurePatternSchema>;
+export type BreakerAdjustment = z.infer<typeof BreakerAdjustmentSchema>;
+export type ValueDefinition = z.infer<typeof ValueDefinitionSchema>;
+export type AlignmentScore = z.infer<typeof AlignmentScoreSchema>;
+export type CollectiveVote = z.infer<typeof CollectiveVoteSchema>;
+export type ExternalEvent = z.infer<typeof ExternalEventSchema>;
+export type ExternalPolicy = z.infer<typeof ExternalPolicySchema>;
+export type GovernanceChangeRequest = z.infer<typeof GovernanceChangeRequestSchema>;
