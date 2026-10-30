@@ -2,10 +2,17 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    "@behavior-os/core",
+    "@behavior-os/sdk",
+    "@behavior-os/schemas",
+    "@behavior-os/mcp-server",
+    "@behavior-os/cli",
+    "@behavior-os/opencode-plugin"
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "master",
   "updateInternalDependencies": "patch",
-  "ignore": []
+  "ignore": ["behavioros-examples", "behavioros-orchestrator"]
 }

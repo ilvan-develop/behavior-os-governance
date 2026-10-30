@@ -769,4 +769,84 @@ program
     process.exitCode = 1;
   });
 
+// METRICS command
+program
+  .command('metrics')
+  .description('Display governance metrics from the Behavior-OS engine')
+  .option('-d, --directory <path>', 'Project directory', '.')
+  .option('-j, --json', 'Output as JSON instead of formatted table')
+  .option('-r, --reset', 'Reset all metrics before reporting')
+  .action(async (options) => {
+    const dir = options.directory;
+    const pattern = process.env.BEHAVIOROS_DNA || 'surgical-team';
+    const bos = new BehaviorOS();
+    const loaded = await loadDnaForCommand(bos, dir, pattern);
+
+    if (options.reset) {
+      bos.resetMetrics();
+      console.log(chalk.gray('  ✓ Metrics reset'));
+    }
+
+    const metrics = bos.getMetrics();
+
+    if (options.json) {
+      console.log(JSON.stringify(metrics, null, 2));
+      return;
+    }
+
+    console.log(chalk.blue('Behavior-OS Governance Metrics'));
+    console.log(chalk.gray('='.repeat(40)));
+    console.log(chalk.gray(`DNA: ${loaded ?? 'none'}`));
+    console.log(chalk.gray(`Timestamp: ${metrics.timestamp}`));
+    console.log(chalk.gray(`Uptime: ${Math.round(metrics.uptimeMs / 1000)}s`));
+
+    // Governance overview
+    const gov = metrics.governance;
+    const total = gov.totalActions;
+    const denyPct = total > 0 ? ((gov.denied / total) * 100).toFixed(1) : '0.0';
+    console.log(chalk.yellow('\nGovernance:'));
+    console.log(`  Total actions:  ${total}`);
+    console.log(`  Allowed:        ${gov.allowed}`);
+    console.log(`  Denied:         ${gov.denied} (${denyPct}%)`);
+    console.log(`  Escalated:      ${gov.escalated}`);
+    console.log(`  Warned:         ${gov.warned}`);
+    console.log(`  Avg rules/action: ${gov.avgRulesPerAction.toFixed(1)}`);
+
+    if (gov.topRules.length > 0) {
+      console.log(chalk.yellow('\nTop firing rules:'));
+      for (const rule of gov.topRules) {
+        console.log(`  ${rule.id.padEnd(30)} ${rule.count}× (${rule.action})`);
+      }
+    }
+
+    if (gov.latencySamples && gov.latencySamples.length > 0) {
+      const sorted = [...gov.latencySamples].sort((a, b) => a - b);
+      const p50 = sorted[Math.floor(sorted.length * 0.5)];
+      const p95 = sorted[Math.floor(sorted.length * 0.95)];
+      console.log(chalk.yellow('\nLatency (ms):'));
+      console.log(`  p50: ${p50}`);
+      console.log(`  p95: ${p95}`);
+    }
+
+    // Learning summary
+    console.log(chalk.yellow('\nLearning:'));
+    console.log(`  Events total: ${metrics.learningEventsTotal}`);
+    const byType = Object.entries(metrics.learningEventsByType).sort((a, b) => b[1] - a[1]);
+    for (const [type, count] of byType.slice(0, 5)) {
+      console.log(`  ${type}: ${count}`);
+    }
+
+    // Consensus/prediction (if any)
+    if (metrics.consensus.totalRounds > 0) {
+      console.log(chalk.yellow('\nConsensus:'));
+      console.log(`  Rounds: ${metrics.consensus.totalRounds}`);
+      console.log(`  Approved: ${metrics.consensus.approved}`);
+      console.log(`  Rejected: ${metrics.consensus.rejected}`);
+    }
+    if (metrics.prediction.totalPredictions > 0) {
+      console.log(chalk.yellow('\nPredictions:'));
+      console.log(`  Total: ${metrics.prediction.totalPredictions}`);
+    }
+  });
+
 program.parse();
