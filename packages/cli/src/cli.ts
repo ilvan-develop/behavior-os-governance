@@ -593,12 +593,14 @@ program
       console.log(chalk.yellow('  Pre-flight (governance): skipped — no DNA loaded'));
     }
 
-    // Protocol step 4 — create mission.
+    // Protocol step 4 — create mission. requiredChecks mirrors the plugin's
+    // auto-mission: governance + audit must pass before completion is accepted.
     console.log(chalk.cyan('\n[Step 4/7] Create mission'));
     const mission = bos.createMission({
       title: options.task,
       type: 'feature',
       priority: options.priority as 'critical' | 'high' | 'medium' | 'low',
+      requiredChecks: ['governance', 'audit'],
     });
     console.log(chalk.green(`  ✓ Mission created: ${mission.id}`));
 
@@ -631,7 +633,15 @@ program
     });
     console.log(chalk.green(`  ✓ Learning recorded: ${event.id}`));
 
-    // Updating a local state file is not one of the 7 protocol steps.
+    // Close the mission created by the dry run. Since the audit was simulated
+    // (no real verification), the mission cannot be "completed" — it gets
+    // cancelled to close the lifecycle. This fixes the CLI lifecycle gap where
+    // autonomous created missions it could never close.
+    bos.cancelMission(mission.id);
+    const closed = bos.getMission(mission.id);
+    console.log(
+      chalk.gray(`  Mission ${mission.id} closed (status: ${closed?.status ?? 'unknown'})`),
+    );
     const statePath = join(dir, '.behavioros', 'state.json');
     if (existsSync(statePath)) {
       const state = JSON.parse(readFileSync(statePath, 'utf-8'));

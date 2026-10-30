@@ -205,6 +205,7 @@ server.registerTool(
   },
   async () => {
     try {
+      const bos = getBehaviorOS();
       const dnas = await loadDNAPatterns();
       const patterns = Object.entries(dnas).map(([key, dna]) => ({
         key,
@@ -213,6 +214,9 @@ server.registerTool(
         description: dna.description,
         governanceRules: dna.governance?.length ?? 0,
       }));
+      // Mirror the plugin host: listing patterns is step 2 of the 7-step protocol.
+      // Without this, MCP callers stall at step 1 after select_dna.
+      bos.advanceProtocolStep('bos_list_dna');
       return {
         content: [
           { type: 'text', text: JSON.stringify({ total: patterns.length, patterns }, null, 2) },
@@ -1525,6 +1529,9 @@ server.registerTool(
     try {
       const bos = getBehaviorOS();
       const state = bos.getState();
+      // Resolve State is step 3 of the 7-step protocol; the plugin host already
+      // advances it here so MCP callers must mirror that to stay aligned.
+      bos.advanceProtocolStep('bos_get_state');
       return {
         content: [{ type: 'text', text: JSON.stringify(state, null, 2) }],
       };

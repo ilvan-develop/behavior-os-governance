@@ -84,6 +84,13 @@ describe('MCP server structure', () => {
     expect(serverSource).not.toMatch(/# Behavior-OS 7-Step Protocol\\n\\n1\./);
   });
 
+  it('mirrors plugin protocol advancement on bos_list_dna and bos_get_state', () => {
+    // Finding: MCP server stalled at step 1 after select_dna because bos_list_dna
+    // and bos_get_state never called advanceProtocolStep — unlike the plugin host.
+    expect(serverSource).toContain("advanceProtocolStep('bos_list_dna')");
+    expect(serverSource).toContain("advanceProtocolStep('bos_get_state')");
+  });
+
   it('states the real tool count in the package manifest', () => {
     const manifest = JSON.parse(
       readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'),

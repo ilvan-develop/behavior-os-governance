@@ -85,4 +85,75 @@ describe('BehaviorOSSDK', () => {
     const insights = sdk.getInsights(10);
     expect(insights.length).toBeGreaterThan(0);
   });
+
+  it('should create mission with requiredChecks', () => {
+    const mission = sdk.createMission({
+      title: 'Test Mission',
+      type: 'feature',
+      priority: 'high',
+      requiredChecks: ['governance', 'audit'],
+    });
+
+    expect(mission.id).toBeDefined();
+    expect(mission.title).toBe('Test Mission');
+    expect(mission.status).toBe('pending');
+  });
+
+  it('should start, complete, and cancel missions via SDK', () => {
+    const mission = sdk.createMission({
+      title: 'Lifecycle Mission',
+      type: 'feature',
+      priority: 'high',
+      requiredChecks: ['governance'],
+    });
+
+    // Start -> active
+    const started = sdk.startMission(mission.id);
+    expect(started).not.toBeNull();
+    expect(started?.status).toBe('active');
+
+    // Complete with evidence
+    const completed = sdk.completeMission(mission.id, {
+      evidence: [{ gate: 'governance', status: 'passed', source: 'test' }],
+    });
+    expect(completed).not.toBeNull();
+    expect(completed?.status).toBe('completed');
+
+    // Cancel a new mission
+    const cancelTarget = sdk.createMission({
+      title: 'Cancel Mission',
+      type: 'refactor',
+      priority: 'medium',
+    });
+    const result = sdk.cancelMission(cancelTarget.id);
+    expect(result.ok).toBe(true);
+    expect(result.mission?.status).toBe('cancelled');
+  });
+
+  it('should list missions with filters', () => {
+    sdk.createMission({ title: 'Feature A', type: 'feature', priority: 'high' });
+    sdk.createMission({ title: 'Bug B', type: 'bugfix', priority: 'low' });
+
+    const all = sdk.listMissions();
+    expect(all.length).toBeGreaterThanOrEqual(2);
+
+    const features = sdk.listMissions(50, { type: 'feature' });
+    expect(features.every((m) => m.type === 'feature')).toBe(true);
+
+    const highPriority = sdk.listMissions(50, { priority: 'high' });
+    expect(highPriority.every((m) => m.priority === 'high')).toBe(true);
+  });
+
+  it('should fail a mission with reason', () => {
+    const mission = sdk.createMission({
+      title: 'Fail Mission',
+      type: 'incident',
+      priority: 'critical',
+    });
+
+    sdk.startMission(mission.id);
+    const failed = sdk.failMission(mission.id, 'Test failure reason');
+    expect(failed).not.toBeNull();
+    expect(failed?.status).toBe('failed');
+  });
 });

@@ -1,13 +1,16 @@
-import { BehaviorOS, type BehaviorOSConfig } from '@behavior-os/core';
+import { BehaviorOS, type BehaviorOSConfig, type MissionTransitionResult } from '@behavior-os/core';
 import type {
   AuditReport,
   DNA,
   GovernanceDecision,
   LearningEvent,
   Mission,
+  MissionPriority,
+  MissionStatus,
+  MissionType,
 } from '@behavior-os/schemas';
 
-export type { BehaviorOSConfig } from '@behavior-os/core';
+export type { BehaviorOSConfig, MissionTransitionResult } from '@behavior-os/core';
 export { BehaviorOS } from '@behavior-os/core';
 export type {
   Agent,
@@ -16,6 +19,9 @@ export type {
   GovernanceDecision,
   LearningEvent,
   Mission,
+  MissionPriority,
+  MissionStatus,
+  MissionType,
 } from '@behavior-os/schemas';
 
 export class BehaviorOSSDK {
@@ -50,7 +56,7 @@ export class BehaviorOSSDK {
   // Audit
   async runAudit(options: {
     missionId: string;
-    agentId: string;
+    agentId?: string;
     stages?: string[];
     simulate?: boolean;
   }): Promise<AuditReport> {
@@ -60,15 +66,56 @@ export class BehaviorOSSDK {
   // Missions
   createMission(options: {
     title: string;
+    description?: string;
     type: string;
     priority: string;
     dnaPattern?: string;
+    createdBy?: string;
+    tags?: string[];
+    /** Gates that must each have passing evidence before completion. */
+    requiredChecks?: string[];
+    /** `executed` requires real, provenance-stamped evidence for every gate. */
+    verificationMode?: 'any' | 'executed';
   }): Mission {
     return this.bos.createMission(options);
   }
 
   startMission(missionId: string): Mission | null {
     return this.bos.startMission(missionId);
+  }
+
+  completeMission(
+    missionId: string,
+    options: {
+      expectedVersion?: number;
+      actor?: string;
+      evidence?: Array<{
+        gate: string;
+        status: 'passed' | 'failed' | 'skipped';
+        source: string;
+        detail?: string;
+        simulated?: boolean;
+        provenance?: 'executed' | 'reported' | 'simulated';
+        executionId?: string;
+      }>;
+    } = {},
+  ): Mission | null {
+    return this.bos.completeMission(missionId, options);
+  }
+
+  failMission(missionId: string, reason?: string): Mission | null {
+    return this.bos.failMission(missionId, reason);
+  }
+
+  cancelMission(missionId: string): MissionTransitionResult {
+    return this.bos.cancelMission(missionId);
+  }
+
+  listMissions(
+    limit = 50,
+    filters: { status?: MissionStatus; type?: MissionType; priority?: MissionPriority } = {},
+  ): Mission[] {
+    return this.bos.listMissions(limit, filters);
   }
 
   // Learning
