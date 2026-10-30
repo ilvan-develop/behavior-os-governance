@@ -40,10 +40,10 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 }
 
 describe('agent registry', () => {
-  it('reports a missing registry without throwing', () => {
+  it('reports a missing registry without throwing', async () => {
     const root = project();
 
-    const result = listRegisteredAgents(root);
+    const result = await listRegisteredAgents(root);
 
     expect(result.found).toBe(false);
     expect(result.agents).toEqual([]);
@@ -51,7 +51,7 @@ describe('agent registry', () => {
     expect(result.path).toBe(join(root, 'behavioros.db'));
   });
 
-  it('lists agents persisted through the engine, ordered by id', () => {
+  it('lists agents persisted through the engine, ordered by id', async () => {
     const root = project();
     const db = join(root, 'behavioros.db');
     const bos = new BehaviorOS({ persistence: { path: db } });
@@ -59,7 +59,7 @@ describe('agent registry', () => {
     bos.registerAgent(makeAgent({ id: 'agent-a', name: 'Alpha' }));
     bos.closeStore();
 
-    const result = listRegisteredAgents(root);
+    const result = await listRegisteredAgents(root);
 
     expect(result.found).toBe(true);
     expect(result.error).toBeNull();
@@ -67,7 +67,7 @@ describe('agent registry', () => {
     expect(result.agents[0]?.name).toBe('Alpha');
   });
 
-  it('reads a registry under .behavioros/ when the root database is absent', () => {
+  it('reads a registry under .behavioros/ when the root database is absent', async () => {
     const root = project();
     const behavioros = join(root, '.behavioros');
     mkdirSync(behavioros);
@@ -75,39 +75,40 @@ describe('agent registry', () => {
     store.saveAgent(makeAgent({ id: 'nested' }));
     store.close();
 
-    const result = listRegisteredAgents(root);
+    const result = await listRegisteredAgents(root);
 
     expect(result.found).toBe(true);
     expect(result.agents.map((agent) => agent.id)).toEqual(['nested']);
   });
 
-  it('honours an explicit --db path, even when it is missing', () => {
+  it('honours an explicit --db path, even when it is missing', async () => {
     const root = project();
     const explicit = join(root, 'custom', 'agents.db');
 
     expect(resolveAgentRegistryPath(root, explicit)).toEqual({ path: explicit, exists: false });
-    expect(listRegisteredAgents(root, explicit).found).toBe(false);
+    const result = await listRegisteredAgents(root, explicit);
+    expect(result.found).toBe(false);
   });
 
-  it('reports an unreadable database instead of an empty registry', () => {
+  it('reports an unreadable database instead of an empty registry', async () => {
     const root = project();
     const db = join(root, 'behavioros.db');
     writeFileSync(db, 'not a sqlite database');
 
-    const result = listRegisteredAgents(root);
+    const result = await listRegisteredAgents(root);
 
     expect(result.found).toBe(true);
     expect(result.agents).toEqual([]);
     expect(result.error).not.toBeNull();
   });
 
-  it('returns an empty list for a valid but empty registry', () => {
+  it('returns an empty list for a valid but empty registry', async () => {
     const root = project();
     const db = join(root, 'behavioros.db');
     const store = new SqliteStore({ path: db });
     store.close();
 
-    const result = listRegisteredAgents(root);
+    const result = await listRegisteredAgents(root);
 
     expect(result.found).toBe(true);
     expect(result.agents).toEqual([]);

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { SqliteStore } from '@behavior-os/core';
+import { BehaviorOS } from '@behavior-os/core';
 import type { Agent } from '@behavior-os/schemas';
 
 export interface AgentRegistryResult {
@@ -8,7 +8,7 @@ export interface AgentRegistryResult {
   path: string;
   /** Whether the registry file exists. */
   found: boolean;
-  /** Agents ordered by id (`SqliteStore.listAgents()`). */
+  /** Agents loaded via the facade from the SQLite store. */
   agents: Agent[];
   /** Read error, when the file exists but could not be opened. */
   error: string | null;
@@ -38,37 +38,50 @@ export function resolveAgentRegistryPath(
 }
 
 /**
- * Read registered agents from the SQLite registry.
+ * Read registered agents via the BehaviorOS facade instead of reaching into
+ * `SqliteStore` directly (Finding #11: CLI bypass of facade).
+ *
+ * Creates a BehaviorOS instance configured with the same SQLite path the
+ * plugin/MCP use, lets `hydrateFromStore` populate the in-memory agent map,
+ * then returns `listAgents()`. The store is properly closed afterwards to
+ * avoid file-handle leaks (especially on Windows).
  *
  * A missing registry is not an error: a project that never enabled persistence
  * simply has no agents to list. An existing but unreadable/corrupt database is
- * reported instead of being presented as an empty registry.
+ * reported via the facade's `storeError` status field.
  */
-export function listRegisteredAgents(
+export async function listRegisteredAgents(
   directory: string,
   explicitPath?: string,
-): AgentRegistryResult {
+): Promise<AgentRegistryResult> {
   const resolved = resolveAgentRegistryPath(directory, explicitPath);
   if (!resolved.exists) {
     return { path: resolved.path, found: false, agents: [], error: null };
   }
 
-  let store: SqliteStore | null = null;
+  const bos = new BehaviorOS({
+    persistence: { path: resolved.path },
+  });
+
   try {
-    store = new SqliteStore({ path: resolved.path });
-    return { path: resolved.path, found: true, agents: store.listAgents(), error: null };
-  } catch (error) {
-    return {
-      path: resolved.path,
-      found: true,
-      agents: [],
-      error: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    try {
-      store?.close();
-    } catch {
-      // The read result is already determined; a close failure must not hide it.
+    const status = bos.getStatus();
+
+    // If the store failed to initialise (corrupt DB, wrong format), surface
+    // the error instead of silently returning an empty registry.
+    if (status.store === false && status.storeError) {
+      return {
+        path: resolved.path,
+        found: true,
+        agents: [],
+        error: status.storeError,
+      };
     }
+
+    // hydrateFromStore runs in the constructor when persistence is set;
+    // listAgents() now reflects what was persisted by any host.
+    return { path: resolved.path, found: true, agents: bos.listAgents(), error: null };
+  } finally {
+    // Ensure the SQLite handle is released promptly (Windows file locking).
+    bos.closeStore();
   }
 }

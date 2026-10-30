@@ -288,6 +288,7 @@ export class BehaviorOS {
   private agents: Map<string, Agent> = new Map();
   private readonly config: BehaviorOSConfig;
   private store: Store | null = null;
+  private storeInitError: string | null = null;
   private pipeline: PipelineEngine | null = null;
   private codeEditEngine: CodeEditEngine | null = null;
 
@@ -326,8 +327,9 @@ export class BehaviorOS {
         if (persistence.autoHydrate !== false) {
           this.hydrateFromStore();
         }
-      } catch {
+      } catch (storeError) {
         this.store = null;
+        this.storeInitError = storeError instanceof Error ? storeError.message : String(storeError);
       }
     }
   }
@@ -2512,6 +2514,10 @@ export class BehaviorOS {
       auditEnabled: boolean;
       learningEnabled: boolean;
     };
+    /** true when a durable store is active, false when it failed to initialise, null when no persistence configured. */
+    store: boolean | null;
+    /** Error message when the store failed to initialise, null otherwise. */
+    storeError: string | null;
   } {
     return {
       engine: true,
@@ -2525,6 +2531,8 @@ export class BehaviorOS {
         auditEnabled: this.config.audit?.enabled ?? true,
         learningEnabled: this.config.learning?.enabled ?? true,
       },
+      store: this.store ? true : this.storeInitError ? false : null,
+      storeError: this.storeInitError,
     };
   }
 }

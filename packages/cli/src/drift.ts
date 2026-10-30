@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DriftEngine } from '@behavior-os/core';
+import { BehaviorOS } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { load } from 'js-yaml';
 
@@ -66,7 +66,13 @@ export interface DriftComparison {
 }
 
 /**
- * Compare current DNA snapshots with a baseline using `DriftEngine`.
+ * Compare current DNA snapshots with a baseline using the facade's
+ * `compareDNADrift` (which delegates to `DriftEngine.compare`).
+ *
+ * Finding #11 fix: previously this function instantiated `new DriftEngine()`
+ * directly, bypassing the BehaviorOS facade. Now it creates a BehaviorOS
+ * instance with the default (no-persistence) mode so the comparison goes
+ * through the same engine resolution path as every other host.
  *
  * `DriftEngine` is the source of truth for governance-rule and quality-gate
  * drift; this wrapper only adds the repository-level cases the engine cannot
@@ -75,8 +81,8 @@ export interface DriftComparison {
 export function compareDnaSnapshots(
   current: Record<string, DNA>,
   baseline: Record<string, DNA>,
-  engine: DriftEngine = new DriftEngine(),
 ): DriftComparison {
+  const bos = new BehaviorOS();
   const findings: DriftFinding[] = [];
   let compared = 0;
 
@@ -94,7 +100,7 @@ export function compareDnaSnapshots(
     }
 
     compared += 1;
-    const drift = engine.compare(previous, dna);
+    const drift = bos.compareDNADrift(previous, dna);
     if (drift.totalChanges > 0) {
       findings.push({
         pattern,

@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 81 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 83 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_add_conversation_turn',
   'bos_add_knowledge_edge',
@@ -97,7 +97,7 @@ const MCP_TOOLS = [
   'bos_vote_idea',
   'bos_whoami',
 ];
-// MCP_TOOLS count: 81
+// MCP_TOOLS count: 83
 
 /** Extra tools registered by the OpenCode plugin (`plugins/opencode-v2`). */
 const PLUGIN_ONLY_TOOLS = [
@@ -571,7 +571,7 @@ describe('documented counts match the code', () => {
   it('derives the counts it is supposed to guard', () => {
     // A broken derivation would silently compare wrong numbers with wrong
     // numbers, so the derivation itself is pinned to the measured reality.
-    expect(measured.mcpTools).toBe(81);
+    expect(measured.mcpTools).toBe(83);
     expect(measured.mcpResources).toBe(2);
     expect(measured.pluginTools).toBe(70);
     expect(measured.dnas).toBe(21);

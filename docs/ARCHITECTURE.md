@@ -269,7 +269,7 @@ pending ──▶ active ──▶ completed   (terminal)
 mission plan through real adapters. `ControlLoop`
 (`packages/orchestrator/src/control-loop.ts`) adds durable, evidence-driven
 continuation on top of it. Both are libraries, not new tool surfaces: MCP still
-exposes 81 tools and the plugin 38.
+exposes 83 tools and the plugin 38.
 
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
@@ -344,7 +344,7 @@ auditor so the loop never reports overall `PASS` — it stops as `UNVERIFIED`.
 
 ### MCP Server (standalone)
 
-- 81 tools + 2 resources exposed via Model Context Protocol
+- 83 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 

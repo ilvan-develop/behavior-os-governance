@@ -47,7 +47,7 @@ pnpm test
 | Agents don't learn from mistakes         | Learning engine records events & detects recurring patterns                |
 | Hard to coordinate multiple agents       | 7-step protocol + auto-derived missions for traceable work                 |
 | No quality gates                         | Quality gates + audit stages (lint → typecheck → security → coverage)      |
-| Reinventing infrastructure every project | 43 engine files, 81 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 43 engine files, 83 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -398,7 +398,7 @@ mcpServers:
 | `@behavior-os/core`            | 47 engines + EngineRegistry                                                                                                     | 2.0.0   |     | 2.1.0 |
 | `@behavior-os/sdk`             | High-level TypeScript SDK                                                                                                       | 2.0.0   |
 | `@behavior-os/cli`             | CLI (12 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check) | 2.0.0   |
-| `@behavior-os/mcp-server`      | MCP server with 81 tools + 2 resources                                                                                          | 2.0.0   |
+| `@behavior-os/mcp-server`      | MCP server with 83 tools + 2 resources                                                                                          | 2.0.0   |
 | `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 41 tools + hooks                                                                                        | 2.0.0   |
 
 ## License

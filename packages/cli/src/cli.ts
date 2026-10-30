@@ -480,7 +480,7 @@ program
     '--db <path>',
     'Agent registry SQLite path (default: <dir>/behavioros.db or <dir>/.behavioros/behavioros.db)',
   )
-  .action((options) => {
+  .action(async (options) => {
     const dir = options.directory;
     const statePath = join(dir, '.behavioros', 'state.json');
 
@@ -505,7 +505,7 @@ program
       );
     }
 
-    const registry = listRegisteredAgents(dir, options.db);
+    const registry = await listRegisteredAgents(dir, options.db);
     console.log(chalk.cyan(`\n  Agent registry: ${registry.path}`));
 
     if (!registry.found) {
