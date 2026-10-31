@@ -22,11 +22,21 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Setup Node
+      - name: Configure npm auth
         run: |
-          node -p "require('./package.json').version"
+          echo "node_modules/.bin\n/dist" >> .git/info/exclude
+          echo "${NPM_TOKEN}" | node -e "
+            const fs = require('fs');
+            let input = '';
+            process.stdin.on('data', chunk => input += chunk);
+            process.stdin.on('end', () => {
+              fs.writeFileSync('.npmrc', '//registry.npmjs.org/:_authToken=' + input.trim() + '\n');
+            });
+          "
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish to npm
-        run: pnpm release
+        run: pnpm changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
