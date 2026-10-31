@@ -23,22 +23,23 @@ pnpm run typecheck
 ### Inicialização
 
 ```typescript
-import { BehaviorOS } from "@behavior-os/core";
-import type { DNA } from "@behavior-os/schemas";
+import { BehaviorOS } from '@behavior-os/core';
+import type { DNA } from '@behavior-os/schemas';
 
 // Criar instância com persistência opcional (SQLite, Node >= 22.5)
 const bos = new BehaviorOS({ persistence: { path: './behavioros.db' } });
 
-// Carregar DNA (sincrono: lê YAML + valida Zod)
-await bos.loadDNAFromPath("./dnas/surgical-team.yaml");
+// Carregar DNA a partir do directorio dnas/ (sincrono: lê YAML + valida Zod)
+const dna = await bos.loadDNAFromDirectory('./dnas/surgical-team.yaml');
+await bos.loadDNA(dna);
 ```
 
 ### Avaliação de Governança
 
 ```typescript
 // Avaliar ação
-const decision = bos.evaluateGovernance("deploy_to_prod", {
-  agent: "ci-bot",
+const decision = bos.evaluateGovernance('deploy_to_prod', {
+  agent: 'ci-bot',
   context: {
     production: true,
     has_code_review: true,
@@ -47,7 +48,7 @@ const decision = bos.evaluateGovernance("deploy_to_prod", {
 });
 
 console.log(decision.verdict); // "allow" | "deny" | "escalate"
-console.log(decision.reason);  // Explicação detalhada
+console.log(decision.reason); // Explicação detalhada
 ```
 
 ### Criação de Missões
@@ -55,16 +56,19 @@ console.log(decision.reason);  // Explicação detalhada
 ```typescript
 // Criar missão
 const mission = bos.createMission({
-  title: "Implementar feature X",
-  type: "feature",
-  priority: "high",
+  title: 'Implementar feature X',
+  type: 'feature',
+  priority: 'high',
 });
 
 // Iniciar missão
 bos.startMission(mission.id);
 
 // Completar missão com evidência de verificação
-bos.completeMission(mission.id, { requiredChecks: ['test', 'typecheck'], verificationMode: 'real' });
+bos.completeMission(mission.id, {
+  requiredChecks: ['test', 'typecheck'],
+  verificationMode: 'real',
+});
 ```
 
 ### Auditoria
@@ -72,8 +76,8 @@ bos.completeMission(mission.id, { requiredChecks: ['test', 'typecheck'], verific
 ```typescript
 const report = await bos.runAudit({
   missionId: mission.id,
-  agentId: "agent-1",
-  stages: ["lint", "typecheck", "security", "coverage"],
+  agentId: 'agent-1',
+  stages: ['lint', 'typecheck', 'security', 'coverage'],
 });
 ```
 
@@ -81,10 +85,10 @@ const report = await bos.runAudit({
 
 ```typescript
 const learning = bos.recordLearning({
-  type: "insight",
-  source: "governance",
-  content: "Regra X evitou deploy problemático",
-  impact: "high",
+  type: 'insight',
+  source: 'governance',
+  content: 'Regra X evitou deploy problemático',
+  impact: 'high',
   relatedMission: mission.id,
 });
 ```
@@ -93,29 +97,29 @@ const learning = bos.recordLearning({
 
 ## DNA Patterns Disponíveis
 
-| Pattern | Descrição | Setor |
-|---------|-----------|-------|
-| surgical-team | Zero-defect | Geral |
+| Pattern               | Descrição              | Setor      |
+| --------------------- | ---------------------- | ---------- |
+| surgical-team         | Zero-defect            | Geral      |
 | enterprise-governance | Compliance corporativo | Enterprise |
-| military-operations | Hierarquia rígida | Segurança |
-| lean-factory | Kaizen contínuo | Manufatura |
-| devops-pipeline | CI/CD automation | DevOps |
-| financial-compliance | Regulação financeira | Fintech |
-| healthcare-hipaa | HIPAA compliance | Saúde |
-| startup-agile | Iteração rápida | Startups |
-| enterprise-sox | SOX compliance | Financeiro |
-| research-lab | Governança pesquisa | Academia |
-| gaming-studio | Dev de jogos | Gaming |
-| iot-embedded | Sistemas embarcados | IoT |
-| ai-ml-pipeline | ML governance | AI/ML |
-| blockchain-web3 | Smart contracts | Web3 |
-| mobile-app | Apps mobile | Mobile |
-| cloud-native | Cloud apps | Cloud |
-| legacy-modernization | Migração legado | Enterprise |
-| open-source | Projetos OSS | Community |
-| data-engineering | Data pipelines | Data |
-| fintech-trading | Trading systems | Fintech |
-| quantum-computing | Quantum algorithms | Research |
+| military-operations   | Hierarquia rígida      | Segurança  |
+| lean-factory          | Kaizen contínuo        | Manufatura |
+| devops-pipeline       | CI/CD automation       | DevOps     |
+| financial-compliance  | Regulação financeira   | Fintech    |
+| healthcare-hipaa      | HIPAA compliance       | Saúde      |
+| startup-agile         | Iteração rápida        | Startups   |
+| enterprise-sox        | SOX compliance         | Financeiro |
+| research-lab          | Governança pesquisa    | Academia   |
+| gaming-studio         | Dev de jogos           | Gaming     |
+| iot-embedded          | Sistemas embarcados    | IoT        |
+| ai-ml-pipeline        | ML governance          | AI/ML      |
+| blockchain-web3       | Smart contracts        | Web3       |
+| mobile-app            | Apps mobile            | Mobile     |
+| cloud-native          | Cloud apps             | Cloud      |
+| legacy-modernization  | Migração legado        | Enterprise |
+| open-source           | Projetos OSS           | Community  |
+| data-engineering      | Data pipelines         | Data       |
+| fintech-trading       | Trading systems        | Fintech    |
+| quantum-computing     | Quantum algorithms     | Research   |
 
 ---
 
@@ -176,18 +180,18 @@ O plugin regista 70 tools `bos_*`. As 85 tools do servidor MCP incluem as
 mesmas ferramentas governadas; as exclusivas do plugin são `bos_get_log`
 e `bos_verify_audit_trail` (já integradas no MCP desde v2.1). Lista completa:
 
-| Tool | Descrição |
-|------|-----------|
-| bos_select_dna | Seleciona o padrão de governança |
-| bos_list_dna | Lista os padrões disponíveis |
-| bos_get_state | Estado atual do protocolo |
-| bos_create_mission | Cria uma missão |
-| bos_start_mission | Inicia uma missão |
-| bos_run_audit | Executa a auditoria |
-| bos_record_learning | Regista um evento de aprendizagem |
-| bos_evaluate_governance | Avalia uma ação contra as regras |
-| bos_preflight | Corre os gates `pre` de forma síncrona |
-| … | (ver `docs/API_REFERENCE.md` para as 29) |
+| Tool                    | Descrição                                |
+| ----------------------- | ---------------------------------------- |
+| bos_select_dna          | Seleciona o padrão de governança         |
+| bos_list_dna            | Lista os padrões disponíveis             |
+| bos_get_state           | Estado atual do protocolo                |
+| bos_create_mission      | Cria uma missão                          |
+| bos_start_mission       | Inicia uma missão                        |
+| bos_run_audit           | Executa a auditoria                      |
+| bos_record_learning     | Regista um evento de aprendizagem        |
+| bos_evaluate_governance | Avalia uma ação contra as regras         |
+| bos_preflight           | Corre os gates `pre` de forma síncrona   |
+| …                       | (ver `docs/API_REFERENCE.md` para as 29) |
 
 ---
 
@@ -212,9 +216,9 @@ e `bos_verify_audit_trail` (já integradas no MCP desde v2.1). Lista completa:
 ```typescript
 // ✅ Bom - tipagem explícita
 const mission: Mission = bos.createMission({
-  title: "Feature",
-  type: "feature",
-  priority: "high" as MissionPriority,
+  title: 'Feature',
+  type: 'feature',
+  priority: 'high' as MissionPriority,
 });
 
 // ❌ Ruim - uso de any
@@ -227,7 +231,7 @@ const mission = bos.createMission({} as any);
 // Sempre validar antes de usar
 const result = DNASchema.safeParse(dna);
 if (!result.success) {
-  throw new Error("DNA inválido: " + result.error.message);
+  throw new Error('DNA inválido: ' + result.error.message);
 }
 ```
 
@@ -235,7 +239,7 @@ if (!result.success) {
 
 ```typescript
 // Usar logger estruturado
-logger.info({ event: "mission.created", missionId: mission.id });
+logger.info({ event: 'mission.created', missionId: mission.id });
 ```
 
 ---
@@ -274,22 +278,33 @@ pnpm test --coverage
 
 ```typescript
 class BehaviorOS {
-  loadDNAFromPath(path: string): Promise<void>
-  evaluateGovernance(action: string, params: { agent: string; context?: Record<string, unknown> }): GovernanceDecision
-  createMission(params: CreateMissionInput): Mission
-  startMission(missionId: string): Mission | null
-  completeMission(missionId: string, options?: { requiredChecks?: string[]; verificationMode?: string }): Mission | null
-  failMission(missionId: string, reason?: string, options?: { requiredChecks?: string[] }): Mission | null
-cancelMission(missionId: string): Mission | null
-  getMission(missionId: string): Mission | null
-  listMissions(limit?: number): Mission[]
-  runAudit(params: RunAuditInput): Promise<AuditReport>
-  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown }
-  recordLearning(params: RecordLearningInput): LearningEvent
-  getInsights(limit?: number): LearningEvent[]
-  getState(): AgentState
-  getAgentState(): AgentState
-  getStatus(): Status
+  loadDNA(dna: DNA): Promise<void>;
+  loadDNAFromDirectory(dir: string): Promise<DNA>;
+  evaluateGovernance(
+    action: string,
+    params: { agent: string; context?: Record<string, unknown> },
+  ): GovernanceDecision;
+  createMission(params: CreateMissionInput): Mission;
+  startMission(missionId: string): Mission | null;
+  completeMission(
+    missionId: string,
+    options?: { requiredChecks?: string[]; verificationMode?: string },
+  ): Mission | null;
+  failMission(
+    missionId: string,
+    reason?: string,
+    options?: { requiredChecks?: string[] },
+  ): Mission | null;
+  cancelMission(missionId: string): Mission | null;
+  getMission(missionId: string): Mission | null;
+  listMissions(limit?: number): Mission[];
+  runAudit(params: RunAuditInput): Promise<AuditReport>;
+  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown };
+  recordLearning(params: RecordLearningInput): LearningEvent;
+  getInsights(limit?: number): LearningEvent[];
+  getState(): AgentState;
+  getAgentState(): AgentState;
+  getStatus(): Status;
 }
 ```
 
@@ -324,7 +339,7 @@ interface Mission {
 interface GovernanceDecision {
   id: string;
   action: string;
-  verdict: "allow" | "deny" | "escalate" | "transform";
+  verdict: 'allow' | 'deny' | 'escalate' | 'transform';
   reason: string;
   rulesEvaluated: string[];
   timestamp: string;
@@ -341,8 +356,9 @@ interface GovernanceDecision {
 
 ```typescript
 // Solução: Carregar DNA antes de avaliar
-await bos.loadDNAFromPath("./dnas/enterprise-governance.yaml");
-const decision = bos.evaluateGovernance("action", { agent: "test" });
+const dna = await bos.loadDNAFromDirectory('./dnas/enterprise-governance.yaml');
+await bos.loadDNA(dna);
+const decision = bos.evaluateGovernance('action', { agent: 'test' });
 ```
 
 ### Erro: "Quality gate failed"
@@ -350,7 +366,7 @@ const decision = bos.evaluateGovernance("action", { agent: "test" });
 ```typescript
 // Verificar métricas
 const quality = bos.checkQuality({
-  test_coverage: 85,  // Deve ser >= threshold
+  test_coverage: 85, // Deve ser >= threshold
   lint_errors: 0,
   security_vulnerabilities: 0,
 });
@@ -360,7 +376,7 @@ const quality = bos.checkQuality({
 
 ```typescript
 // Verificar importações
-import type { MissionType, Priority } from "@behavior-os/schemas";
+import type { MissionType, Priority } from '@behavior-os/schemas';
 ```
 
 ---

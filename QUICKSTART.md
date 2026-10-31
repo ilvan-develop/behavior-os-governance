@@ -63,33 +63,37 @@ pending → active → completed
 ## Quick Example
 
 ```typescript
-import { BehaviorOS } from "@behavior-os/core";
+import { BehaviorOS } from '@behavior-os/core';
 
 const bos = new BehaviorOS();
 
 // Load a DNA pattern from the dnas/ directory (validated against DNASchema)
-await bos.loadDNAFromPath("./dnas/surgical-team.yaml");
+const dna = await bos.loadDNAFromDirectory('./dnas/surgical-team.yaml');
+await bos.loadDNA(dna);
 
 // Create and manage mission
 const mission = bos.createMission({
-  title: "Implement feature",
-  type: "feature",
-  priority: "high",
+  title: 'Implement feature',
+  type: 'feature',
+  priority: 'high',
 });
 
 // Evaluate governance before action
-const decision = bos.evaluateGovernance("deploy", {
-  agent: "devops-agent",
-  context: { production: true }
+const decision = bos.evaluateGovernance('deploy', {
+  agent: 'devops-agent',
+  context: { production: true },
 });
 
-if (decision.verdict === "deny") {
-  console.log("Action blocked:", decision.reason);
+if (decision.verdict === 'deny') {
+  console.log('Action blocked:', decision.reason);
 }
 
 // Complete mission with audit
-bos.completeMission(mission.id, { requiredChecks: ["test", "typecheck"], verificationMode: "real" });
-const report = await bos.runAudit({ missionId: mission.id, agentId: "devops-agent" });
+bos.completeMission(mission.id, {
+  requiredChecks: ['test', 'typecheck'],
+  verificationMode: 'real',
+});
+const report = await bos.runAudit({ missionId: mission.id, agentId: 'devops-agent' });
 ```
 
 ## CLI Commands

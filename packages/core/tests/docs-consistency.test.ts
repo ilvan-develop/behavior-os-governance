@@ -38,6 +38,7 @@ const MCP_TOOLS = [
   'bos_complete_mission',
   'bos_complete_task',
   'bos_consolidate_memory',
+  'bos_conversation_report',
   'bos_create_brainstorm',
   'bos_create_dynamic_dna',
   'bos_create_mission',
@@ -98,7 +99,7 @@ const MCP_TOOLS = [
   'bos_vote_idea',
   'bos_whoami',
 ];
-// MCP_TOOLS count: 85
+// MCP_TOOLS count: 86
 
 /** Extra tools registered by the OpenCode plugin (`plugins/opencode-v2`). */
 const PLUGIN_ONLY_TOOLS = [
@@ -377,6 +378,7 @@ describe('documentation consistency', () => {
       'autonomous',
       'protocol',
       'drift-check',
+      'metrics',
     ]);
 
     for (const file of docs) {
