@@ -14,7 +14,7 @@
   ],
   "linked": [],
   "access": "public",
-  "baseBranch": "master",
+  "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": ["behavioros-examples", "behavioros-orchestrator", "@behavior-os/opencode-plugin"]
 }
