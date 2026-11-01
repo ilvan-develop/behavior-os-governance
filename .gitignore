@@ -87,3 +87,6 @@ run-*.bat
 run-*.cjs
 test-governance*.cjs
 npm-lock.yaml
+# Generated npm auth file used by CI; must never be committed.
+.npm-auth-tmp
+status.log

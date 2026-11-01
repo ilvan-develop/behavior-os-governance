@@ -31,7 +31,10 @@ jobs:
       - run: pnpm build
       - name: Configure npm auth
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
+          # Use a separate auth file to avoid overwriting the project .npmrc
+          # (which is version-controlled and would leak the token into commits)
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npm-auth-tmp
+          export NPM_CONFIG_USERCONFIG=.npm-auth-tmp
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Version packages (if changesets pending)
@@ -61,3 +64,4 @@ jobs:
         run: pnpm changeset publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: .npm-auth-tmp
