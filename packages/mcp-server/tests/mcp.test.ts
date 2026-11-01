@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { SERVER_VERSION } from '../src/version.js';
 
 // Structural checks over the MCP server source. These back the public claim in
 // docs/CLAIMS.md ("30 tools + 2 resources") and fail if the two drift apart.
@@ -101,5 +102,19 @@ describe('MCP server structure', () => {
       readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'),
     ) as { description: string };
     expect(manifest.description).toContain(`${toolNames.length} tools`);
+  });
+
+  it('reports the published package version to MCP clients, not a literal', () => {
+    const pkg = JSON.parse(
+      readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'),
+    ) as { version: string };
+    expect(SERVER_VERSION, 'serverInfo.version must match the registry version').toBe(pkg.version);
+    expect(serverSource, 'both server instances must use the shared constant').toContain(
+      'version: SERVER_VERSION',
+    );
+    expect(
+      serverSource,
+      'a hardcoded serverInfo.version drifts from package.json and hides which engine a host runs',
+    ).not.toMatch(/new McpServer\(\{[^}]*version: ['"]\d+\.\d+\.\d+['"]/);
   });
 });

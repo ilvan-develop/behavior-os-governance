@@ -1,5 +1,18 @@
 # @behavior-os/cli
 
+## 2.2.2
+
+### Patch Changes
+
+- fix: report the published version in `--version` and `serverInfo`
+  
+  Both entry points hardcoded `2.0.0`, so `behavioros --version` and the MCP
+  `serverInfo.version` disagreed with the version actually installed from the
+  registry (2.2.1). Both now read the version from their own `package.json`, and
+  tests fail if a literal is reintroduced.
+- @behavior-os/core@2.2.2
+  - @behavior-os/schemas@2.2.2
+
 ## 2.2.1
 
 ### Patch Changes

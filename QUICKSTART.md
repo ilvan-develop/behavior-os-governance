@@ -25,7 +25,7 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests (110 files / 1199 cases)
+# Run tests (110 files / 1201 cases)
 pnpm test
 ```
 

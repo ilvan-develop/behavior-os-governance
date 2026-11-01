@@ -1,5 +1,12 @@
 # @behavior-os/sdk
 
+## 2.2.2
+
+### Patch Changes
+
+- @behavior-os/core@2.2.2
+  - @behavior-os/schemas@2.2.2
+
 ## 2.2.1
 
 ### Patch Changes

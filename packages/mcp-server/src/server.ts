@@ -19,6 +19,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { rateLimitConfigFromEnv, ToolRateLimiter, withRateLimit } from './rate-limit.js';
+import { SERVER_VERSION } from './version.js';
 
 /** Module directory: a stable anchor for relative config paths (R19). */
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -54,14 +55,14 @@ function getBehaviorOS(): BehaviorOS {
 // Create MCP server
 export const server = new McpServer({
   name: 'behavioros',
-  version: '2.0.0',
+  version: SERVER_VERSION,
 });
 
 /**
  * Throttle every tool at the registration boundary. Wrapping here (instead of
- * in each handler) means all 30 tools and any future tool get the same limit;
- * the override is local to this server instance and delegates to the original
- * method with a bound receiver.
+ * in each handler) means every registered tool and any future tool get the same
+ * limit; the override is local to this server instance and delegates to the
+ * original method with a bound receiver.
  */
 const parsedRateLimit = rateLimitConfigFromEnv();
 for (const warning of parsedRateLimit.warnings) {
@@ -82,7 +83,7 @@ server.registerTool = ((name, config, callback) =>
  * re-connected across tests.
  */
 export function createServer(): McpServer {
-  return new McpServer({ name: 'behavioros', version: '2.0.0' });
+  return new McpServer({ name: 'behavioros', version: SERVER_VERSION });
 }
 
 /**

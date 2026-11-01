@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import { Command } from 'commander';
 import { listRegisteredAgents } from './agents.js';
 import { runDriftCheck } from './drift.js';
+import { CLI_VERSION } from './version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,7 +17,7 @@ const program = new Command();
 program
   .name('behavioros')
   .description('Behavior-OS CLI - Governance platform for AI agent teams')
-  .version('2.0.0');
+  .version(CLI_VERSION);
 
 /**
  * Best-effort DNA loader shared by the commands that need governance to be

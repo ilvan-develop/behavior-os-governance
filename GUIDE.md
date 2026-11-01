@@ -418,5 +418,5 @@ MIT License - ver LICENSE para detalhes.
 ---
 
 **Autor:** BehaviorOS Team 🇦🇴  
-**Versão:** 2.2.1  
+**Versão:** 2.2.2  
 **Data:** 2026-11-01
