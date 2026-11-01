@@ -1,6 +1,6 @@
 {
   "name": "@behavior-os/schemas",
-  "version": "2.0.1",
+  "version": "2.2.0",
   "description": "Zod schemas for Behavior-OS types",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,5 +1,23 @@
 # @behavior-os/cli
 
+## 2.2.0
+
+### Patch Changes
+
+- 885f016: fix: unify MCP protocol advancement steps with plugin host
+  
+  The MCP server now advances `bos_list_dna` (step 2) and `bos_get_state` (step 3)
+  protocol steps, matching the plugin host's behavior. Previously, MCP callers
+  stalled at step 1 after `bos_select_dna` because only `bos_start_mission` advanced
+  the protocol in MCP.
+  
+  Also completes the SDK lifecycle gap (added `completeMission`, `failMission`,
+  `cancelMission`, `listMissions`, `requiredChecks`/`verificationMode` on
+  `createMission`) and fixes the CLI `autonomous` command to close dry-run missions.
+- Updated dependencies [885f016]
+  - @behavior-os/core@2.2.0
+  - @behavior-os/schemas@2.2.0
+
 ## 2.0.1
 
 ### Patch Changes
