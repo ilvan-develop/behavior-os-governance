@@ -46,27 +46,25 @@ jobs:
           STATUS_EXIT=$?
           set -e
           cat status.log
-          # `changeset status` exits non-zero both when there ARE changesets
-          # (to force action) and when it cannot run. Treat "no pending" as a
-          # clean no-op; otherwise version, commit and push.
-          if grep -qi "no unreleased changesets\|There are no changesets to be released" status.log; then
+          # `changeset status` exits non-zero in three cases:
+          #  (1) packages are pending a bump -> log contains "Packages to be bumped"
+          #  (2) no changesets exist         -> exit 1, log says "no unreleased changesets"
+          #  (3) real error                 -> exit != 0, no actionable content
+          # Treat only case (1) as versionable; (2) and (3) are clean no-ops.
+          if grep -qi "Packages to be bumped" status.log; then
+            pnpm changeset version
+            echo "versioned=true" >> "$GITHUB_OUTPUT"
+            echo "Version bumped; committing and pushing."
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A -- ':!status.log'
+            git commit -m "chore: version packages" --no-verify || echo "no changes to commit"
+            git push
+          else
             echo "versioned=false" >> "$GITHUB_OUTPUT"
             echo "No pending changesets; nothing to version or publish."
             exit 0
           fi
-          if [ $STATUS_EXIT -ne 0 ] && ! grep -qi "Packages to be bumped\|bump" status.log; then
-            echo "versioned=false" >> "$GITHUB_OUTPUT"
-            echo "changeset status reported a failure with no actionable changes; skipping."
-            exit 0
-          fi
-          pnpm changeset version
-          echo "versioned=true" >> "$GITHUB_OUTPUT"
-          echo "Version bumped; committing and pushing."
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A -- ':!status.log'
-          git commit -m "chore: version packages" --no-verify || echo "no changes to commit"
-          git push
       - name: Publish to npm
         if: steps.version.outputs.versioned == 'true'
         run: pnpm changeset publish
