@@ -6,7 +6,9 @@ on:
     types: [published]
   workflow_dispatch:
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -29,6 +31,11 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Verify publishable manifests
+        # Fails if a packed manifest still carries `workspace:` ranges or a
+        # `bin`/`main` target that is missing from the tarball — the exact
+        # defect that made 2.2.0 uninstallable for consumers.
+        run: pnpm verify:publish
       - name: Configure npm auth
         run: |
           # Write auth to ~/.npmrc (home dir, not version-controlled) so the
@@ -55,9 +62,8 @@ jobs:
             exit 0
           fi
           if [ $VERSION_EXIT -ne 0 ]; then
-            echo "versioned=false" >> "$GITHUB_OUTPUT"
-            echo "changeset version failed (exit $VERSION_EXIT); skipping publish."
-            exit 0
+            echo "changeset version failed (exit $VERSION_EXIT); refusing to publish."
+            exit 1
           fi
           # Check whether git actually has new changes to commit
           git config user.name "github-actions[bot]"
@@ -73,7 +79,10 @@ jobs:
           echo "versioned=true" >> "$GITHUB_OUTPUT"
           echo "Version bumped and pushed; publishing to npm."
       - name: Publish to npm
-        if: steps.version.outputs.versioned == 'true'
+        # `changeset publish` is idempotent: it only uploads versions that are
+        # not on the registry yet and logs a warning otherwise. Running it
+        # unconditionally means a manual dispatch can also publish a version
+        # that was bumped locally (the version step then finds no changesets).
         run: pnpm changeset publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

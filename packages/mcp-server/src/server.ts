@@ -1,4 +1,5 @@
-﻿import { dirname } from 'node:path';
+#!/usr/bin/env node
+import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
 

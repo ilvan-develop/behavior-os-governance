@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-labelledby="title desc">
+  <title id="title">Behavior-OS</title>
+  <desc id="desc">A hexagonal shield with three connected agent nodes governed by a central rule ring.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#14263f"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="240" rx="48" fill="url(#bg)"/>
+  <path d="M120 26 202 72v96l-82 46-82-46V72z" fill="none" stroke="url(#edge)" stroke-width="6" stroke-linejoin="round"/>
+  <circle cx="120" cy="120" r="30" fill="none" stroke="url(#edge)" stroke-width="5"/>
+  <circle cx="120" cy="120" r="9" fill="#22d3ee"/>
+  <circle cx="120" cy="62" r="11" fill="#38bdf8"/>
+  <circle cx="69" cy="150" r="11" fill="#38bdf8"/>
+  <circle cx="171" cy="150" r="11" fill="#38bdf8"/>
+  <path d="M120 73v17M92 141l-14-27M148 141l14-27" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" opacity="0.85"/>
+</svg>

@@ -8,10 +8,16 @@
 
 ## Installation
 
+Two supported paths. Use npm if you only want to consume the framework; clone
+the repository if you want to work on it.
+
 ```bash
-# Clone the repository
-git clone https://github.com/ilvan-develop/behavior-os.git
-cd behavior-os
+# Option A — consume the published packages
+npm install @behavior-os/sdk @behavior-os/cli @behavior-os/mcp-server
+
+# Option B — work on the framework itself
+git clone https://github.com/ilvan-develop/behavior-os-governance.git
+cd behavior-os-governance
 
 # Install dependencies
 pnpm install
@@ -19,7 +25,7 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests
+# Run tests (110 files / 1199 cases)
 pnpm test
 ```
 
@@ -165,4 +171,4 @@ not registered inside OpenCode so a session sees a single tool catalog.
 - Read the [Full Documentation](./docs/)
 - Explore [DNA Patterns](./dnas/)
 - Check [Architecture Guide](./docs/ARCHITECTURE.md)
-- Join the [Community](https://github.com/ilvan-develop/behavior-os/discussions)
+- Join the [Community](https://github.com/ilvan-develop/behavior-os-governance/discussions)

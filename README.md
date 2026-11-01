@@ -1,20 +1,21 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ilvan-develop/behavioros/main/website/logo.svg" alt="Behavior-OS Logo" width="140" />
+  <img src="https://raw.githubusercontent.com/ilvan-develop/behavior-os-governance/main/website/logo.svg" alt="Behavior-OS Logo" width="140" />
 </p>
 
-<h1 align="center">Behavior-OS v2.0</h1>
+<h1 align="center">Behavior-OS v2.2</h1>
 
 <p align="center">
   <strong>The Operating System for Autonomous AI Agent Teams</strong>
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-866-brightgreen" alt="Tests" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/version-2.1.0-blue" alt="Version" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-1199-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/version-2.2.1-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
   <a href="#"><img src="https://img.shields.io/badge/typescript-strict-3178C6" alt="TypeScript" /></a>
   <a href="#"><img src="https://img.shields.io/badge/pnpm-workspace-F69220" alt="pnpm" /></a>
+  <a href="https://www.npmjs.com/package/@behavior-os/core"><img src="https://img.shields.io/badge/npm-%40behavior-os-purple" alt="npm" /></a>
 </p>
 
 ---
@@ -33,7 +34,7 @@ pnpm build
 # Initialize a new project scaffold
 pnpm exec behavioros init --dna surgical-team
 
-# Run the full test suite (866 cases)
+# Run the full test suite (1199 cases, 110 files)
 pnpm test
 
 # Type-check (11 packages)
@@ -41,6 +42,12 @@ pnpm typecheck
 
 # Run the governance conformance check (24/24 claims)
 pnpm verify:governance
+
+# Install the published packages from npm
+npm install @behavior-os/sdk @behavior-os/cli @behavior-os/mcp-server
+
+# Scaffold a governed project with the CLI
+npx @behavior-os/cli init --dna surgical-team
 ```
 
 ## Why Behavior-OS?
@@ -302,49 +309,47 @@ Run `behavioros <command> --help` for the exact flags. Every command uses exit
 code `0` (success) or `1` (missing `dnas/`, invalid DNA, failed validation,
 blocked `deploy` pre-flight, `autonomous` without `--task`).
 
-| Command                            | What it actually does                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------- |
-| `npx @behavior-os/cli init`        | Scaffold a project (`.behavioros/state.json`, `.mcp.json`, sample DNA)          |
-| `npx @behavior-os/cli compile`     | Parse and validate **every** `dnas/*.yaml` against the DNA schema               |
-| `npx @behavior-os/cli validate`    | Validate the project layout plus every DNA pattern                              |
-| `npx @behavior-os/cli status`      | Engine status (DNA, missions, agents) + `.behavioros/state.json`                |
-| `npx @behavior-os/cli diff`        | Compare `dnas/*.yaml` against `.behavioros/baseline.json`                       |
-| `npx @behavior-os/cli simulate`    | Evaluate one action against the loaded DNA rules                                |
-| `npx @behavior-os/cli deploy`      | Print the deployment gate plan + a real pre-flight (**does not deploy**)        |
-| `npx @behavior-os/cli ecosystem`   | Report what can be read from disk (DNA patterns, verdicts)                      |
-| `npx @behavior-os/cli agent`       | Show the local state summary and registered agents from the SQLite registry     |
-| `npx @behavior-os/cli autonomous`  | Dry-run the 7-step protocol on `--task` (audit simulated, no work executed)     |
-| `npx @behavior-os/cli protocol`    | Check the 7 steps against the local state file                                  |
-| `npx @behavior-os/cli drift-check` | Compare every DNA rule/gate with the baseline (`DriftEngine`; exits 1 on drift) |
-| `npx @behavior-os/cli metrics`      | Display governance metrics (governance events, latency, deny/allow rates) with `--json` / `--reset` flags |
+| Command                            | What it actually does                                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `npx @behavior-os/cli init`        | Scaffold a project (`.behavioros/state.json`, `.mcp.json`, sample DNA)                                    |
+| `npx @behavior-os/cli compile`     | Parse and validate **every** `dnas/*.yaml` against the DNA schema                                         |
+| `npx @behavior-os/cli validate`    | Validate the project layout plus every DNA pattern                                                        |
+| `npx @behavior-os/cli status`      | Engine status (DNA, missions, agents) + `.behavioros/state.json`                                          |
+| `npx @behavior-os/cli diff`        | Compare `dnas/*.yaml` against `.behavioros/baseline.json`                                                 |
+| `npx @behavior-os/cli simulate`    | Evaluate one action against the loaded DNA rules                                                          |
+| `npx @behavior-os/cli deploy`      | Print the deployment gate plan + a real pre-flight (**does not deploy**)                                  |
+| `npx @behavior-os/cli ecosystem`   | Report what can be read from disk (DNA patterns, verdicts)                                                |
+| `npx @behavior-os/cli agent`       | Show the local state summary and registered agents from the SQLite registry                               |
+| `npx @behavior-os/cli autonomous`  | Dry-run the 7-step protocol on `--task` (audit simulated, no work executed)                               |
+| `npx @behavior-os/cli protocol`    | Check the 7 steps against the local state file                                                            |
+| `npx @behavior-os/cli drift-check` | Compare every DNA rule/gate with the baseline (`DriftEngine`; exits 1 on drift)                           |
+| `npx @behavior-os/cli metrics`     | Display governance metrics (governance events, latency, deny/allow rates) with `--json` / `--reset` flags |
 
 ## Test Status
 
 Counted from the repository (not aspirational). Run `pnpm test` for the live result.
 
-| Metric                               | Value                                                    |
-| ------------------------------------ | -------------------------------------------------------- |
-| Test files (`*.test.ts`)             | 82                                                       |
-| Test cases (executed by `pnpm test`) | 866                                                      |
-| Typecheck                            | `pnpm typecheck` (11/11 tasks, 0 errors)                 |
-| Build                                | `pnpm build` (ESM + DTS)                                 |
-| Coverage                             | `pnpm test:coverage` (same 82 files / 866 cases, exit 0) |
-| Lint                                 | `pnpm lint:check` (Biome, 460 files, clean)              |
-| Clean                                | `pnpm clean` (8/8 tasks, removes `dist/`)                |
+| Metric                               | Value                                                      |
+| ------------------------------------ | ---------------------------------------------------------- |
+| Test files (`*.test.ts`)             | 110                                                        |
+| Test cases (executed by `pnpm test`) | 1199                                                       |
+| Typecheck                            | `pnpm typecheck` (11/11 tasks, 0 errors)                   |
+| Build                                | `pnpm build` (ESM + DTS)                                   |
+| Coverage                             | `pnpm test:coverage` (same 110 files / 1199 cases, exit 0) |
+| Publishability                       | `pnpm verify:publish` (packed manifests, exit 0)           |
+| Lint                                 | `pnpm lint:check` (Biome, clean)                           |
+| Clean                                | `pnpm clean` (8/8 tasks, removes `dist/`)                  |
 
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Option A — install the published packages
+npm install @behavior-os/sdk @behavior-os/cli @behavior-os/mcp-server
+
+# Option B — work on the framework itself
 pnpm install
-
-# Build all packages
 pnpm build
-
-# Run tests
 pnpm test
-
-# Type check
 pnpm typecheck
 ```
 
@@ -369,6 +374,9 @@ const status = bos.getStatus();
 ```
 
 ## MCP Setup
+
+After `npm install @behavior-os/mcp-server` the `behavioros-mcp` binary is
+available (`npx behavioros-mcp` runs it without a global install).
 
 ### Claude Code
 
@@ -397,11 +405,12 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 
 ### OpenCode v2 (recommended — native plugin)
 
-The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. Inside
-this repository it is auto-loaded from `.opencode/plugins/behavioros.ts`, a thin
-loader that re-exports the built package; it exposes the full 70 `bos_*` tool
-surface plus governance hooks (`tool:execute.before`, `tool:execute.after`)
-and session context — no MCP server registration required.
+The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It
+ships in this repository and is **not** published to npm: it is auto-loaded from
+`.opencode/plugins/behavioros.ts`, a thin loader that re-exports the built
+package; it exposes the full 70 `bos_*` tool surface plus governance hooks
+(`tool:execute.before`, `tool:execute.after`) and session context — no MCP server
+registration required.
 
 The MCP server is intentionally **not** registered inside OpenCode so sessions
 see a single, non-duplicated tool catalog. For other MCP-capable hosts use the
@@ -423,12 +432,12 @@ mcpServers:
 
 | Package                        | Description                                                                                                                              | Version |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                         | 2.0.1   |
-| `@behavior-os/core`            | 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.1.0   |
-| `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.1.0   |
-| `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.0.1   |
-| `@behavior-os/mcp-server`      | MCP server with 85 tools + 2 resources                                                                                                   | 2.0.1   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 70 tools + hooks                                                                                                 | 2.1.0   |
+| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                         | 2.2.1   |
+| `@behavior-os/core`            | 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.2.1   |
+| `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.2.1   |
+| `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.2.1   |
+| `@behavior-os/mcp-server`      | MCP server with 85 tools + 2 resources                                                                                                   | 2.2.1   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 70 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
 | `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
 
 ## License
@@ -439,7 +448,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 <p align="center">
   Created by <strong>Ilvan Joaquim</strong> from Angola 🇦🇴<br>
-  <a href="https://github.com/ilvan-develop/behavior-os">GitHub</a> ·
+  <a href="https://github.com/ilvan-develop/behavior-os-governance">GitHub</a> ·
   <a href="./docs/PROTOCOL.md">Protocol</a> ·
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
 </p>

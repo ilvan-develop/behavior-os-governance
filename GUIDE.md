@@ -1,9 +1,14 @@
-# 🚀 BehaviorOS v2.0 - Guia Completo
+# 🚀 BehaviorOS v2.2 - Guia Completo
 
 ## Instalação Rápida
 
 ```bash
-# Instalar dependências
+# Opção A — via npm (pacotes publicados)
+npm install @behavior-os/sdk @behavior-os/cli @behavior-os/mcp-server
+
+# Opção B — a partir do repositório (workspace pnpm)
+git clone https://github.com/ilvan-develop/behavior-os-governance.git
+cd behavior-os-governance
 pnpm install
 
 # Construir projeto
@@ -385,8 +390,8 @@ import type { MissionType, Priority } from '@behavior-os/schemas';
 
 ```bash
 # Fork e clone
-git clone https://github.com/ilvan-develop/behavior-os.git
-cd behavior-os
+git clone https://github.com/ilvan-develop/behavior-os-governance.git
+cd behavior-os-governance
 
 # Instalar
 pnpm install
@@ -413,5 +418,5 @@ MIT License - ver LICENSE para detalhes.
 ---
 
 **Autor:** BehaviorOS Team 🇦🇴  
-**Versão:** 2.1.0  
-**Data:** 2026-10-30
+**Versão:** 2.2.1  
+**Data:** 2026-11-01

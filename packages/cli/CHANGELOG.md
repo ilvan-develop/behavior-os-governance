@@ -1,5 +1,25 @@
 # @behavior-os/cli
 
+## 2.2.1
+
+### Patch Changes
+
+- fix(publish): ship installable manifests
+  
+  The 2.2.0 tarballs were produced with `npm publish` from the workspace, so the
+  published manifests still contained `workspace:*` dependency ranges and npm
+  rejects the install with `EUNSUPPORTEDPROTOCOL: Unsupported URL Type
+  "workspace:"`. Republishing through `pnpm changeset publish` rewrites those
+  ranges to the real version.
+  
+  `pnpm verify:publish` now packs every publishable package and fails when a
+  packed manifest still carries a `workspace:` range or declares a `bin`/`main`
+  target that is missing from the tarball. The release and tag workflows run it
+  before publishing, and it is part of `pnpm verify:all`.
+- Updated dependencies
+  - @behavior-os/schemas@2.2.1
+  - @behavior-os/core@2.2.1
+
 ## 2.2.0
 
 ### Patch Changes

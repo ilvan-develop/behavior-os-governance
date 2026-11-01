@@ -22,17 +22,13 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Verify publishable manifests
+        run: pnpm verify:publish
       - name: Configure npm auth
         run: |
-          echo "node_modules/.bin\n/dist" >> .git/info/exclude
-          echo "${NPM_TOKEN}" | node -e "
-            const fs = require('fs');
-            let input = '';
-            process.stdin.on('data', chunk => input += chunk);
-            process.stdin.on('end', () => {
-              fs.writeFileSync('.npmrc', '//registry.npmjs.org/:_authToken=' + input.trim() + '\n');
-            });
-          "
+          # Home directory, never the version-controlled project .npmrc: a token
+          # written there leaks into git and trips push protection.
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish to npm

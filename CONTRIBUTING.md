@@ -4,8 +4,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/ilvan-develop/behavior-os.git
-cd behavior-os
+git clone https://github.com/ilvan-develop/behavior-os-governance.git
+cd behavior-os-governance
 
 # Install dependencies
 pnpm install
@@ -23,16 +23,16 @@ pnpm typecheck
 ## Project Structure
 
 ```
-behavior-os/
+behavior-os-governance/
 ├── packages/
 │   ├── schemas/     # Zod validation schemas
 │   ├── core/        # 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools (13 commands)
 │   ├── mcp-server/  # MCP server implementation (85 tools + 2 resources)
-│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 64 tests)
+│   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 68 tests)
 ├── plugins/
-│   └── opencode-v2/ # OpenCode v2 plugin (70 tools)
+│   └── opencode-v2/ # OpenCode v2 plugin (70 tools; loaded from the workspace, not published to npm)
 ├── dnas/            # 21 DNA pattern YAML files
 ├── docs/            # Documentation (CLAIMS.md is the source of truth)
 ├── examples/        # Usage examples (a pnpm workspace member — `pnpm test` runs its 4 cases)
@@ -93,8 +93,26 @@ chore: update dependencies
 1. Fork the repository
 2. Create feature branch
 3. Make changes with tests
-4. Run `pnpm test` and `pnpm typecheck`
+4. Run `pnpm test`, `pnpm typecheck` and `pnpm verify:publish`
 5. Submit pull request
+
+## Releasing
+
+Publishing is a human action, and the only supported path is the `Release`
+workflow (`.github/workflows/release.yml`) because it publishes through
+`pnpm changeset publish`. `npm publish` packs the workspace manifests verbatim,
+so the tarball keeps `workspace:*` ranges and consumers get
+`EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"`.
+
+1. Add a changeset: `pnpm changeset`
+2. Run the ladder locally: `pnpm build && pnpm verify:publish`
+3. Land the changeset on `main`; the release workflow versions, commits and
+   publishes the packages that are not on the registry yet
+4. A maintainer can re-run it with `workflow_dispatch` (it is idempotent)
+
+`pnpm verify:publish` packs every publishable package, rejects `workspace:`
+ranges and checks that each declared `bin`/`main`/`types` target is inside the
+tarball — the exact checks whose absence shipped an uninstallable 2.2.0.
 
 ## Reporting Issues
 

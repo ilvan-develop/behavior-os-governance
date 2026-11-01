@@ -228,3 +228,39 @@ describe('dependency security gate', () => {
     ).toEqual([]);
   });
 });
+
+describe('registry publish gate', () => {
+  it('defines one publish gate and runs it in the ladder (k)', () => {
+    expect(
+      rootManifest.scripts?.['verify:publish'],
+      'verify:publish is the single definition of the "packed manifests are installable" gate',
+    ).toBe('node scripts/verify-publish.mjs');
+
+    expect(
+      rootManifest.scripts?.['verify:all'] ?? '',
+      'the ladder must pack the packages, otherwise an uninstallable tarball passes every other gate',
+    ).toContain('pnpm verify:publish');
+  });
+
+  it('verifies packed manifests before publishing, never with npm publish (l)', () => {
+    const release = readFileSync(join(repoRoot, '.github', 'workflows', 'release.yml'), 'utf-8');
+    const verifyAt = release.indexOf('pnpm verify:publish');
+    const publishAt = release.indexOf('changeset publish');
+
+    expect(verifyAt, 'the release workflow must run the publish gate').toBeGreaterThan(-1);
+    expect(publishAt, 'the release workflow must publish through changesets').toBeGreaterThan(-1);
+    expect(verifyAt, 'the gate must run before publishing').toBeLessThan(publishAt);
+    expect(
+      release,
+      'npm publish keeps `workspace:` ranges in the manifest and ships packages consumers cannot install',
+    ).not.toMatch(/\bnpm publish\b/);
+  });
+
+  it('keeps the npm token out of the version-controlled .npmrc (m)', () => {
+    for (const workflow of ['release.yml', 'tag-release.yml']) {
+      const source = readFileSync(join(repoRoot, '.github', 'workflows', workflow), 'utf-8');
+      expect(source, `${workflow} must run the publish gate`).toContain('pnpm verify:publish');
+      expect(source, `${workflow} must authenticate from the home directory`).toContain('~/.npmrc');
+    }
+  });
+});

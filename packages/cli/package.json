@@ -1,6 +1,6 @@
 {
   "name": "@behavior-os/cli",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "CLI for Behavior-OS initialization and management",
   "type": "module",
   "main": "./dist/index.js",
