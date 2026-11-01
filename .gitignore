@@ -90,3 +90,5 @@ npm-lock.yaml
 # Generated npm auth file used by CI; must never be committed.
 .npm-auth-tmp
 status.log
+# Generated npm auth token file (home dir); never committed.
+.npmrc.auth
