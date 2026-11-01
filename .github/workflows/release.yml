@@ -41,30 +41,37 @@ jobs:
       - name: Version packages (if changesets pending)
         id: version
         run: |
+          # Try to version; changeset version exits 1 when there are no
+          # unreleased changesets. Capture the result and only commit/push
+          # when actual version files changed.
           set +e
-          pnpm changeset status --verbose > status.log 2>&1
-          STATUS_EXIT=$?
+          pnpm changeset version > version.log 2>&1
+          VERSION_EXIT=$?
           set -e
-          cat status.log
-          # `changeset status` exits non-zero in three cases:
-          #  (1) packages are pending a bump -> log contains "Packages to be bumped"
-          #  (2) no changesets exist         -> exit 1, log says "no unreleased changesets"
-          #  (3) real error                 -> exit != 0, no actionable content
-          # Treat only case (1) as versionable; (2) and (3) are clean no-ops.
-          if grep -qi "Packages to be bumped" status.log; then
-            pnpm changeset version
-            echo "versioned=true" >> "$GITHUB_OUTPUT"
-            echo "Version bumped; committing and pushing."
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add -A -- ':!status.log'
-            git commit -m "chore: version packages" --no-verify || echo "no changes to commit"
-            git push
-          else
+          cat version.log
+          if grep -q "No unreleased changesets found" version.log; then
             echo "versioned=false" >> "$GITHUB_OUTPUT"
             echo "No pending changesets; nothing to version or publish."
             exit 0
           fi
+          if [ $VERSION_EXIT -ne 0 ]; then
+            echo "versioned=false" >> "$GITHUB_OUTPUT"
+            echo "changeset version failed (exit $VERSION_EXIT); skipping publish."
+            exit 0
+          fi
+          # Check whether git actually has new changes to commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A -- ':!version.log'
+          if git diff --cached --quiet; then
+            echo "versioned=false" >> "$GITHUB_OUTPUT"
+            echo "No file changes from version bump; nothing to publish."
+            exit 0
+          fi
+          git commit -m "chore: version packages" --no-verify
+          git push
+          echo "versioned=true" >> "$GITHUB_OUTPUT"
+          echo "Version bumped and pushed; publishing to npm."
       - name: Publish to npm
         if: steps.version.outputs.versioned == 'true'
         run: pnpm changeset publish
