@@ -1,5 +1,68 @@
 # @behavior-os/core
 
+## 2.3.0
+
+### Minor Changes
+
+- e73676d: feat(governance): enforce active policies and authenticate human approval
+  
+  Close the two operational gaps in governed policy versioning:
+  
+  - Policy versions may carry machine-readable enforcement
+    (`block`/`escalate`/`require`/`warn`, a match string and a severity).
+    `BehaviorOS.evaluateGovernance()` consults the human-activated policy set
+    after DNA rules, so activation changes real verdicts for matching actions.
+    Policy rule ids appear in `rulesEvaluated`/`firedRules` and in governance
+    metrics; a policy `deny` is not softened by the lenient governance level.
+  - `evaluateGovernance` results and `getStatus().policies` expose the active
+    ruleset (`{active, ids, enforced}`) to plugin, MCP, CLI and SDK hosts.
+  - When `BEHAVIOR_OS_APPROVAL_KEY` is set, `approvePolicyVersion` requires an
+    HMAC-SHA256 token over the exact version, content hash and rationale,
+    compared in constant time. The approval record stores
+    `verification: 'hmac' | 'actor-kind'` so the weaker local-development basis
+    stays visible. `scripts/policy-approval-token.mjs` issues the token.
+  - `bos_policy` exposes the lifecycle in the MCP server (87 tools) and the
+    OpenCode plugin (72 tools): list, status, events, create, validate, approve,
+    activate, deactivate, rollback and monitor. Mutating calls persist through the
+    host's lifecycle path; a refused transition is reported as an error rather
+    than a success.
+  - Tests cover the full behavior: candidate and approved-but-inactive versions
+    do not enforce, activation blocks a matching action, non-matching actions are
+    untouched, deactivation removes the effect, and HMAC approval rejects missing
+    or invalid tokens.
+- e73676d: feat(responsible-ai): fairness metrics, data provenance and human oversight
+  
+  Adds a deterministic Responsible-AI layer that measures outcomes instead of
+  declaring a gate:
+  
+  - `FairnessEngine` computes demographic parity difference, disparate impact
+    ratio and equal opportunity difference from per-group counts, with
+    configurable thresholds.
+  - Data provenance (datasetId, source, ISO-8601 collectedAt, consentBasis,
+    transformations, lineage) is validated separately from evidence provenance.
+  - Human oversight is a first-class gate: when required, approval plus a
+    non-empty `reviewerId` are mandatory.
+  - Verdicts: `pass` / `warn` / `block` / `insufficient_data`. Missing ground
+    truth yields an explicit "not computed" reason, never an invented metric.
+  - Exposed through `BehaviorOS.evaluateFairness()`, `bos_evaluate_fairness`
+    (MCP and OpenCode plugin), and the `fairness-gate` rule in the
+    `ai-ml-pipeline` DNA.
+  
+  Toolchain and docs:
+  
+  - `vitest.config.ts` now resolves explicit project configs, so the root
+    `vitest` run no longer aborts on stray files under `packages/`.
+  - Documentation counts are guarded against drift: MCP tool list, plugin-only
+    tools and Zod schema counts are checked against source.
+  - Synchronised counts: 87 MCP tools, 72 plugin tools, 48 engines,
+    87 `z.object` / 60 `z.enum`.
+
+### Patch Changes
+
+- Updated dependencies [e73676d]
+- Updated dependencies [e73676d]
+  - @behavior-os/schemas@2.3.0
+
 ## 2.2.2
 
 ### Patch Changes
