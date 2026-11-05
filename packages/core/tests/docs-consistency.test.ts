@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 86 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 87 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_add_conversation_turn',
   'bos_add_knowledge_edge',
@@ -73,6 +73,7 @@ const MCP_TOOLS = [
   'bos_override_rule',
   'bos_parse_rule',
   'bos_parse_rules_batch',
+  'bos_policy',
   'bos_predict_governance',
   'bos_preflight',
   'bos_propose_idea',
@@ -102,7 +103,7 @@ const MCP_TOOLS = [
   'bos_vote_idea',
   'bos_whoami',
 ];
-// MCP_TOOLS count: 86
+// MCP_TOOLS count: 87
 
 /** Extra tools registered by the OpenCode plugin (`plugins/opencode-v2`). */
 const PLUGIN_ONLY_TOOLS = [
@@ -617,9 +618,9 @@ describe('documented counts match the code', () => {
   it('derives the counts it is supposed to guard', () => {
     // A broken derivation would silently compare wrong numbers with wrong
     // numbers, so the derivation itself is pinned to the measured reality.
-    expect(measured.mcpTools).toBe(86);
+    expect(measured.mcpTools).toBe(87);
     expect(measured.mcpResources).toBe(2);
-    expect(measured.pluginTools).toBe(71);
+    expect(measured.pluginTools).toBe(72);
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
     expect(measured.engines).toBe(48);

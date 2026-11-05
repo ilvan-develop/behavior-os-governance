@@ -32,8 +32,15 @@ describe('MCP server structure', () => {
     expect(serverSource).toContain("actor: 'mcp'");
   });
 
-  it('registers exactly 86 tools', () => {
-    expect(toolNames).toHaveLength(86);
+  it('registers exactly 87 tools', () => {
+    expect(toolNames).toHaveLength(87);
+  });
+
+  it('exposes the governed policy console', () => {
+    expect(toolNames).toContain('bos_policy');
+    expect(serverSource).toContain("'create'");
+    expect(serverSource).toContain("'approve'");
+    expect(serverSource).toContain('approvalToken');
   });
 
   it('exposes the consensus and cross-DNA transfer engines', () => {

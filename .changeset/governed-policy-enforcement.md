@@ -24,6 +24,11 @@ Close the two operational gaps in governed policy versioning:
   compared in constant time. The approval record stores
   `verification: 'hmac' | 'actor-kind'` so the weaker local-development basis
   stays visible. `scripts/policy-approval-token.mjs` issues the token.
+- `bos_policy` exposes the lifecycle in the MCP server (87 tools) and the
+  OpenCode plugin (72 tools): list, status, events, create, validate, approve,
+  activate, deactivate, rollback and monitor. Mutating calls persist through the
+  host's lifecycle path; a refused transition is reported as an error rather
+  than a success.
 - Tests cover the full behavior: candidate and approved-but-inactive versions
   do not enforce, activation blocks a matching action, non-matching actions are
   untouched, deactivation removes the effect, and HMAC approval rejects missing

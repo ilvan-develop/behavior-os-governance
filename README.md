@@ -60,7 +60,7 @@ npx @behavior-os/cli init --dna surgical-team
 | Agents don't learn from mistakes         | Learning engine records events & detects recurring patterns                |
 | Hard to coordinate multiple agents       | 7-step protocol + auto-derived missions for traceable work                 |
 | No quality gates                         | Quality gates + audit stages (lint → typecheck → security → coverage)      |
-| Reinventing infrastructure every project | 48 engine files, 86 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 48 engine files, 87 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -215,6 +215,7 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 | **Antipatterns**     | `bos_scan_antipatterns`, `bos_fix_antipatterns`, `bos_antipattern_report`                                                                 |
 | **Conversations**    | `bos_start_conversation`, `bos_add_conversation_turn`, `bos_resolve_conversation`, `bos_conversation_report`, `bos_list_conversations`    |
 | **Roles**            | `bos_register_role`, `bos_define_policy`, `bos_evaluate_role_action`, `bos_role_policy_report`, `bos_list_roles`                          |
+| **Policy lifecycle** | `bos_policy` (list, status, events, create, validate, approve, activate, deactivate, rollback, monitor)                                   |
 | **Agent Capacity**   | `bos_register_agent_capacity`, `bos_assign_task`, `bos_complete_task`, `bos_analyze_workload`, `bos_recommend_assignment`                 |
 | **Natural Language** | `bos_parse_rule`, `bos_parse_rules_batch`, `bos_apply_natural_language_rules`                                                             |
 | **Temporal**         | `bos_add_temporal_rule`, `bos_check_temporal`, `bos_evaluate_dna_temporal`                                                                |
@@ -230,7 +231,16 @@ proceeds. Fairness, provenance and oversight are reported separately — a fair 
 does not excuse missing provenance or a missing reviewer.
 
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (71 tools in total).
+`bos_verify_audit_trail` (72 tools in total).
+
+**Governed policy lifecycle:** `bos_policy` records immutable versions
+(`policyId@N`) of a policy statement, validates a version, requires a human
+actor (and, when `BEHAVIOR_OS_APPROVAL_KEY` is set, a signed approval token) to
+approve and activate it, and supports deactivation and rollback. An active
+version may carry a machine-readable enforcement block (`block`, `escalate`,
+`require` or `warn`); `bos_evaluate_governance` then applies it to every
+matching action, with `deny` never softened by lenient mode. The whole
+lifecycle is appended to the hash-chained governance log.
 
 ### Persistence (opt-in)
 
@@ -414,7 +424,7 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It
 ships in this repository and is **not** published to npm: it is auto-loaded from
 `.opencode/plugins/behavioros.ts`, a thin loader that re-exports the built
-package; it exposes the full 71 `bos_*` tool surface plus governance hooks
+package; it exposes the full 72 `bos_*` tool surface plus governance hooks
 (`tool:execute.before`, `tool:execute.after`) and session context — no MCP server
 registration required.
 
@@ -442,8 +452,8 @@ mcpServers:
 | `@behavior-os/core`            | 48 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.2.2   |
 | `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.2.2   |
 | `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.2.2   |
-| `@behavior-os/mcp-server`      | MCP server with 86 tools + 2 resources                                                                                                   | 2.2.2   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 71 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
+| `@behavior-os/mcp-server`      | MCP server with 87 tools + 2 resources                                                                                                   | 2.2.2   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 72 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
 | `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
 
 ## License

@@ -68,6 +68,7 @@ import type {
   PolicyMonitoring,
   PolicyMonitorResult,
   PolicyRollbackResult,
+  PolicySummary,
   PolicyValidationResult,
   PolicyVersion,
   PolicyVersionStatus,
@@ -1258,6 +1259,11 @@ export class BehaviorOS {
 
   getPolicyMonitoring(policyId: string): PolicyMonitoring | undefined {
     return this.getLearningEngine().getPolicyMonitoring(policyId);
+  }
+
+  /** Every policy identity with its latest/active version and status. */
+  listPolicies(): PolicySummary[] {
+    return this.getLearningEngine().listPolicies();
   }
 
   getPolicyLedgerSnapshot(): PolicyLedgerState {

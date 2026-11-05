@@ -1476,7 +1476,213 @@ export default Plugin.define({
         },
       });
 
-      // Tool 11: bos_get_status
+      // Tool 11: bos_policy (governed policy lifecycle console)
+      addLifecycle({
+        name: 'bos_policy',
+        description:
+          'Governed policy lifecycle: list, status, events, create, validate, approve, activate, deactivate, rollback and monitor. Only a human actor can approve or activate; enforcement changes evaluateGovernance for matching actions.',
+        input: {
+          type: 'object',
+          properties: {
+            operation: {
+              type: 'string',
+              enum: [
+                'list',
+                'status',
+                'events',
+                'create',
+                'validate',
+                'approve',
+                'activate',
+                'deactivate',
+                'rollback',
+                'monitor',
+              ],
+            },
+            policyId: { type: 'string' },
+            versionId: { type: 'string' },
+            toVersionId: { type: 'string' },
+            content: { type: 'string' },
+            rationale: { type: 'string' },
+            reason: { type: 'string' },
+            actorId: { type: 'string' },
+            actorKind: { type: 'string', enum: ['human', 'agent', 'llm', 'system'] },
+            approvalToken: { type: 'string' },
+            issues: { type: 'array', items: { type: 'string' } },
+            enforcement: {
+              type: 'object',
+              properties: {
+                action: { type: 'string', enum: ['block', 'escalate', 'require', 'warn'] },
+                match: { type: 'string' },
+                severity: {
+                  type: 'string',
+                  enum: ['critical', 'high', 'medium', 'low', 'info'],
+                },
+                description: { type: 'string' },
+              },
+            },
+            success: { type: 'boolean' },
+            detail: { type: 'string' },
+          },
+          required: ['operation'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as {
+            operation:
+              | 'list'
+              | 'status'
+              | 'events'
+              | 'create'
+              | 'validate'
+              | 'approve'
+              | 'activate'
+              | 'deactivate'
+              | 'rollback'
+              | 'monitor';
+            policyId?: string;
+            versionId?: string;
+            toVersionId?: string;
+            content?: string;
+            rationale?: string;
+            reason?: string;
+            actorId?: string;
+            actorKind?: 'human' | 'agent' | 'llm' | 'system';
+            approvalToken?: string;
+            issues?: string[];
+            enforcement?: {
+              action: 'block' | 'escalate' | 'require' | 'warn';
+              match: string;
+              severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+              description?: string;
+            };
+            success?: boolean;
+            detail?: string;
+          };
+
+          if (typeof bos.createPolicyCandidate !== 'function') {
+            return {
+              content:
+                'Policy console unavailable [STALE_HOST]: restart the session to load the rebuilt core.',
+            };
+          }
+
+          const actor = {
+            id: params.actorId ?? 'opencode',
+            kind: params.actorKind ?? ('agent' as const),
+          };
+          const requireField = (value: string | undefined, name: string): string => {
+            if (!value) throw new Error(`${name} is required for operation "${params.operation}"`);
+            return value;
+          };
+          const readOnly =
+            params.operation === 'list' ||
+            params.operation === 'status' ||
+            params.operation === 'events';
+          const before = readOnly ? undefined : bos.exportState();
+
+          let result: unknown;
+          switch (params.operation) {
+            case 'list':
+              result = bos.listPolicies();
+              break;
+            case 'status': {
+              const policyId = requireField(params.policyId, 'policyId');
+              const versions = bos.getPolicyVersions(policyId);
+              result = {
+                policyId,
+                active: bos.getActivePolicyVersion(policyId) ?? null,
+                latest: versions[versions.length - 1] ?? null,
+                versions: versions.map((version) => ({
+                  versionId: version.versionId,
+                  status: bos.getPolicyStatus(policyId, version.versionId),
+                  enforcement: version.enforcement ?? null,
+                })),
+                monitoring: bos.getPolicyMonitoring(policyId) ?? null,
+              };
+              break;
+            }
+            case 'events':
+              result = bos.getPolicyLedgerEvents(params.policyId);
+              break;
+            case 'create':
+              result = bos.createPolicyCandidate({
+                ...(params.policyId ? { policyId: params.policyId } : {}),
+                content: requireField(params.content, 'content'),
+                actor,
+                source: 'opencode',
+                ...(params.reason ? { reason: params.reason } : {}),
+                ...(params.enforcement ? { enforcement: params.enforcement } : {}),
+              });
+              break;
+            case 'validate':
+              result = bos.validatePolicyVersion(
+                requireField(params.policyId, 'policyId'),
+                requireField(params.versionId, 'versionId'),
+                { actor, ...(params.issues ? { issues: params.issues } : {}) },
+              );
+              break;
+            case 'approve':
+              result = bos.approvePolicyVersion(
+                requireField(params.policyId, 'policyId'),
+                requireField(params.versionId, 'versionId'),
+                {
+                  actor,
+                  rationale: requireField(params.rationale, 'rationale'),
+                  ...(params.approvalToken ? { approvalToken: params.approvalToken } : {}),
+                },
+              );
+              break;
+            case 'activate':
+              result = bos.activatePolicyVersion(
+                requireField(params.policyId, 'policyId'),
+                requireField(params.versionId, 'versionId'),
+                { actor, ...(params.reason ? { reason: params.reason } : {}) },
+              );
+              break;
+            case 'deactivate':
+              result = bos.deactivatePolicy(requireField(params.policyId, 'policyId'), {
+                actor,
+                reason: requireField(params.reason, 'reason'),
+              });
+              break;
+            case 'rollback':
+              result = bos.rollbackPolicy(
+                requireField(params.policyId, 'policyId'),
+                requireField(params.toVersionId, 'toVersionId'),
+                { actor, reason: requireField(params.reason, 'reason') },
+              );
+              break;
+            case 'monitor':
+              result = bos.monitorPolicy(requireField(params.policyId, 'policyId'), {
+                actor,
+                success: params.success ?? true,
+                ...(params.detail ? { detail: params.detail } : {}),
+              });
+              break;
+          }
+
+          if (before) {
+            const persisted = await persistLifecycleChange(ctx, before);
+            if (!persisted.ok) {
+              return {
+                content: `Policy ${params.operation} failed [PERSISTENCE_FAILED]: ${persisted.error ?? 'unknown storage error'}`,
+              };
+            }
+          }
+
+          const failed =
+            typeof result === 'object' && result !== null && 'ok' in result && result.ok === false;
+          if (failed) {
+            const refusal = result as { code?: string; message?: string };
+            return {
+              content: `Policy ${params.operation} refused [${refusal.code ?? 'ERROR'}]: ${refusal.message ?? 'unknown error'}`,
+            };
+          }
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
+      // Tool 12: bos_get_status
       tools.add({
         name: 'bos_get_status',
         description: 'Get current Behavior-OS status',

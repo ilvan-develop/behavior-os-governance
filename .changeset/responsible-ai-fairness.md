@@ -31,5 +31,5 @@ Toolchain and docs:
   `vitest` run no longer aborts on stray files under `packages/`.
 - Documentation counts are guarded against drift: MCP tool list, plugin-only
   tools and Zod schema counts are checked against source.
-- Synchronised counts: 86 MCP tools, 71 plugin tools, 48 engines,
+- Synchronised counts: 87 MCP tools, 72 plugin tools, 48 engines,
   87 `z.object` / 60 `z.enum`.

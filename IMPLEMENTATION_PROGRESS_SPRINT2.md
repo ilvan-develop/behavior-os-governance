@@ -45,10 +45,10 @@ No MCP tool was added, so the documented MCP/plugin counts are unchanged.
 | `pnpm lint:check`                      | exit 0 — 464 files checked, no fixes applied                                                                   |
 | `pnpm --filter @behavior-os/core test` | exit 0 — 83 files, 870 tests                                                                                   |
 | `pnpm test --force`                    | exit 0 — 8/8 packages successful                                                                               |
-| Per-package test counts                | schemas 35, core 870, sdk 15, cli 22, mcp-server 45, orchestrator 149, plugin 177, examples 4 — **1317 total** |
+| Per-package test counts                | schemas 35, core 870, sdk 15, cli 22, mcp-server 46, orchestrator 149, plugin 178, examples 4 — **1319 total** |
 | `pnpm build`                           | exit 0 — 8/8 tasks successful                                                                                  |
 | `pnpm verify:publish`                  | exit 0 — 5 packages installable                                                                                |
-| `pnpm verify:plugin`                   | exit 0 — 71 tools surfaced                                                                                     |
+| `pnpm verify:plugin`                   | exit 0 — 72 tools surfaced                                                                                     |
 | `pnpm verify:opencode`                 | exit 0 — 39/39 checks                                                                                          |
 | `pnpm verify:windows`                  | exit 0 — zero visible console windows                                                                          |
 | `pnpm smoke:mcp`                       | exit 0 — 2 resources, 21 DNA patterns, governance escalation matched                                           |
@@ -75,6 +75,13 @@ Two gaps that were explicit limitations of the first delivery are now closed:
    `policyId|versionId|contentHash|rationale` (constant-time compare). The
    approval record stores `verification: 'hmac' | 'actor-kind'`.
    `scripts/policy-approval-token.mjs` issues the token.
+3. **Policy console on both host surfaces.** `bos_policy` exposes list, status,
+   events, create, validate, approve, activate, deactivate, rollback and monitor
+   in the MCP server (87 tools) and the OpenCode plugin (72 tools). Mutations go
+   through the host lifecycle persistence path, so a failed write is reported and
+   the in-memory state is restored instead of claiming success. The plugin e2e
+   test drives create → validate → human approve → activate → blocked action →
+   deactivate → unblocked action through the real tool surface.
 
 Also added: `getStatus().policies {active, ids, enforced}` so plugin, MCP and
 CLI hosts can observe the active ruleset without a new tool.

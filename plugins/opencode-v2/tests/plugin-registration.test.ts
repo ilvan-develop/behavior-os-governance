@@ -228,6 +228,7 @@ const EXPECTED_TOOLS = [
   'bos_loop_status',
   'bos_parse_rule',
   'bos_parse_rules_batch',
+  'bos_policy',
   'bos_predict_governance',
   'bos_preflight',
   'bos_query_knowledge_graph',
@@ -265,7 +266,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 71 bos_* tools', async () => {
+  it('registers exactly the 72 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -277,7 +278,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(71);
+    expect(addedTools).toHaveLength(72);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -310,7 +311,7 @@ describe('behavior-os plugin registration', () => {
       const { ctx, addedTools } = createFakeContext(repoRoot);
       await plugin.setup(ctx as never);
 
-      expect(addedTools).toHaveLength(71);
+      expect(addedTools).toHaveLength(72);
       const select = addedTools.find((t) => t.name === 'bos_select_dna');
       const enumValues = (
         select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -1593,6 +1594,111 @@ describe('behavior-os governance log', () => {
     const stored = persisted.learningRecords.find((record) => record.id === recordId);
     expect(stored?.stage).toBe('validated');
     expect(stored?.evidence).toContain('pnpm test: 659 cases passed');
+  });
+
+  it('drives the governed policy console end-to-end through the plugin', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'lean-factory' });
+
+    const created = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_policy', {
+          operation: 'create',
+          policyId: 'policy:e2e-freeze',
+          content: 'Deployments must not start on Friday.',
+          reason: 'e2e evidence',
+          enforcement: {
+            action: 'block',
+            match: 'deploy',
+            severity: 'critical',
+            description: 'Friday deploy freeze',
+          },
+        })
+      ).content,
+    ) as { ok: boolean; version: { versionId: string } };
+    expect(created.ok).toBe(true);
+    const versionId = created.version.versionId;
+
+    const validation = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_policy', {
+          operation: 'validate',
+          policyId: 'policy:e2e-freeze',
+          versionId,
+        })
+      ).content,
+    ) as { ok: boolean };
+    expect(validation.ok).toBe(true);
+
+    const approval = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_policy', {
+          operation: 'approve',
+          policyId: 'policy:e2e-freeze',
+          versionId,
+          rationale: 'Reviewed the freeze and accept the rule.',
+          actorId: 'human:e2e',
+          actorKind: 'human',
+        })
+      ).content,
+    ) as { ok: boolean };
+    expect(approval.ok).toBe(true);
+
+    const activation = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_policy', {
+          operation: 'activate',
+          policyId: 'policy:e2e-freeze',
+          versionId,
+          reason: 'Rolling out the freeze for the quarter',
+          actorId: 'human:e2e',
+          actorKind: 'human',
+        })
+      ).content,
+    ) as { ok: boolean };
+    expect(activation.ok).toBe(true);
+
+    const blocked = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_evaluate_governance', {
+          action: 'deploy production',
+          agent: 'agent-1',
+        })
+      ).content,
+    ) as { verdict: string; reason: string };
+    expect(blocked.verdict).toBe('deny');
+    expect(blocked.reason).toContain('Friday deploy freeze');
+
+    const list = JSON.parse(
+      (await runTool(addedTools, 'bos_policy', { operation: 'list' })).content,
+    ) as Array<{ policyId: string; status: string; enforced: boolean }>;
+    const summary = list.find((policy) => policy.policyId === 'policy:e2e-freeze');
+    expect(summary?.status).toBe('active');
+    expect(summary?.enforced).toBe(true);
+
+    const deactivated = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_policy', {
+          operation: 'deactivate',
+          policyId: 'policy:e2e-freeze',
+          reason: 'Freeze lifted after the quarter ended',
+          actorId: 'human:e2e',
+          actorKind: 'human',
+        })
+      ).content,
+    ) as { ok: boolean };
+    expect(deactivated.ok).toBe(true);
+
+    const after = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_evaluate_governance', {
+          action: 'deploy production',
+          agent: 'agent-1',
+        })
+      ).content,
+    ) as { verdict: string };
+    expect(after.verdict).not.toBe('deny');
   });
 
   it('bos_set_agent switches the acting persona from the active DNA', async () => {

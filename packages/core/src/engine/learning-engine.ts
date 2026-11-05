@@ -253,6 +253,16 @@ export interface PolicyEnforcementEvaluation {
   matches: PolicyEnforcementMatch[];
 }
 
+/** One-line view of a policy identity for list/status surfaces. */
+export interface PolicySummary {
+  policyId: string;
+  versions: number;
+  activeVersionId?: string;
+  latestVersionId: string;
+  status: PolicyVersionStatus;
+  enforced: boolean;
+}
+
 export interface CreatePolicyCandidateOptions {
   /** Stable policy identity. Defaults to `policy:<learningId>` when omitted. */
   policyId?: string;
@@ -1380,6 +1390,28 @@ export class LearningEngine {
   getPolicyMonitoring(policyId: string): PolicyMonitoring | undefined {
     const stats = this.policyMonitoring.get(policyId);
     return stats ? { ...stats } : undefined;
+  }
+
+  /** Stable summary of every policy identity, for the MCP/plugin console. */
+  listPolicies(): PolicySummary[] {
+    return [...this.policyVersions.keys()]
+      .sort((left, right) => left.localeCompare(right))
+      .map((policyId) => {
+        const history = this.policyVersions.get(policyId) ?? [];
+        const latest = history[history.length - 1];
+        const activeVersionId = this.activePolicyVersions.get(policyId);
+        const target =
+          (activeVersionId ? this.findPolicyVersion(policyId, activeVersionId) : undefined) ??
+          latest;
+        return {
+          policyId,
+          versions: history.length,
+          ...(activeVersionId ? { activeVersionId } : {}),
+          latestVersionId: latest.versionId,
+          status: this.getPolicyStatus(policyId, target.versionId) ?? 'candidate',
+          enforced: target.enforcement !== undefined,
+        };
+      });
   }
 
   snapshotPolicyLedger(): PolicyLedgerState {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { FairnessInput } from '@behavior-os/core';
+import type { FairnessInput, PolicyActor, PolicyEnforcement } from '@behavior-os/core';
 import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
 
 import type {
@@ -1586,6 +1586,172 @@ server.registerTool(
         content: [
           {
             type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+/** Machine-readable enforcement attached to a policy version. */
+export const policyEnforcementSchema = z.object({
+  action: z.enum(['block', 'escalate', 'require', 'warn']),
+  match: z.string().describe('Case-insensitive substring of the action, or "*" for every action'),
+  severity: z.enum(['critical', 'high', 'medium', 'low', 'info']),
+  description: z.string().optional(),
+});
+
+server.registerTool(
+  'bos_policy',
+  {
+    description:
+      'Governed policy lifecycle console: list, status, events, create, validate, approve, activate, deactivate, rollback and monitor. Only a human actor can approve or activate.',
+    inputSchema: z.object({
+      operation: z.enum([
+        'list',
+        'status',
+        'events',
+        'create',
+        'validate',
+        'approve',
+        'activate',
+        'deactivate',
+        'rollback',
+        'monitor',
+      ]),
+      policyId: z
+        .string()
+        .optional()
+        .describe('Stable policy identity, e.g. policy:no-friday-deploy'),
+      versionId: z.string().optional().describe('Version id, e.g. policy:no-friday-deploy@1'),
+      toVersionId: z.string().optional().describe('Rollback target version id'),
+      content: z.string().optional().describe('Policy statement (create)'),
+      rationale: z.string().optional().describe('Human approval rationale (approve, >= 10 chars)'),
+      reason: z.string().optional().describe('Audit reason (create/activate/deactivate/rollback)'),
+      actorId: z.string().optional().describe('Actor id (default mcp-client)'),
+      actorKind: z
+        .enum(['human', 'agent', 'llm', 'system'])
+        .optional()
+        .describe('Actor kind; approve/activate/deactivate/rollback require human'),
+      approvalToken: z
+        .string()
+        .optional()
+        .describe('HMAC token required when BEHAVIOR_OS_APPROVAL_KEY is set'),
+      issues: z.array(z.string()).optional().describe('Validation issues to record'),
+      enforcement: policyEnforcementSchema.optional(),
+      success: z.boolean().optional().describe('Monitoring outcome (default true)'),
+      detail: z.string().optional().describe('Monitoring detail'),
+    }),
+    annotations: {
+      title: 'Governed Policy',
+    },
+  },
+  async (params) => {
+    try {
+      const bos = getBehaviorOS();
+      const actor: PolicyActor = {
+        id: params.actorId ?? 'mcp-client',
+        kind: params.actorKind ?? 'agent',
+      };
+      const requireField = (value: string | undefined, name: string): string => {
+        if (!value) throw new Error(`${name} is required for operation "${params.operation}"`);
+        return value;
+      };
+
+      let result: unknown;
+      switch (params.operation) {
+        case 'list':
+          result = bos.listPolicies();
+          break;
+        case 'status': {
+          const policyId = requireField(params.policyId, 'policyId');
+          const versions = bos.getPolicyVersions(policyId);
+          result = {
+            policyId,
+            active: bos.getActivePolicyVersion(policyId) ?? null,
+            latest: versions[versions.length - 1] ?? null,
+            versions: versions.map((version) => ({
+              versionId: version.versionId,
+              status: bos.getPolicyStatus(policyId, version.versionId),
+              enforcement: version.enforcement ?? null,
+            })),
+            monitoring: bos.getPolicyMonitoring(policyId) ?? null,
+          };
+          break;
+        }
+        case 'events':
+          result = bos.getPolicyLedgerEvents(params.policyId);
+          break;
+        case 'create':
+          result = bos.createPolicyCandidate({
+            ...(params.policyId ? { policyId: params.policyId } : {}),
+            content: requireField(params.content, 'content'),
+            actor,
+            source: 'mcp',
+            ...(params.reason ? { reason: params.reason } : {}),
+            ...(params.enforcement ? { enforcement: params.enforcement as PolicyEnforcement } : {}),
+          });
+          break;
+        case 'validate':
+          result = bos.validatePolicyVersion(
+            requireField(params.policyId, 'policyId'),
+            requireField(params.versionId, 'versionId'),
+            { actor, ...(params.issues ? { issues: params.issues } : {}) },
+          );
+          break;
+        case 'approve':
+          result = bos.approvePolicyVersion(
+            requireField(params.policyId, 'policyId'),
+            requireField(params.versionId, 'versionId'),
+            {
+              actor,
+              rationale: requireField(params.rationale, 'rationale'),
+              ...(params.approvalToken ? { approvalToken: params.approvalToken } : {}),
+            },
+          );
+          break;
+        case 'activate':
+          result = bos.activatePolicyVersion(
+            requireField(params.policyId, 'policyId'),
+            requireField(params.versionId, 'versionId'),
+            { actor, ...(params.reason ? { reason: params.reason } : {}) },
+          );
+          break;
+        case 'deactivate':
+          result = bos.deactivatePolicy(requireField(params.policyId, 'policyId'), {
+            actor,
+            reason: requireField(params.reason, 'reason'),
+          });
+          break;
+        case 'rollback':
+          result = bos.rollbackPolicy(
+            requireField(params.policyId, 'policyId'),
+            requireField(params.toVersionId, 'toVersionId'),
+            { actor, reason: requireField(params.reason, 'reason') },
+          );
+          break;
+        case 'monitor':
+          result = bos.monitorPolicy(requireField(params.policyId, 'policyId'), {
+            actor,
+            success: params.success ?? true,
+            ...(params.detail ? { detail: params.detail } : {}),
+          });
+          break;
+      }
+
+      const failed =
+        typeof result === 'object' && result !== null && 'ok' in result && result.ok === false;
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        ...(failed ? { isError: true } : {}),
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
             text: `Error: ${error instanceof Error ? error.message : String(error)}`,
           },
         ],

@@ -52,7 +52,13 @@ export type { FairnessInput, ProvenanceCheck } from './fairness-engine.js';
 export type {
   AdvanceLearningRecordOptions,
   CreateLearningRecordOptions,
+  CreatePolicyCandidateOptions,
   LearningAdvanceResult,
+  PolicyActor,
+  PolicyEnforcement,
+  PolicySummary,
+  PolicyVersion,
+  PolicyVersionStatus,
 } from './learning-engine.js';
 export { LEARNING_STAGES } from './learning-engine.js';
 export type {

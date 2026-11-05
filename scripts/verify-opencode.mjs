@@ -387,12 +387,12 @@ check('plugin loader points at the versioned build', () => {
   return 'auto-discovered loader';
 });
 
-check('plugin exposes 71 unique bos_* tools', () => {
+check('plugin exposes 72 unique bos_* tools', () => {
   const source = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
   const names = [...source.matchAll(/name:\s*'([a-z0-9_]+)'/g)]
     .map((match) => match[1])
     .filter((name) => name.startsWith('bos_'));
-  if (names.length !== 71) fail(`expected 71 bos_* tools, found ${names.length}`);
+  if (names.length !== 72) fail(`expected 72 bos_* tools, found ${names.length}`);
   if (new Set(names).size !== names.length) fail('duplicate bos_* tool names');
   return `${names.length} tools`;
 });

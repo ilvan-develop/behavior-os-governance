@@ -29,10 +29,10 @@ behavior-os-governance/
 │   ├── core/        # 48 + BehaviorOS facade + persistence (SQLite/Postgres)
 │   ├── sdk/         # High-level TypeScript SDK
 │   ├── cli/         # CLI tools (13 commands)
-│   ├── mcp-server/  # MCP server implementation (86 tools + 2 resources)
+│   ├── mcp-server/  # MCP server implementation (87 tools + 2 resources)
 │   └── orchestrator/# Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop; 68 tests)
 ├── plugins/
-│   └── opencode-v2/ # OpenCode v2 plugin (71 tools; loaded from the workspace, not published to npm)
+│   └── opencode-v2/ # OpenCode v2 plugin (72 tools; loaded from the workspace, not published to npm)
 ├── dnas/            # 21 DNA pattern YAML files
 ├── docs/            # Documentation (CLAIMS.md is the source of truth)
 ├── examples/        # Usage examples (a pnpm workspace member — `pnpm test` runs its 4 cases)
