@@ -1,5 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["BEHAVIOR_OS_APPROVAL_KEY"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

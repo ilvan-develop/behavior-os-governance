@@ -1462,6 +1462,80 @@ export const GovernanceChangeRequestSchema = z.object({
   createdAt: z.string(),
 });
 
+// ============================================================
+// Responsible AI: fairness, data provenance, human oversight
+// ============================================================
+
+export const FairnessVerdictSchema = z.enum(['pass', 'warn', 'block', 'insufficient_data']);
+
+export const FairnessGroupSchema = z.object({
+  group: z.string().min(1),
+  total: z.number().int().nonnegative(),
+  positive: z.number().int().nonnegative(),
+  /** Ground-truth positives; required to compute equal opportunity. */
+  actualPositive: z.number().int().nonnegative().optional(),
+  /** True positives among the favourable decisions. */
+  truePositive: z.number().int().nonnegative().optional(),
+});
+
+export const FairnessThresholdsSchema = z.object({
+  maxParityDifference: z.number().min(0).max(1).default(0.1),
+  minDisparateImpactRatio: z.number().min(0).max(1).default(0.8),
+  maxEqualOpportunityDifference: z.number().min(0).max(1).default(0.1),
+});
+
+export const DataProvenanceSchema = z.object({
+  datasetId: z.string().min(1),
+  source: z.string().min(1),
+  /** ISO-8601 timestamp; validated by the engine so the schema stays portable. */
+  collectedAt: z.string().min(1),
+  /** Legal or ethical basis for using the data. */
+  consentBasis: z.string().min(1),
+  transformations: z.array(z.string()).optional(),
+  lineage: z.array(z.string()).optional(),
+});
+
+export const HumanOversightSchema = z.object({
+  required: z.boolean(),
+  approved: z.boolean(),
+  reviewerId: z.string().optional(),
+  reviewedAt: z.string().optional(),
+  rationale: z.string().optional(),
+});
+
+export const FairnessMetricSchema = z.object({
+  name: z.enum([
+    'demographic_parity_difference',
+    'disparate_impact_ratio',
+    'equal_opportunity_difference',
+  ]),
+  value: z.number(),
+  threshold: z.number(),
+  passed: z.boolean(),
+  detail: z.string(),
+});
+
+export const FairnessEvaluationSchema = z.object({
+  verdict: FairnessVerdictSchema,
+  passed: z.boolean(),
+  metrics: z.array(FairnessMetricSchema),
+  violations: z.array(z.string()),
+  provenanceComplete: z.boolean(),
+  provenanceIssues: z.array(z.string()),
+  oversightSatisfied: z.boolean(),
+  reasons: z.array(z.string()),
+  thresholds: FairnessThresholdsSchema,
+  evaluatedAt: z.string(),
+});
+
+export type FairnessVerdict = z.infer<typeof FairnessVerdictSchema>;
+export type FairnessGroup = z.infer<typeof FairnessGroupSchema>;
+export type FairnessThresholds = z.infer<typeof FairnessThresholdsSchema>;
+export type DataProvenance = z.infer<typeof DataProvenanceSchema>;
+export type HumanOversight = z.infer<typeof HumanOversightSchema>;
+export type FairnessMetric = z.infer<typeof FairnessMetricSchema>;
+export type FairnessEvaluation = z.infer<typeof FairnessEvaluationSchema>;
+
 export type TemporalPattern = z.infer<typeof TemporalPatternSchema>;
 export type TemporalPatternSuggestion = z.infer<typeof TemporalPatternSuggestionSchema>;
 export type CrossDomainTransfer = z.infer<typeof CrossDomainTransferSchema>;

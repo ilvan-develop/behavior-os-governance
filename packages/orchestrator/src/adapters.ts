@@ -26,6 +26,11 @@ export interface AdapterExecutionContext {
  */
 export interface TaskAdapter {
   readonly name: string;
+  /**
+   * Whether this adapter can mutate state. Undefined means mutating: only an
+   * explicit `false` from host-owned adapter code can make a task read-only.
+   */
+  readonly mutating?: boolean;
   execute(input: Record<string, unknown>, context: AdapterExecutionContext): Promise<AdapterResult>;
 }
 
@@ -55,6 +60,11 @@ function stringInput(input: Record<string, unknown>, key: string): string | unde
  */
 export class ShellAdapter implements TaskAdapter {
   readonly name = 'shell';
+  /**
+   * Shell commands can write, delete or spawn arbitrary processes, so this
+   * adapter is always mutating even when a plan declares `mutating: false`.
+   */
+  readonly mutating = true;
   private readonly options: ShellAdapterOptions;
 
   constructor(options: ShellAdapterOptions = {}) {

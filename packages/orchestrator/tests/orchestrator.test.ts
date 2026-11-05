@@ -415,6 +415,35 @@ describe('AutonomousOrchestrator idempotency and resumption', () => {
     expect(behaviorOS.listMissions()).toHaveLength(1);
   });
 
+  it('fails closed when one idempotency key is reused by a different task', async () => {
+    const { orchestrator } = makeOrchestrator();
+    let calls = 0;
+    orchestrator.registerAdapter({
+      name: 'counted',
+      async execute() {
+        calls += 1;
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+    const plan = basePlan([
+      nodeTask({ id: 'first', adapter: 'counted', idempotencyKey: 'shared-op', input: {} }),
+      nodeTask({ id: 'second', adapter: 'counted', idempotencyKey: 'shared-op', input: {} }),
+    ]);
+
+    const result = await orchestrator.executeMission(plan, 'agent-1');
+
+    // The adapter runs once for the logical operation: the second task must not
+    // re-execute a key already bound to the first task.
+    expect(calls).toBe(1);
+    // The second task must not borrow the first task's evidence to pretend its
+    // own gates passed; it fails closed instead.
+    const second = result.tasks.find((task) => task.id === 'second');
+    expect(second?.status).toBe('blocked');
+    expect(second?.error?.code).toBe('INVALID_INPUT');
+    const first = result.tasks.find((task) => task.id === 'first');
+    expect(first?.status).toBe('completed');
+  });
+
   it('skips tasks whose gates already have executed evidence on resume', async () => {
     const behaviorOS = new BehaviorOS();
     await behaviorOS.loadDNA(TEST_DNA);
@@ -676,5 +705,266 @@ describe('AutonomousOrchestrator observability and persistence', () => {
       store.failSaves = false;
       store.close();
     }
+  });
+});
+
+describe('AutonomousOrchestrator parallel branches', () => {
+  function workTask(id: string, overrides: Partial<TaskDefinitionInput> = {}): TaskDefinitionInput {
+    return {
+      id,
+      objective: `work ${id}`,
+      adapter: 'work',
+      input: {},
+      maxAttempts: 1,
+      acceptance: [
+        {
+          gate: `gate-${id}`,
+          description: `gate ${id}`,
+          type: 'stdout-contains',
+          expected: 'ok',
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it('runs independent branches concurrently up to maxParallelism', async () => {
+    const { orchestrator } = makeOrchestrator();
+    let active = 0;
+    let peak = 0;
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute() {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        active -= 1;
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([workTask('a'), workTask('b'), workTask('c'), workTask('d')]),
+      'agent-1',
+      { maxParallelism: 2 },
+    );
+
+    expect(result.outcome).toBe('completed');
+    expect(peak).toBe(2);
+    // Results are applied in deterministic plan order, not completion order.
+    expect(result.tasks.map((task) => task.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('is strictly sequential by default', async () => {
+    const { orchestrator } = makeOrchestrator();
+    let active = 0;
+    let peak = 0;
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute() {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([workTask('a'), workTask('b')]),
+      'agent-1',
+    );
+
+    expect(result.outcome).toBe('completed');
+    expect(peak).toBe(1);
+  });
+
+  it('never starts a dependent task before its prerequisite completes', async () => {
+    const { orchestrator } = makeOrchestrator();
+    const completed = new Set<string>();
+    let violation = false;
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute(_input, context) {
+        if (context.taskId === 'dependent' && !completed.has('prerequisite')) {
+          violation = true;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        completed.add(context.taskId);
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([workTask('prerequisite'), workTask('dependent', { dependsOn: ['prerequisite'] })]),
+      'agent-1',
+      { maxParallelism: 2 },
+    );
+
+    expect(result.outcome).toBe('completed');
+    expect(violation).toBe(false);
+    expect(result.tasks.map((task) => task.id)).toEqual(['prerequisite', 'dependent']);
+  });
+
+  it('keeps independent results when a sibling branch fails in the same batch', async () => {
+    const { orchestrator } = makeOrchestrator();
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute(_input, context) {
+        if (context.taskId === 'boom') {
+          return { exitCode: 1, stdout: '', stderr: 'boom' };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([workTask('a'), workTask('boom'), workTask('c')]),
+      'agent-1',
+      { maxParallelism: 3 },
+    );
+
+    expect(result.outcome).toBe('failed');
+    expect(result.tasks.map((task) => [task.id, task.status])).toEqual([
+      ['a', 'completed'],
+      ['boom', 'failed'],
+      ['c', 'completed'],
+    ]);
+  });
+
+  it('cancels in-flight branches when the caller aborts', async () => {
+    const { orchestrator } = makeOrchestrator();
+    const controller = new AbortController();
+    let started = 0;
+    let releaseStart: () => void = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute(_input, context) {
+        started += 1;
+        if (started === 2) releaseStart();
+        await new Promise<void>((resolve) => {
+          context.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const mission = orchestrator.executeMission(
+      basePlan([workTask('a'), workTask('b')]),
+      'agent-1',
+      { maxParallelism: 2, signal: controller.signal },
+    );
+    await bothStarted;
+    controller.abort();
+    const result = await mission;
+
+    expect(result.outcome).toBe('cancelled');
+  });
+
+  it('times out one branch without losing its sibling result', async () => {
+    const { orchestrator } = makeOrchestrator();
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute(_input, context) {
+        if (context.taskId === 'slow') {
+          await new Promise<void>((resolve) => {
+            context.signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+          return { exitCode: 0, stdout: 'ok', stderr: '' };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([workTask('slow', { timeoutMs: 25 }), workTask('fast')]),
+      'agent-1',
+      { maxParallelism: 2 },
+    );
+
+    expect(result.outcome).toBe('failed');
+    const slow = result.tasks.find((task) => task.id === 'slow');
+    const fast = result.tasks.find((task) => task.id === 'fast');
+    expect(slow?.status).toBe('failed');
+    expect(slow?.error?.code).toBe('TIMEOUT');
+    // The sibling branch is independent: its completed result must survive.
+    expect(fast?.status).toBe('completed');
+    expect(fast?.exitCode).toBe(0);
+  });
+
+  it('resumes a partially proven parallel batch and runs only the unproven branches', async () => {
+    const behaviorOS = new BehaviorOS();
+    await behaviorOS.loadDNA(TEST_DNA);
+    const mission: Mission = behaviorOS.createMission({
+      title: 'Interrupted parallel mission',
+      type: 'feature',
+      priority: 'high',
+      dnaPattern: TEST_DNA.name,
+      createdBy: 'agent-1',
+      requiredChecks: ['gate-a', 'gate-b', 'gate-c'],
+      verificationMode: 'executed',
+    });
+    expect(behaviorOS.transitionMission(mission.id, 'active').ok).toBe(true);
+    expect(
+      behaviorOS.addMissionEvidence(mission.id, [
+        {
+          gate: 'gate-a',
+          status: 'passed',
+          source: 'prior run',
+          provenance: 'executed',
+          executionId: 'a:1:exec-a',
+          taskId: 'a',
+        },
+      ]).ok,
+    ).toBe(true);
+
+    const orchestrator = new AutonomousOrchestrator({ behaviorOS, dna: TEST_DNA, dnasDir });
+    orchestrator.registerAgent({
+      id: 'agent-1',
+      dnaPattern: TEST_DNA.name,
+      capabilities: ['execute'],
+      authority: 'admin',
+    });
+    let active = 0;
+    let peak = 0;
+    const ran: string[] = [];
+    orchestrator.registerAdapter({
+      name: 'work',
+      async execute(_input, context) {
+        active += 1;
+        peak = Math.max(peak, active);
+        ran.push(context.taskId);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+
+    const result = await orchestrator.executeMission(
+      basePlan([
+        workTask('a', { adapter: 'never-registered', input: {} }),
+        workTask('b'),
+        workTask('c'),
+      ]),
+      'agent-1',
+      { maxParallelism: 2, resumeMissionId: mission.id },
+    );
+
+    expect(result.outcome).toBe('completed');
+    // `a` was already proven, so only the two unproven branches ran — and both
+    // ran concurrently within the same batch.
+    expect(ran.sort()).toEqual(['b', 'c']);
+    expect(peak).toBe(2);
+    expect(result.tasks.find((task) => task.id === 'a')?.attempts).toBe(0);
+    expect(
+      result.tasks
+        .filter((task) => task.id === 'b' || task.id === 'c')
+        .every((task) => task.status === 'completed'),
+    ).toBe(true);
   });
 });

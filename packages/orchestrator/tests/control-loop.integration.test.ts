@@ -175,6 +175,9 @@ describe('ControlLoop integration through the orchestration entry point', () => 
     expect(h.behaviorOS.listMissions()).toHaveLength(1);
     expect(resumed.tasks.find((entry) => entry.id === 'a')?.attempts).toBe(1);
     expect(resumed.tasks.find((entry) => entry.id === 'b')?.attempts).toBe(1);
+    // The resumed task `a` was skipped on the second run, so its recorded
+    // assignment must survive.
+    expect(resumed.tasks.find((entry) => entry.id === 'a')?.assignedAgentId).toBe('agent-1');
   });
 
   it('enforces mission-level approval before dispatch and keeps the decision durable', async () => {

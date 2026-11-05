@@ -24,6 +24,7 @@ import {
   type CircuitBreakerOptions,
   type CircuitState,
 } from './circuit-breaker.js';
+import type { DelegationEngine, DelegationRole } from './delegation.js';
 
 /** A typed orchestration precondition failure (never a synthetic task success). */
 export class OrchestratorError extends Error {
@@ -41,6 +42,12 @@ export interface AgentConfig {
   dnaPattern: string;
   capabilities: string[];
   authority: 'readonly' | 'write' | 'admin';
+  /**
+   * Delegation role. When omitted, `readonly` agents become `explorer` and
+   * write/admin agents become `operator`. Only used when a
+   * `DelegationEngine` is configured.
+   */
+  role?: DelegationRole;
 }
 
 export interface TaskAcceptanceInput {
@@ -69,6 +76,46 @@ export interface TaskDefinitionInput {
   /** Bounded retries: 1 means a single attempt. Defaults to 1, max 10. */
   maxAttempts?: number;
   idempotencyKey?: string;
+  /**
+   * Skills the task requires. Empty or omitted means no skill constraint; it
+   * never falls back to the pinned agent's capabilities.
+   */
+  requiredSkills?: string[];
+  /**
+   * Whether the task mutates state. Defaults to `true` (safety-first): a task
+   * must explicitly declare itself read-only before it can run on a readonly
+   * role such as `auditor` or `explorer`.
+   */
+  mutating?: boolean;
+}
+
+/**
+ * Internal task shape: the persisted `TaskDefinition` plus the delegation hints
+ * that must not become part of the public schema. Task definitions are not
+ * validated against `TaskDefinitionSchema` before dispatch, so the extra
+ * properties are inert.
+ */
+type DelegatedTaskDefinition = TaskDefinition & {
+  requiredSkills?: string[];
+  mutating?: boolean;
+};
+
+/**
+ * Validate and normalize `requiredSkills` at every plan boundary.
+ *
+ * An empty array means "no skill constraint". It never inherits the pinned
+ * agent's capabilities. Invalid element types are a governed input error, not
+ * an accidental `TypeError` from `.trim()`.
+ */
+export function normalizeRequiredSkills(taskId: string, value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((skill) => typeof skill !== 'string')) {
+    throw new OrchestratorError(
+      'INVALID_INPUT',
+      `Task "${taskId}" requiredSkills must be an array of skill names`,
+    );
+  }
+  return [...new Set(value.map((skill) => skill.trim()).filter(Boolean))];
 }
 
 export interface MissionPlan {
@@ -122,6 +169,13 @@ export interface ExecuteMissionOptions {
   seedEvidence?: MissionEvidence[];
   /** Durable control-loop observation hooks. */
   observer?: MissionObserver;
+  /**
+   * Maximum number of mutually ready, independent tasks to execute
+   * concurrently within this mission. Default 1 (strictly sequential, the
+   * historical behaviour). A task never starts before all of its dependencies
+   * have completed, regardless of this value.
+   */
+  maxParallelism?: number;
 }
 
 export type MissionOutcome = 'completed' | 'failed' | 'cancelled' | 'blocked';
@@ -150,6 +204,12 @@ export interface OrchestratorOptions {
   defaultTimeoutMs?: number;
   defaultMaxAttempts?: number;
   circuitBreaker?: CircuitBreakerOptions;
+  /**
+   * Optional delegation engine. When present, every dispatched task is
+   * assigned through it before governance/dispatch. Without it the legacy
+   * pinned `task.agentId` behaviour is unchanged.
+   */
+  delegation?: DelegationEngine;
   /** Deterministic clock for tests. */
   now?: () => string;
 }
@@ -200,10 +260,12 @@ interface AttemptOutcome {
  * and adapter/timeout/retry/loop/circuit failures terminate with a classified
  * error. There is no "executed" status that bypasses the lifecycle.
  */
+
 export class AutonomousOrchestrator {
   private readonly behaviorOS: BehaviorOS;
   private readonly agents = new Map<string, AgentConfig>();
   private readonly adapters = new Map<string, TaskAdapter>();
+  private readonly idempotencyByKey = new Map<string, TaskResult>();
   private readonly breakers = new Map<string, CircuitBreaker>();
   private readonly listeners = new Set<(event: TaskEvent) => void>();
   private readonly completedByKey = new Map<string, MissionExecutionResult>();
@@ -212,6 +274,7 @@ export class AutonomousOrchestrator {
   private readonly options: OrchestratorOptions;
   private readonly dnasDir: string;
   private readonly now: () => string;
+  private readonly delegation?: DelegationEngine;
   private eventSeq = 0;
 
   constructor(options: OrchestratorOptions = {}) {
@@ -219,12 +282,42 @@ export class AutonomousOrchestrator {
     this.behaviorOS = options.behaviorOS ?? new BehaviorOS();
     this.dnasDir = options.dnasDir ?? resolve(process.cwd(), 'dnas');
     this.now = options.now ?? (() => new Date().toISOString());
+    this.delegation = options.delegation;
     this.registerAdapter(new ShellAdapter());
   }
 
   /** Register an agent identity. The adapter does the executing; the agent is governance provenance. */
   registerAgent(config: AgentConfig): void {
     this.agents.set(config.id, config);
+    if (this.delegation) {
+      // Mirror the orchestrator's authoritative identity into the delegation
+      // policy. The role defaults from authority so a readonly agent can never
+      // be registered as a writer by omission.
+      const role: DelegationRole =
+        config.role ?? (config.authority === 'readonly' ? 'explorer' : 'operator');
+      this.delegation.registerAgent({
+        id: config.id,
+        role,
+        capabilities: config.capabilities,
+        authority: config.authority,
+      });
+    }
+  }
+
+  /** Read-only delegation engine access for hosts and tests (null when disabled). */
+  getDelegationEngine(): DelegationEngine | null {
+    return this.delegation ?? null;
+  }
+
+  /**
+   * Trust the adapter's mutability metadata over the plan's declaration.
+   * Only `task.mutating === false` *and* `adapter.mutating === false` is
+   * read-only; a missing/unknown adapter is treated as mutating (fail closed).
+   */
+  private isEffectiveMutating(task: DelegatedTaskDefinition): boolean {
+    if (task.mutating !== false) return true;
+    const adapter = this.adapters.get(task.adapter);
+    return adapter?.mutating !== false;
   }
 
   /** Register an execution adapter. Its `name` is the plan's `adapter` value. */
@@ -583,6 +676,11 @@ export class AutonomousOrchestrator {
     let terminalError: TaskError | undefined;
     let blockedError: TaskError | undefined;
     let cancelled = false;
+    const requestedParallelism = options.maxParallelism ?? 1;
+    const parallelism =
+      Number.isFinite(requestedParallelism) && requestedParallelism >= 1
+        ? Math.floor(requestedParallelism)
+        : 1;
 
     while (true) {
       if (terminalError) break;
@@ -634,13 +732,13 @@ export class AutonomousOrchestrator {
         continue;
       }
 
-      const next = pending.find((task) =>
+      const readyTasks = pending.filter((task) =>
         (task.dependsOn ?? []).every((dependencyId) => {
           const dependency = tasks.find((candidate) => candidate.id === dependencyId);
           return dependency?.status === 'completed';
         }),
       );
-      if (!next) {
+      if (readyTasks.length === 0) {
         // Normalization rejects cycles, so this is defensive only.
         terminalError = {
           code: 'INVALID_INPUT',
@@ -649,117 +747,321 @@ export class AutonomousOrchestrator {
         };
         break;
       }
-      const task = next;
 
-      const existingEvidence = this.completedEvidenceFor(task, mission);
-      if (existingEvidence) {
-        const skipped: TaskResult = {
-          id: task.id,
-          missionId: task.missionId,
-          status: 'completed',
-          agentId: task.agentId,
-          adapter: task.adapter,
-          attempts: 0,
-          correlationId,
-          idempotencyKey: task.idempotencyKey,
-          acceptance: [],
-          evidence: existingEvidence,
-          completedAt: this.now(),
-        };
-        task.status = 'completed';
+      // Up to `maxParallelism` mutually ready tasks run concurrently. Every
+      // dependency of a ready task is already completed, so the batch holds
+      // independent branches only. Tasks already proven by executed evidence
+      // resume without consuming a concurrency slot, so unproven siblings can
+      // still fill the batch. Results are applied sequentially in batch order,
+      // which keeps evidence, events and outcome deterministic.
+      let executableSlots = parallelism;
+      const batch = readyTasks.filter((task) => {
+        if (this.completedEvidenceFor(task, mission)) return true;
+        if (executableSlots === 0) return false;
+        executableSlots -= 1;
+        return true;
+      });
+      let stopDispatch = false;
+      const scheduled: Array<{
+        task: DelegatedTaskDefinition;
+        delegationKey: string;
+        reservationHeld: boolean;
+        delegationStarted: boolean;
+        promise: Promise<TaskResult>;
+      }> = [];
+
+      for (const task of batch) {
+        if (stopDispatch) break;
+
+        const existingEvidence = this.completedEvidenceFor(task, mission);
+        if (existingEvidence) {
+          const skipped: TaskResult = {
+            id: task.id,
+            missionId: task.missionId,
+            status: 'completed',
+            agentId: task.agentId,
+            adapter: task.adapter,
+            attempts: 0,
+            correlationId,
+            idempotencyKey: task.idempotencyKey,
+            acceptance: [],
+            evidence: existingEvidence,
+            completedAt: this.now(),
+          };
+          task.status = 'completed';
+          task.updatedAt = this.now();
+          results.push(skipped);
+          this.emit(
+            'task.completed',
+            mission.id,
+            correlationId,
+            {
+              attempts: 0,
+              skipped: true,
+            },
+            task.id,
+          );
+          const observerError = await this.observeSettled(options, task, skipped);
+          if (observerError) {
+            terminalError = observerError;
+            stopDispatch = true;
+          }
+          continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Delegation: pick the eligible agent *before* the task is frozen as
+        // running. A refusal blocks this task (independent branches continue)
+        // instead of silently dispatching to the pinned agent.
+        // ---------------------------------------------------------------
+        const delegationKey = `${mission.id}:${task.id}`;
+        let reservationHeld = false;
+        let delegationStarted = false;
+        let delegated = false;
+
+        if (this.delegation) {
+          const assignment = this.delegation.reserve({
+            reservationKey: delegationKey,
+            taskId: task.id,
+            requiredSkills: task.requiredSkills ?? [],
+            mutating: this.isEffectiveMutating(task),
+          });
+          if (!assignment.agentId) {
+            const error: TaskError = {
+              code: 'AGENT_NOT_FOUND',
+              message: `Delegation refused task "${task.id}": ${assignment.reason}`,
+              retryable: false,
+            };
+            const result = this.taskFailure(task, this.now(), error, 'blocked');
+            task.status = 'blocked';
+            task.updatedAt = this.now();
+            results.push(result);
+            blockedError ??= error;
+            this.emit(
+              'task.blocked',
+              mission.id,
+              correlationId,
+              { code: error.code, delegation: assignment.reason },
+              task.id,
+            );
+            const observerError = await this.observeSettled(options, task, result);
+            if (observerError) {
+              terminalError = observerError;
+              stopDispatch = true;
+            }
+            continue;
+          }
+          reservationHeld = true;
+          task.agentId = assignment.agentId;
+          delegated = true;
+          this.emit(
+            'task.dispatched',
+            mission.id,
+            correlationId,
+            {
+              delegated: true,
+              agentId: assignment.agentId,
+              role: assignment.role,
+              reason: assignment.reason,
+              recommendedBy: assignment.recommendedBy,
+            },
+            task.id,
+          );
+        }
+
+        // A mutating task is re-checked against governance immediately before
+        // dispatch, with the task's own context and the *selected* agent. The
+        // mission-level preflight remains the first veto; this closes the gap
+        // where a task declares itself read-only while its adapter mutates.
+        if (this.isEffectiveMutating(task)) {
+          const taskAgent = this.agents.get(task.agentId);
+          const taskGovernanceContext: Record<string, unknown> = {
+            ...(plan.governanceContext ?? {}),
+            action: 'execute',
+            missionId: mission.id,
+            taskId: task.id,
+            taskType: task.type,
+            adapter: task.adapter,
+            mutating: true,
+            authority: taskAgent?.authority ?? 'readonly',
+          };
+          const taskPreflight = this.behaviorOS.preflightAction('execute', {
+            agent: task.agentId,
+            context: taskGovernanceContext,
+          });
+          const taskDecision = this.behaviorOS.evaluateGovernance('execute', {
+            agent: task.agentId,
+            missionId: mission.id,
+            context: taskGovernanceContext,
+          });
+          if (
+            !taskPreflight.allowed ||
+            taskDecision.verdict === 'deny' ||
+            taskDecision.verdict === 'escalate'
+          ) {
+            if (reservationHeld) {
+              this.delegation?.cancel(delegationKey);
+            }
+            const code: TaskErrorCode =
+              taskPreflight.allowed && taskDecision.verdict === 'escalate'
+                ? 'APPROVAL_REQUIRED'
+                : 'GOVERNANCE_DENIED';
+            const message =
+              taskPreflight.allowed && taskDecision.verdict !== 'deny'
+                ? `Task "${task.id}" requires approval: ${taskDecision.reason}`
+                : `Task "${task.id}" blocked by governance: ${
+                    taskPreflight.allowed ? taskDecision.reason : taskPreflight.blockedBy
+                  }`;
+            const error: TaskError = { code, message, retryable: false };
+            const result = this.taskFailure(task, this.now(), error, 'blocked');
+            task.status = 'blocked';
+            task.updatedAt = this.now();
+            results.push(result);
+            blockedError ??= error;
+            this.emit(
+              'task.blocked',
+              mission.id,
+              correlationId,
+              { code, gate: taskPreflight.blockedBy ?? null, verdict: taskDecision.verdict },
+              task.id,
+            );
+            const observerError = await this.observeSettled(options, task, result);
+            if (observerError) {
+              terminalError = observerError;
+              stopDispatch = true;
+            }
+            continue;
+          }
+        }
+
+        task.status = 'running';
         task.updatedAt = this.now();
-        results.push(skipped);
+        try {
+          options.observer?.taskStarted?.(task);
+        } catch (error) {
+          if (reservationHeld) {
+            this.delegation?.cancel(delegationKey);
+          }
+          terminalError = this.observerFailure(error);
+          stopDispatch = true;
+          break;
+        }
+
+        if (delegated) {
+          delegationStarted = true;
+          this.delegation?.markStarted(delegationKey);
+        }
+
+        scheduled.push({
+          task,
+          delegationKey,
+          reservationHeld,
+          delegationStarted,
+          promise: this.executeTask(task, options),
+        });
+      }
+
+      // Await every scheduled branch, even when dispatch is stopping, so a
+      // delegation reservation is always released exactly once.
+      const settled = await Promise.all(
+        scheduled.map(async (entry) => {
+          let settledResult: TaskResult | undefined;
+          try {
+            settledResult = await entry.promise;
+            return { entry, result: settledResult };
+          } finally {
+            if (entry.reservationHeld) {
+              if (entry.delegationStarted) {
+                this.delegation?.release(
+                  entry.delegationKey,
+                  settledResult?.status === 'completed',
+                );
+              } else {
+                this.delegation?.cancel(entry.delegationKey);
+              }
+            }
+          }
+        }),
+      );
+
+      if (stopDispatch) break;
+
+      for (const { entry, result: taskResult } of settled) {
+        const task = entry.task;
+        // Cache a completed result by idempotency key so a later duplicate
+        // dispatch of the same logical operation reuses it instead of running
+        // the adapter again. Only completed results are cached; failures stay
+        // in the retry loop.
+        if (task.idempotencyKey && taskResult.status === 'completed') {
+          this.idempotencyByKey.set(task.idempotencyKey, structuredClone(taskResult));
+        }
+
+        task.status = taskResult.status;
+        task.attempts = taskResult.attempts;
+        task.updatedAt = this.now();
+        results.push(taskResult);
         this.emit(
-          'task.completed',
+          taskResult.status === 'completed'
+            ? 'task.completed'
+            : taskResult.status === 'cancelled'
+              ? 'task.cancelled'
+              : taskResult.status === 'blocked'
+                ? 'task.blocked'
+                : 'task.failed',
           mission.id,
           correlationId,
           {
-            attempts: 0,
-            skipped: true,
+            attempts: taskResult.attempts,
+            ...(taskResult.error ? { code: taskResult.error.code } : {}),
+            ...(taskResult.exitCode !== undefined ? { exitCode: taskResult.exitCode } : {}),
           },
           task.id,
         );
-        const observerError = await this.observeSettled(options, task, skipped);
+
+        // Record evidence for every completed criterion. Failed tasks also
+        // record their failed evidence, so the audit trail shows what ran.
+        const evidence = taskResult.evidence;
+        if (evidence.length > 0) {
+          const recorded = this.behaviorOS.addMissionEvidence(task.missionId, evidence, {
+            actor: task.agentId,
+          });
+          if (!recorded.ok) {
+            terminalError = {
+              code: 'PERSISTENCE_FAILED',
+              message: recorded.message,
+              retryable: false,
+            };
+            break;
+          }
+          mission = recorded.mission;
+        }
+
+        const observerError = await this.observeSettled(options, task, taskResult);
         if (observerError) {
           terminalError = observerError;
           break;
         }
-        continue;
-      }
 
-      task.status = 'running';
-      task.updatedAt = this.now();
-      try {
-        options.observer?.taskStarted?.(task);
-      } catch (error) {
-        terminalError = this.observerFailure(error);
-        break;
-      }
-
-      const taskResult = await this.executeTask(task, options);
-      task.status = taskResult.status;
-      task.attempts = taskResult.attempts;
-      task.updatedAt = this.now();
-      results.push(taskResult);
-      this.emit(
-        taskResult.status === 'completed'
-          ? 'task.completed'
-          : taskResult.status === 'cancelled'
-            ? 'task.cancelled'
-            : taskResult.status === 'blocked'
-              ? 'task.blocked'
-              : 'task.failed',
-        mission.id,
-        correlationId,
-        {
-          attempts: taskResult.attempts,
-          ...(taskResult.error ? { code: taskResult.error.code } : {}),
-          ...(taskResult.exitCode !== undefined ? { exitCode: taskResult.exitCode } : {}),
-        },
-        task.id,
-      );
-
-      // Record evidence for every completed criterion. Failed tasks also record
-      // their failed evidence, so the audit trail shows what actually ran.
-      const evidence = taskResult.evidence;
-      if (evidence.length > 0) {
-        const recorded = this.behaviorOS.addMissionEvidence(task.missionId, evidence, {
-          actor: task.agentId,
-        });
-        if (!recorded.ok) {
-          terminalError = {
-            code: 'PERSISTENCE_FAILED',
-            message: recorded.message,
+        if (taskResult.status === 'blocked') {
+          blockedError ??= taskResult.error ?? {
+            code: 'APPROVAL_REQUIRED',
+            message: `Task "${task.id}" is blocked pending approval or an external dependency`,
             retryable: false,
           };
-          break;
+          // Keep dispatching independent branches.
+          continue;
         }
-        mission = recorded.mission;
-      }
-
-      const observerError = await this.observeSettled(options, task, taskResult);
-      if (observerError) {
-        terminalError = observerError;
-        break;
-      }
-
-      if (taskResult.status === 'blocked') {
-        blockedError ??= taskResult.error ?? {
-          code: 'APPROVAL_REQUIRED',
-          message: `Task "${task.id}" is blocked pending approval or an external dependency`,
-          retryable: false,
-        };
-        // Keep dispatching independent branches.
-        continue;
-      }
-      if (taskResult.status !== 'completed') {
-        terminalError = taskResult.error ?? {
-          code: 'EXECUTION_FAILED',
-          message: `Task "${task.id}" ended as ${taskResult.status}`,
-          retryable: false,
-        };
-        if (taskResult.status === 'cancelled') cancelled = true;
-        break;
+        if (taskResult.status !== 'completed') {
+          // Record the failure but keep applying the rest of the settled batch:
+          // an independent branch that already succeeded must not lose its
+          // result because a sibling failed.
+          terminalError ??= taskResult.error ?? {
+            code: 'EXECUTION_FAILED',
+            message: `Task "${task.id}" ended as ${taskResult.status}`,
+            retryable: false,
+          };
+          if (taskResult.status === 'cancelled') cancelled = true;
+        }
       }
     }
 
@@ -880,7 +1182,7 @@ export class AutonomousOrchestrator {
   // -------------------------------------------------------------------------
 
   private async executeTask(
-    task: TaskDefinition,
+    task: DelegatedTaskDefinition,
     options: ExecuteMissionOptions,
   ): Promise<TaskResult> {
     const startedAt = this.now();
@@ -927,6 +1229,54 @@ export class AutonomousOrchestrator {
     let lastOutcome: AttemptOutcome | undefined;
     let lastError: TaskError | undefined;
     let lastStatus: TaskStatus = 'failed';
+
+    if (task.idempotencyKey) {
+      // Idempotency check. A key denotes one logical operation bound to one
+      // task; reuse across a different task would claim that task's gates
+      // passed without running it, so that is a fail-closed error.
+      // This is at-least-once execution with deduplication — not exactly-once
+      // — and only covers effects an adapter actually reported before the
+      // result was persisted.
+      const cached = this.idempotencyByKey.get(task.idempotencyKey);
+      if (cached && cached.id !== task.id) {
+        return this.taskFailure(
+          task,
+          startedAt,
+          {
+            code: 'INVALID_INPUT',
+            message: `Idempotency key "${task.idempotencyKey}" is already bound to task "${cached.id}"; reusing it for a different task is not allowed`,
+            retryable: false,
+          },
+          'blocked',
+        );
+      }
+      if (cached?.status === 'completed') {
+        // Same task, already completed: return a structural clone of the
+        // original result so the caller sees the same evidence, acceptance and
+        // provenance, and downstream code treats it identically. The clone
+        // also stops callers mutating the cached snapshot.
+        return structuredClone(cached);
+      }
+      if (cached && cached.status !== 'failed') {
+        // A cached result exists in a non-terminal, non-failed state (e.g.
+        // 'running', 'dispatched', 'blocked'). Safe recovery cannot be
+        // established automatically, so fail closed and require human
+        // reconciliation instead of masking or blindly retrying.
+        return this.taskFailure(
+          task,
+          startedAt,
+          {
+            code: 'INVALID_INPUT',
+            message: `Idempotency key "${task.idempotencyKey}" has a cached result in "${cached.status}" state, not completed. Requires human reconciliation.`,
+            retryable: false,
+          },
+          'blocked',
+        );
+      }
+      // No cached result, or a prior attempt failed: fall through to the retry
+      // loop. An ordinary retry is not treated as proof the operation is safe
+      // to repeat; adapters receive the same idempotencyKey to dedupe effects.
+    }
 
     while (attempts < task.maxAttempts) {
       if (options.signal?.aborted) {
@@ -1352,7 +1702,7 @@ export class AutonomousOrchestrator {
     plan: MissionPlan,
     defaultAgentId: string,
     existing: Mission | null,
-  ): TaskDefinition[] {
+  ): DelegatedTaskDefinition[] {
     if (!plan.title || plan.title.trim().length === 0) {
       throw new OrchestratorError('INVALID_INPUT', 'Mission plan requires a non-empty title');
     }
@@ -1363,7 +1713,7 @@ export class AutonomousOrchestrator {
     const now = this.now();
     const missionId = existing?.id ?? `pending:${plan.idempotencyKey ?? plan.title}`;
     const seenIds = new Set<string>();
-    const tasks: TaskDefinition[] = [];
+    const tasks: DelegatedTaskDefinition[] = [];
 
     plan.tasks.forEach((task, index) => {
       const id = (task.id ?? `task-${index + 1}`).trim();
@@ -1451,6 +1801,13 @@ export class AutonomousOrchestrator {
           `Task "${id}" dependsOn must be an array of task ids`,
         );
       }
+      const requiredSkills = normalizeRequiredSkills(id, task.requiredSkills);
+      if (task.mutating !== undefined && typeof task.mutating !== 'boolean') {
+        throw new OrchestratorError(
+          'INVALID_INPUT',
+          `Task "${id}" mutating must be a boolean when provided`,
+        );
+      }
       const dependsOn = [...new Set((task.dependsOn ?? []).map((dependency) => dependency.trim()))];
       if (dependsOn.some((dependency) => dependency.length === 0)) {
         throw new OrchestratorError('INVALID_INPUT', `Task "${id}" has an empty dependency id`);
@@ -1476,6 +1833,8 @@ export class AutonomousOrchestrator {
         attempts: 0,
         maxAttempts,
         timeoutMs,
+        requiredSkills,
+        mutating: task.mutating ?? true,
         createdAt: now,
         updatedAt: now,
       });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { FairnessInput } from '@behavior-os/core';
 import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
 
 import type {
@@ -846,6 +847,117 @@ server.registerTool(
     try {
       const bos = getBehaviorOS();
       const result = bos.checkQuality(metrics);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_evaluate_fairness',
+  {
+    description:
+      'Evaluate group outcomes for fairness (demographic parity, disparate impact, equal opportunity), plus data provenance and human oversight',
+    inputSchema: z.object({
+      groups: z
+        .array(
+          z.object({
+            group: z.string().describe('Protected group label'),
+            total: z.number().int().nonnegative().describe('Number of decisions'),
+            positive: z.number().int().nonnegative().describe('Favourable decisions'),
+            actualPositive: z
+              .number()
+              .int()
+              .nonnegative()
+              .optional()
+              .describe('Ground-truth positives (equal opportunity)'),
+            truePositive: z
+              .number()
+              .int()
+              .nonnegative()
+              .optional()
+              .describe('Correctly favourable decisions (equal opportunity)'),
+          }),
+        )
+        .describe('Per-group outcome counts; at least two groups with total > 0'),
+      provenance: z
+        .object({
+          datasetId: z.string(),
+          source: z.string(),
+          collectedAt: z.string().describe('ISO-8601 timestamp'),
+          consentBasis: z.string(),
+          transformations: z.array(z.string()).optional(),
+          lineage: z.array(z.string()).optional(),
+        })
+        .optional()
+        .describe('Data origin and lineage (distinct from evidence provenance)'),
+      oversight: z
+        .object({
+          required: z.boolean(),
+          approved: z.boolean(),
+          reviewerId: z.string().optional(),
+          reviewedAt: z.string().optional(),
+          rationale: z.string().optional(),
+        })
+        .optional()
+        .describe('Human review state for a high-impact decision'),
+      thresholds: z
+        .object({
+          maxParityDifference: z.number().min(0).max(1).optional(),
+          minDisparateImpactRatio: z.number().min(0).max(1).optional(),
+          maxEqualOpportunityDifference: z.number().min(0).max(1).optional(),
+        })
+        .optional()
+        .describe('Override the default fairness thresholds'),
+    }),
+    annotations: {
+      readOnlyHint: true,
+      title: 'Evaluate Fairness',
+    },
+  },
+  async (input: {
+    groups: Array<{
+      group: string;
+      total: number;
+      positive: number;
+      actualPositive?: number;
+      truePositive?: number;
+    }>;
+    provenance?: {
+      datasetId: string;
+      source: string;
+      collectedAt: string;
+      consentBasis: string;
+      transformations?: string[];
+      lineage?: string[];
+    };
+    oversight?: {
+      required: boolean;
+      approved: boolean;
+      reviewerId?: string;
+      reviewedAt?: string;
+      rationale?: string;
+    };
+    thresholds?: {
+      maxParityDifference?: number;
+      minDisparateImpactRatio?: number;
+      maxEqualOpportunityDifference?: number;
+    };
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos.evaluateFairness(input as FairnessInput);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };

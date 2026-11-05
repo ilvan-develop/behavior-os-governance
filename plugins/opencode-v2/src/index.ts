@@ -5,6 +5,7 @@ import {
   BehaviorOS,
   type BehaviorOSSnapshot,
   exportGovernanceLog,
+  type FairnessInput,
   GOVERNANCE_INSTANCE_ID,
   GOVERNANCE_LOG_FILE_ENV,
   type GovernanceLogKind,
@@ -1263,6 +1264,69 @@ export default Plugin.define({
         },
       });
 
+      // Tool 8b: bos_evaluate_fairness
+      tools.add({
+        name: 'bos_evaluate_fairness',
+        description:
+          'Evaluate group outcomes for fairness (demographic parity, disparate impact, equal opportunity), plus data provenance and human oversight',
+        input: {
+          type: 'object',
+          properties: {
+            groups: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  group: { type: 'string' },
+                  total: { type: 'number' },
+                  positive: { type: 'number' },
+                  actualPositive: { type: 'number' },
+                  truePositive: { type: 'number' },
+                },
+                required: ['group', 'total', 'positive'],
+              },
+            },
+            provenance: {
+              type: 'object',
+              properties: {
+                datasetId: { type: 'string' },
+                source: { type: 'string' },
+                collectedAt: { type: 'string' },
+                consentBasis: { type: 'string' },
+                transformations: { type: 'array', items: { type: 'string' } },
+                lineage: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['datasetId', 'source', 'collectedAt', 'consentBasis'],
+            },
+            oversight: {
+              type: 'object',
+              properties: {
+                required: { type: 'boolean' },
+                approved: { type: 'boolean' },
+                reviewerId: { type: 'string' },
+                reviewedAt: { type: 'string' },
+                rationale: { type: 'string' },
+              },
+              required: ['required', 'approved'],
+            },
+            thresholds: {
+              type: 'object',
+              properties: {
+                maxParityDifference: { type: 'number' },
+                minDisparateImpactRatio: { type: 'number' },
+                maxEqualOpportunityDifference: { type: 'number' },
+              },
+            },
+          },
+          required: ['groups'],
+        },
+        execute: async (input: unknown): Promise<{ content: string }> => {
+          const params = input as FairnessInput;
+          const result = bos.evaluateFairness(params);
+          return { content: JSON.stringify(result, null, 2) };
+        },
+      });
+
       // Tool 9: bos_get_insights
       tools.add({
         name: 'bos_get_insights',
@@ -2091,8 +2155,18 @@ export default Plugin.define({
                   input: { type: 'object', additionalProperties: true },
                   timeoutMs: { type: 'number' },
                   maxAttempts: { type: 'number' },
+                  requiredSkills: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Skills the task requires; empty means no constraint',
+                  },
+                  mutating: {
+                    type: 'boolean',
+                    description: 'Fail-closed hint. An adapter that mutates state is still gated.',
+                  },
                 },
                 required: ['id', 'objective', 'adapter', 'agentId', 'acceptance'],
+                additionalProperties: false,
               },
             },
             authorizedPhases: { type: 'array', items: { type: 'string' } },

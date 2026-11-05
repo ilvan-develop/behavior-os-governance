@@ -120,6 +120,22 @@ Pattern detection over recorded events:
   Records carry their transition trail, are exposed through
   `bos_record_learning` (`learningId` + `stage`), and persist in the engine
   snapshot (`learningRecords`).
+- Govern a learning-derived **policy version ledger**: immutable
+  `policyId@N` versions, SHA-256 content hash, provenance, exact-hash
+  validation, human approval, activation/deactivation/rollback, monitoring and
+  an append-only audit trail. The ledger lives in the existing `meta` store key
+  `policy-ledger` (ADR 0001), not in a new table.
+- An active version may carry machine-readable `enforcement`
+  (`block`/`escalate`/`require`/`warn` + `match` + `severity`).
+  `BehaviorOS.evaluateGovernance()` consults the active set after DNA rules, so
+  an activated policy changes the verdict for matching actions. Candidate and
+  approved-but-inactive versions have no effect. `getStatus().policies`
+  reports `{active, ids, enforced}` to every host.
+- When `BEHAVIOR_OS_APPROVAL_KEY` is set, human approval requires an HMAC-SHA256
+  token bound to `policyId|versionId|contentHash|rationale`
+  (`scripts/policy-approval-token.mjs`); without it, the documented
+  `actor.kind === 'human'` contract applies for local development and the
+  approval records its verification basis.
 
 `BehaviorOS.proposeEvolution()` is a pure read. `applyEvolution()` writes a
 proposal into the active DNA only when **all** of these hold:
@@ -269,7 +285,7 @@ pending ──▶ active ──▶ completed   (terminal)
 mission plan through real adapters. `ControlLoop`
 (`packages/orchestrator/src/control-loop.ts`) adds durable, evidence-driven
 continuation on top of it. Both are libraries, not new tool surfaces: MCP still
-exposes 85 tools and the plugin 38.
+exposes 86 tools and the plugin 71.
 
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
@@ -327,10 +343,29 @@ exposes 85 tools and the plugin 38.
   evidence was recorded.
 - Events are per mission and exclude secrets; persistence failures are reported,
   not swallowed.
-- 64 tests in `packages/orchestrator/tests/` cover real execution, failure
+- When `OrchestratorOptions.delegation` is supplied, `DelegationEngine` assigns
+  every task before governance/dispatch. Tasks carry `requiredSkills` and
+  `mutating` (default `true`, safety-first); a `readonly` agent or
+  `explorer`/`auditor` role can never receive a mutating task, and a task with no
+  eligible agent is blocked rather than dispatched to the pinned agent.
+  `requiredSkills: []` means "no skill constraint" and never falls back to the
+  pinned agent's capabilities. Effective mutability is fail-closed: only
+  `task.mutating === false` **and** `adapter.mutating === false` is read-only;
+  a missing or mutating adapter is always re-checked by the task-scoped
+  governance preflight. The shared concurrency budget is enforced by an
+  in-process reservation ledger inside the engine (distinct agents,
+  `missionId:taskId` keys); the `LoopManager` exposes one engine per manager so
+  concurrent loops from the same runtime share the budget. `assignedAgentId`
+  is written only by a real dispatch (`attempts > 0`) and cleared by
+  `retryBlocked`. Limitation: dispatch inside one mission is sequential; the
+  budget is not cross-process; there is no per-file/scope lock.
+- 141 tests in `packages/orchestrator/tests/` cover real execution, failure
   injection, dependency/agent blocking, durable resume, phase re-authorization,
-  task-bound evidence, approval boundaries, limitations, persisted-audit
-  revalidation and terminal-state guards. `control-loop.integration.test.ts`
+  task-bound evidence, approval boundaries, limitations, persisted-audit,
+  shared-budget reservations, `mutating:false` bypass, empty `requiredSkills`,
+  and `assignedAgentId` resume integrity.
+  revalidation, terminal-state guards and real delegation through both
+  `AutonomousOrchestrator` and `ControlLoop`. `control-loop.integration.test.ts`
   exercises the public `ControlLoop` → `AutonomousOrchestrator.executeMission`
   path with an in-memory engine and temporary state only.
 
@@ -344,7 +379,7 @@ auditor so the loop never reports overall `PASS` — it stops as `UNVERIFIED`.
 
 ### MCP Server (standalone)
 
-- 85 tools + 2 resources exposed via Model Context Protocol
+- 86 tools + 2 resources exposed via Model Context Protocol
 - Deliberately **not** registered in the OpenCode v2 config (`.mcp.json` is ignored by v2)
 - Targeted at external MCP clients: Claude Code, Cursor, Windsurf, VS Code Copilot
 

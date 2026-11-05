@@ -60,7 +60,7 @@ npx @behavior-os/cli init --dna surgical-team
 | Agents don't learn from mistakes         | Learning engine records events & detects recurring patterns                |
 | Hard to coordinate multiple agents       | 7-step protocol + auto-derived missions for traceable work                 |
 | No quality gates                         | Quality gates + audit stages (lint → typecheck → security → coverage)      |
-| Reinventing infrastructure every project | 47 engine files, 85 MCP tools + 2 resources, CLI, SDK — batteries included |
+| Reinventing infrastructure every project | 48 engine files, 86 MCP tools + 2 resources, CLI, SDK — batteries included |
 
 ## Architecture
 
@@ -99,11 +99,11 @@ npx @behavior-os/cli init --dna surgical-team
 └──────────────────────────────────────────────────────┘
 
 > The 9-layer diagram above is documentation of the conceptual stack. The
-> **47 engines** listed below are implemented in code; there is no separate
+> **48 engines** listed below are implemented in code; there is no separate
 > "Behavioral" or "Compiler" engine.
 ```
 
-### 47 Core Engines Powering the Stack
+### 48 Core Engines Powering the Stack
 
 | Engine                   | Purpose                                                        |
 | ------------------------ | -------------------------------------------------------------- |
@@ -127,7 +127,7 @@ npx @behavior-os/cli init --dna surgical-team
 | AntipatternEngine        | Detect anti-patterns in agent behavior                         |
 | MetacognitionEngine      | Agent self-reflection and metacognitive tracking               |
 | KnowledgeGraphEngine     | Knowledge graph construction and querying                      |
-| (…and 27 more)           | Full list in `packages/core/src/engine/` (47 total)            |
+| (…and 27 more)           | Full list in `packages/core/src/engine/` (48 total)            |
 
 ## Features Deep Dive
 
@@ -191,7 +191,7 @@ These are the 21 patterns actually shipped in `dnas/*.yaml`:
 > `python-go-microservices`, or `complex-monorepo` DNA file in this repository.
 > Patterns are plain YAML validated by Zod — there is no separate "SkillEngine".
 
-### MCP Server — 85 Tools + 2 Resources
+### MCP Server — 86 Tools + 2 Resources
 
 Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Windsurf):
 
@@ -199,7 +199,7 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | **Governance**       | `bos_select_dna`, `bos_list_dna`, `bos_evaluate_governance`, `bos_preflight`, `bos_predict_governance`, `bos_resolve_consensus`           |
 | **Mission**          | `bos_create_mission`, `bos_start_mission`, `bos_list_missions`, `bos_complete_mission`, `bos_fail_mission`, `bos_cancel_mission`          |
-| **Quality**          | `bos_check_quality`, `bos_run_audit`                                                                                                      |
+| **Quality**          | `bos_check_quality`, `bos_evaluate_fairness`, `bos_run_audit`                                                                             |
 | **Decision**         | `bos_decide`, `bos_create_meta_decision`, `bos_get_meta_cognition_stats`                                                                  |
 | **Evolution**        | `bos_evolution`, `bos_code_fixes`, `bos_apply_code_fixes`, `bos_list_code_fixes`                                                          |
 | **Code editing**     | `bos_code_edit` (dry-run by default), `bos_list_code_edits`                                                                               |
@@ -223,8 +223,14 @@ Connect Behavior-OS to any MCP-capable client (Claude Code, Cursor, VS Code, Win
 
 Resources: `behavioros://protocol/steps`, `behavioros://dna/catalog`
 
+**Responsible AI:** `bos_evaluate_fairness` computes demographic parity, disparate
+impact and equal opportunity from per-group counts, checks data provenance (distinct
+from evidence provenance) and enforces human oversight before a high-impact decision
+proceeds. Fairness, provenance and oversight are reported separately — a fair outcome
+does not excuse missing provenance or a missing reviewer.
+
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (70 tools in total).
+`bos_verify_audit_trail` (71 tools in total).
 
 ### Persistence (opt-in)
 
@@ -408,7 +414,7 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It
 ships in this repository and is **not** published to npm: it is auto-loaded from
 `.opencode/plugins/behavioros.ts`, a thin loader that re-exports the built
-package; it exposes the full 70 `bos_*` tool surface plus governance hooks
+package; it exposes the full 71 `bos_*` tool surface plus governance hooks
 (`tool:execute.before`, `tool:execute.after`) and session context — no MCP server
 registration required.
 
@@ -433,11 +439,11 @@ mcpServers:
 | Package                        | Description                                                                                                                              | Version |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                         | 2.2.2   |
-| `@behavior-os/core`            | 47 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.2.2   |
+| `@behavior-os/core`            | 48 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.2.2   |
 | `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.2.2   |
 | `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.2.2   |
-| `@behavior-os/mcp-server`      | MCP server with 85 tools + 2 resources                                                                                                   | 2.2.2   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 70 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
+| `@behavior-os/mcp-server`      | MCP server with 86 tools + 2 resources                                                                                                   | 2.2.2   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 71 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
 | `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
 
 ## License

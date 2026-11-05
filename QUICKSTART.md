@@ -163,7 +163,7 @@ built package (`pnpm build` emits `plugins/opencode-v2/dist/index.js`):
 }
 ```
 
-The plugin exposes the 70 `bos_*` tools directly; the MCP server is deliberately
+The plugin exposes the 71 `bos_*` tools directly; the MCP server is deliberately
 not registered inside OpenCode so a session sees a single tool catalog.
 
 ## Next Steps

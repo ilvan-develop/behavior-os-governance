@@ -39,6 +39,15 @@ governance:
       - type: "no-random-seed"
         value: true
     description: "Block training without reproducibility controls"
+  - id: "fairness-gate"
+    level: "critical"
+    action: "escalate"
+    conditions:
+      - type: "model_decision"
+        value: true
+      - type: "fairness_evaluated"
+        value: false
+    description: "Escalate high-impact model decisions until bos_evaluate_fairness passes"
 quality:
   - id: "model-accuracy"
     type: "test_coverage"

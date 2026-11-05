@@ -205,6 +205,7 @@ const EXPECTED_TOOLS = [
   'bos_define_policy',
   'bos_drift',
   'bos_evaluate_dna_temporal',
+  'bos_evaluate_fairness',
   'bos_evaluate_governance',
   'bos_evaluate_role_action',
   'bos_evolution',
@@ -264,7 +265,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 70 bos_* tools', async () => {
+  it('registers exactly the 71 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -276,7 +277,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(70);
+    expect(addedTools).toHaveLength(71);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -309,7 +310,7 @@ describe('behavior-os plugin registration', () => {
       const { ctx, addedTools } = createFakeContext(repoRoot);
       await plugin.setup(ctx as never);
 
-      expect(addedTools).toHaveLength(70);
+      expect(addedTools).toHaveLength(71);
       const select = addedTools.find((t) => t.name === 'bos_select_dna');
       const enumValues = (
         select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -794,8 +795,9 @@ describe('behavior-os control loops (real dispatch)', () => {
       status: string;
       outcome?: string;
       attempts: number;
+      assignedAgentId?: string;
       evidence: number;
-      error?: { code: string };
+      error?: { code: string; message: string };
     }>;
   }
 
@@ -829,11 +831,45 @@ describe('behavior-os control loops (real dispatch)', () => {
     expect(started.tasks).toHaveLength(1);
     expect(started.tasks[0].status).toBe('completed');
     expect(started.tasks[0].outcome).toBe('PASS');
+    expect(started.tasks[0].assignedAgentId).toBe('persona:operator');
     expect(started.tasks[0].evidence).toBeGreaterThan(0);
 
     // Fail-safe: the plugin wires no independent auditor, so the loop must never
     // report an overall PASS from task results alone.
     expect(started.outcome).not.toBe('PASS');
+  });
+
+  it('blocks a mutating shell task when the DNA persona is read-only', async () => {
+    const byName = await setupTools();
+    await byName('bos_select_dna').execute({ pattern: 'blockchain-web3' });
+
+    const task = {
+      id: 'task-readonly-should-not-run',
+      objective: 'print a marker that must never be printed',
+      adapter: 'shell',
+      agentId: 'persona:architect',
+      input: { command: 'node', args: ['-e', 'console.log("never-run")'] },
+      acceptance: [
+        {
+          gate: 'stdout',
+          description: 'stdout contains never-run',
+          type: 'stdout-contains',
+          expected: 'never-run',
+          required: true,
+        },
+      ],
+    };
+
+    const started = JSON.parse(
+      (await byName('bos_start_loop').execute({ title: 'readonly persona blocked', tasks: [task] }))
+        .content,
+    ) as LoopOutput;
+
+    expect(started.ok).toBe(true);
+    expect(started.tasks[0].status).toBe('blocked');
+    expect(started.tasks[0].error?.code).toBe('AGENT_NOT_FOUND');
+    expect(started.tasks[0].error?.message).toContain('Delegation refused');
+    expect(started.tasks[0].evidence).toBe(0);
   });
 
   it('bos_loop_status reads persisted state and bos_resume_loop is idempotent', async () => {

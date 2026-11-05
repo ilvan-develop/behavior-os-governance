@@ -298,25 +298,26 @@ const claims = [
     category: 'CONSISTENCY',
     promise: 'Starting a mission sets activeMission to that mission id (no divergence)',
     async check(env) {
-      await env.runTool('bos_create_mission', {
+      // `bos_create_mission` returns "Mission created: <id>". Recover the id from
+      // that response: listing missions is not a reliable way to find it because
+      // `bos_list_missions` sorts by priority and caps the result.
+      const created = await env.runTool('bos_create_mission', {
         title: 'Conformance mission',
         type: 'feature',
         priority: 'medium',
       });
-      // The create tool returns a human string; recover the id from the mission list.
-      const missions = await env.runTool('bos_list_missions', { limit: 50 });
-      const target = missions[missions.length - 1];
-      expect(target?.id, 'no mission was created');
-      await env.runTool('bos_start_mission', { missionId: target.id });
+      const match = /Mission created:\s*(\S+)/.exec(String(created));
+      expect(match, `unexpected create_mission response: ${created}`);
+      const missionId = match[1];
+      await env.runTool('bos_start_mission', { missionId });
       const state = await env.runTool('bos_get_state');
       expect(
-        state.activeMission === target.id,
-        `activeMission="${state.activeMission}" but started mission "${target.id}"`,
+        state.activeMission === missionId,
+        `activeMission="${state.activeMission}" but started mission "${missionId}"`,
       );
-      const active = missions.find((m) => m.id === target.id);
       return {
         status: 'PASS',
-        evidence: `activeMission=${target.id} status=${active?.status ?? 'unknown'}`,
+        evidence: `activeMission=${missionId}`,
       };
     },
   },

@@ -17,7 +17,11 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    projects: ['packages/*', 'plugins/*', 'examples'],
+    projects: [
+      'packages/*/vitest.config.ts',
+      'plugins/*/vitest.config.ts',
+      'examples/vitest.config.ts',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

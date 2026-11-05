@@ -16,14 +16,17 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BehaviorOS } from '@behavior-os/core';
-import type { DNA, MissionPriority, MissionType } from '@behavior-os/schemas';
+import type { BehaviorOS, CognitiveLoadBalancerEngine } from '@behavior-os/core';
+import type { DNA, MissionPriority, MissionType, Persona } from '@behavior-os/schemas';
 import {
+  type AgentConfig,
   AutonomousOrchestrator,
   ControlLoop,
   type ControlLoopPlan,
   type ControlLoopState,
   type ControlTaskDefinition,
+  DelegationEngine,
+  type DelegationRole,
 } from 'behavioros-orchestrator';
 
 /** Directory (relative to the session root) holding loop state and plans. */
@@ -53,6 +56,16 @@ export interface LoopTaskInput {
   input?: Record<string, unknown>;
   timeoutMs?: number;
   maxAttempts?: number;
+  /**
+   * Skills the task requires. Empty or omitted means no skill constraint; the
+   * orchestrator never falls back to the pinned agent's capabilities.
+   */
+  requiredSkills?: string[];
+  /**
+   * Whether the task mutates state. The effective decision is fail-closed: an
+   * adapter that declares `mutating` cannot be neutralised by this flag.
+   */
+  mutating?: boolean;
 }
 
 export interface StartLoopOptions {
@@ -88,6 +101,7 @@ export interface LoopSummary {
     status: string;
     outcome?: string;
     attempts: number;
+    assignedAgentId?: string;
     error?: { code: string; message: string; retryable: boolean };
     evidence: number;
   }>;
@@ -99,13 +113,94 @@ interface PlanSidecar {
   authorizedPhases: string[] | null;
 }
 
+type LoopPersona = Persona;
+
+function personaAuthority(persona: LoopPersona | undefined): {
+  authority: AgentConfig['authority'];
+  role: DelegationRole;
+  capabilities: string[];
+} {
+  if (!persona) return { authority: 'readonly', role: 'explorer', capabilities: [] };
+
+  const role = persona.role.toLowerCase();
+  const authority = persona.authority.toLowerCase();
+
+  const readonly =
+    role === 'auditor' ||
+    role === 'explorer' ||
+    authority === 'auditor' ||
+    authority === 'readonly' ||
+    authority.includes('compliance') ||
+    authority === 'sox-officer' ||
+    authority === 'healthcare';
+  if (readonly) {
+    return {
+      authority: 'readonly',
+      role: role === 'explorer' ? 'explorer' : 'auditor',
+      capabilities: [...persona.skills],
+    };
+  }
+
+  if (authority === 'admin') {
+    return { authority: 'admin', role: 'operator', capabilities: [...persona.skills] };
+  }
+
+  const write =
+    authority === 'write' ||
+    authority === 'operator' ||
+    authority === 'architect' ||
+    authority === 'maintainer' ||
+    authority === 'pi' ||
+    authority.endsWith('-lead') ||
+    authority.endsWith('-director');
+  if (write) {
+    return {
+      authority: 'write',
+      role: role === 'fixer' ? 'fixer' : 'operator',
+      capabilities: [...persona.skills],
+    };
+  }
+
+  return {
+    authority: 'readonly',
+    role: role === 'explorer' ? 'explorer' : 'auditor',
+    capabilities: [...persona.skills],
+  };
+}
+
+function findPersona(dna: DNA | null, agentId: string): Persona | undefined {
+  if (!dna) return undefined;
+  const normalized = agentId.startsWith('persona:') ? agentId.slice('persona:'.length) : agentId;
+  return dna.personas.find(
+    (persona) =>
+      persona.role === normalized ||
+      persona.name === normalized ||
+      `persona:${persona.role}` === agentId ||
+      `persona:${persona.name}` === agentId,
+  );
+}
+
 export class LoopManager {
   private readonly behaviorOS: BehaviorOS;
   private readonly rootDir: string;
+  /**
+   * One engine per manager keeps the concurrency budget shared across every
+   * control loop started from this runtime. It is an in-process budget: it is
+   * not visible to other processes, workers, or `LoopManager` instances.
+   */
+  private readonly delegation: DelegationEngine;
 
   constructor(behaviorOS: BehaviorOS, rootDir: string) {
     this.behaviorOS = behaviorOS;
     this.rootDir = rootDir;
+    this.delegation = new DelegationEngine(
+      behaviorOS.getCognitiveLoadBalancer() as CognitiveLoadBalancerEngine,
+    );
+  }
+
+  /** Read-only accessor for tests and diagnostics. */
+  getDelegationEngine(): DelegationEngine {
+    return this.delegation;
   }
 
   static statePath(rootDir: string, runId: string): string {
@@ -133,6 +228,7 @@ export class LoopManager {
         status: task.status,
         ...(task.outcome ? { outcome: task.outcome } : {}),
         attempts: task.attempts,
+        ...(task.assignedAgentId ? { assignedAgentId: task.assignedAgentId } : {}),
         ...(task.error
           ? {
               error: {
@@ -230,7 +326,12 @@ export class LoopManager {
     const planPath = LoopManager.planPath(this.rootDir, runId);
     if (!existsSync(planPath)) throw new Error(`Loop "${runId}" not found`);
     const sidecar = JSON.parse(readFileSync(planPath, 'utf-8')) as PlanSidecar;
-    const loop = this.createLoop(runId, sidecar.plan, sidecar.authorizedPhases ?? undefined, null);
+    const loop = this.createLoop(
+      runId,
+      sidecar.plan,
+      sidecar.authorizedPhases ?? undefined,
+      this.behaviorOS.getDNA(),
+    );
     // Only record when the loop is actually waiting for approval; otherwise
     // the call is a no-op and we return the current state.
     const currentState = loop.getState();
@@ -269,16 +370,34 @@ export class LoopManager {
     const orchestrator = new AutonomousOrchestrator({
       behaviorOS: this.behaviorOS,
       dnasDir: join(this.rootDir, 'dnas'),
+      delegation: this.delegation,
       ...(dna ? { dna } : {}),
     });
 
     const loopAgentId = agentIds[0] ?? this.behaviorOS.resolveAgentIdentity().agentId;
     for (const id of new Set([...agentIds, loopAgentId])) {
+      const profile = personaAuthority(findPersona(dna, id));
+      const existing = this.delegation.getProfile(id);
+      if (
+        existing &&
+        (existing.authority !== profile.authority ||
+          existing.role !== profile.role ||
+          existing.capabilities.length !== profile.capabilities.length ||
+          existing.capabilities.some(
+            (capability, index) => capability !== profile.capabilities[index],
+          ))
+      ) {
+        throw new Error(
+          `Agent "${id}" is already registered with a different delegation profile; ` +
+            'refusing to overwrite it in a shared budget',
+        );
+      }
       orchestrator.registerAgent({
         id,
         dnaPattern: dna?.name ?? 'unassigned',
-        capabilities: ['execute'],
-        authority: 'write',
+        capabilities: profile.capabilities,
+        authority: profile.authority,
+        role: profile.role,
       });
     }
 

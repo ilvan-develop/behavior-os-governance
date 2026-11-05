@@ -18,6 +18,7 @@ import {
   type MissionExecutionResult,
   type MissionObserver,
   type MissionPlan,
+  normalizeRequiredSkills,
   OrchestratorError,
   type TaskDefinitionInput,
 } from './orchestrator.js';
@@ -80,6 +81,15 @@ export interface ControlTaskState {
   timeoutMs?: number;
   maxAttempts: number;
   idempotencyKey: string;
+  /** Skills handed to delegation (empty means no skill constraint). */
+  requiredSkills: string[];
+  /** Whether the task mutates state. Defaults to true (safety-first). */
+  mutating: boolean;
+  /**
+   * Agent the orchestrator actually delegated the task to. `agentId` stays
+   * the plan pin so resuming a state file keeps matching its plan.
+   */
+  assignedAgentId?: string;
   status: TaskStatus;
   outcome?: ControlOutcome;
   attempts: number;
@@ -213,6 +223,12 @@ export function controlPlanSignature(plan: ControlLoopPlan): string {
           maxAttempts: task.maxAttempts ?? null,
           idempotencyKey: task.idempotencyKey ?? null,
           limitations: task.limitations ?? [],
+          // Only include delegation hints when the plan declares them, so the
+          // signature of a plan written before delegation existed is stable.
+          ...(task.requiredSkills && task.requiredSkills.length > 0
+            ? { requiredSkills: normalizeRequiredSkills(task.id ?? 'task', task.requiredSkills) }
+            : {}),
+          ...(task.mutating !== undefined ? { mutating: task.mutating } : {}),
         })),
       }),
     )
@@ -267,6 +283,13 @@ export function createInitialControlState(
         `Task "${id}" requires at least one acceptance criterion`,
       );
     }
+    const requiredSkills = normalizeRequiredSkills(id, task.requiredSkills);
+    if (task.mutating !== undefined && typeof task.mutating !== 'boolean') {
+      throw new OrchestratorError(
+        'INVALID_INPUT',
+        `Task "${id}" mutating must be a boolean when provided`,
+      );
+    }
     const dependsOn = dependencyIds(task);
     if (dependsOn.includes(id)) {
       throw new OrchestratorError('INVALID_INPUT', `Task "${id}" cannot depend on itself`);
@@ -288,6 +311,8 @@ export function createInitialControlState(
       ...(task.timeoutMs ? { timeoutMs: task.timeoutMs } : {}),
       maxAttempts: Math.min(10, Math.max(1, Math.trunc(task.maxAttempts ?? 1))),
       idempotencyKey: task.idempotencyKey ?? `${options.runId ?? createdAt}:${id}`,
+      requiredSkills,
+      mutating: task.mutating ?? true,
       status: 'pending',
       attempts: 0,
       evidence: [],
@@ -904,6 +929,9 @@ export class ControlLoop {
       delete task.error;
       delete task.startedAt;
       delete task.completedAt;
+      // A retried task is no longer assigned; only a new dispatch records a
+      // fresh assignment.
+      delete task.assignedAgentId;
       const failures = new Set(state.failureClassifications[task.id] ?? []);
       failures.add(`RETRY_REQUESTED: ${reason}`);
       state.failureClassifications[task.id] = [...failures];
@@ -960,6 +988,7 @@ export class ControlLoop {
         }
         stored.status = 'running';
         stored.startedAt = task.updatedAt;
+        stored.assignedAgentId = task.agentId;
         state.phase = 'execute';
         state.currentTaskId = task.id;
         this.persist(state);
@@ -970,8 +999,12 @@ export class ControlLoop {
           throw new Error(`Control-loop state has no settled task "${result.id}"`);
         }
         stored.status = result.status;
-        // A resumed task that was skipped reports `attempts: 0`; do not erase
-        // the attempt count from the run that actually executed it.
+        // A resumed task that was skipped reports `attempts: 0` and carries
+        // the plan pin, not a real dispatch. Only a real dispatch may update
+        // the recorded assignment.
+        if (result.attempts > 0) {
+          stored.assignedAgentId = result.agentId;
+        }
         stored.attempts = Math.max(stored.attempts, result.attempts);
         stored.completedAt = result.completedAt;
         stored.evidence = result.evidence;
@@ -997,6 +1030,11 @@ export class ControlLoop {
       const stored = state.tasks.find((candidate) => candidate.id === settled.id);
       if (!stored) continue;
       stored.status = settled.status;
+      // A skipped resume result carries the plan pin and `attempts: 0`; only a
+      // real dispatch may update the recorded assignment.
+      if (settled.attempts > 0) {
+        stored.assignedAgentId = settled.agentId;
+      }
       stored.attempts = Math.max(stored.attempts, settled.attempts);
       stored.completedAt = settled.completedAt;
       stored.evidence = settled.evidence;
@@ -1451,6 +1489,8 @@ export class ControlLoop {
       ...(task.timeoutMs ? { timeoutMs: task.timeoutMs } : {}),
       maxAttempts: task.maxAttempts,
       idempotencyKey: task.idempotencyKey,
+      ...(task.requiredSkills.length > 0 ? { requiredSkills: task.requiredSkills } : {}),
+      mutating: task.mutating,
     }));
     const produced = new Set(
       tasks.flatMap((task) => task.acceptance.map((criterion) => criterion.gate)),
@@ -1536,6 +1576,8 @@ export class ControlLoop {
         timeoutMs: task.timeoutMs ? task.timeoutMs : undefined,
         maxAttempts: Math.min(10, Math.max(1, Math.trunc(task.maxAttempts ?? 1))),
         idempotencyKey: task.idempotencyKey,
+        requiredSkills: normalizeRequiredSkills(id, task.requiredSkills),
+        mutating: task.mutating ?? true,
       };
       const matches =
         stored.type === expected.type &&
@@ -1547,6 +1589,8 @@ export class ControlLoop {
         isDeepStrictEqual(stored.acceptance, expected.acceptance) &&
         isDeepStrictEqual(stored.input, expected.input) &&
         isDeepStrictEqual(stored.timeoutMs, expected.timeoutMs) &&
+        isDeepStrictEqual(stored.requiredSkills ?? [], expected.requiredSkills) &&
+        (stored.mutating ?? true) === expected.mutating &&
         stored.maxAttempts === expected.maxAttempts &&
         (expected.idempotencyKey === undefined ||
           stored.idempotencyKey === expected.idempotencyKey);
@@ -1585,6 +1629,10 @@ export class ControlLoop {
         ...criterion,
         required: criterion.required ?? true,
       }));
+      // Delegation hints were added after the first state version. Older
+      // state files keep their original safety posture: mutating by default.
+      task.requiredSkills ??= [];
+      task.mutating ??= true;
     }
     return parsed;
   }
@@ -1705,6 +1753,14 @@ function isControlTaskState(value: unknown): value is ControlTaskState {
     value.dependsOn.every(
       (dependency) => typeof dependency === 'string' && dependency.trim().length > 0,
     ) &&
+    (value.requiredSkills === undefined ||
+      (Array.isArray(value.requiredSkills) &&
+        value.requiredSkills.every(
+          (skill) => typeof skill === 'string' && skill.trim().length > 0,
+        ))) &&
+    (value.mutating === undefined || typeof value.mutating === 'boolean') &&
+    (value.assignedAgentId === undefined ||
+      (typeof value.assignedAgentId === 'string' && value.assignedAgentId.trim().length > 0)) &&
     acceptance.success &&
     isRecord(value.input) &&
     CONTROL_TASK_STATUSES.has(value.status as string) &&

@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** The 83 tools registered by `packages/mcp-server/src/server.ts`. */
+/** The 86 tools registered by `packages/mcp-server/src/server.ts`. */
 const MCP_TOOLS = [
   'bos_add_conversation_turn',
   'bos_add_knowledge_edge',
@@ -47,6 +47,7 @@ const MCP_TOOLS = [
   'bos_define_policy',
   'bos_drift',
   'bos_evaluate_dna_temporal',
+  'bos_evaluate_fairness',
   'bos_evaluate_governance',
   'bos_evaluate_role_action',
   'bos_evolution',
@@ -85,6 +86,7 @@ const MCP_TOOLS = [
   'bos_register_agent_capacity',
   'bos_register_role',
   'bos_reset_metrics',
+  'bos_resolve_consensus',
   'bos_resolve_conversation',
   'bos_role_policy_report',
   'bos_run_audit',
@@ -94,6 +96,7 @@ const MCP_TOOLS = [
   'bos_set_agent',
   'bos_start_conversation',
   'bos_start_mission',
+  'bos_suggest_cross_dna_transfer',
   'bos_teach_behavior',
   'bos_verify_audit_trail',
   'bos_vote_idea',
@@ -105,10 +108,8 @@ const MCP_TOOLS = [
 const PLUGIN_ONLY_TOOLS = [
   'bos_approve_loop',
   'bos_loop_status',
-  'bos_resolve_consensus',
   'bos_resume_loop',
   'bos_start_loop',
-  'bos_suggest_cross_dna_transfer',
 ];
 
 const KNOWN_TOOLS = new Set([...MCP_TOOLS, ...PLUGIN_ONLY_TOOLS]);
@@ -256,6 +257,50 @@ describe('documentation consistency', () => {
         ).toBe(true);
       }
     }
+  });
+
+  it('keeps the MCP tool list in sync with the server', () => {
+    const serverSource = readFileSync(
+      join(repoRoot, 'packages', 'mcp-server', 'src', 'server.ts'),
+      'utf-8',
+    );
+    const registered = [...serverSource.matchAll(/server\.registerTool\(\s*\n\s*'([^']+)'/g)].map(
+      (match) => match[1],
+    );
+
+    expect(new Set(MCP_TOOLS).size, 'MCP_TOOLS contains duplicates').toBe(MCP_TOOLS.length);
+    expect(new Set(registered).size, 'server.ts registers duplicate tools').toBe(registered.length);
+    expect([...MCP_TOOLS].sort()).toEqual([...registered].sort());
+  });
+
+  it('keeps plugin-only tools exactly equal to the plugin/server difference', () => {
+    const pluginSource = readFileSync(
+      join(repoRoot, 'plugins', 'opencode-v2', 'src', 'index.ts'),
+      'utf-8',
+    );
+    const pluginNames = [...pluginSource.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map(
+      (match) => match[1],
+    );
+    const mcpNames = new Set(MCP_TOOLS);
+
+    expect([...new Set(pluginNames)].sort()).toEqual([...pluginNames].sort());
+    expect(pluginNames.filter((name) => !mcpNames.has(name)).sort()).toEqual(
+      [...PLUGIN_ONLY_TOOLS].sort(),
+    );
+  });
+
+  it('keeps documented schema counts equal to the measured source', () => {
+    const schemaSource = readFileSync(
+      join(repoRoot, 'packages', 'schemas', 'src', 'index.ts'),
+      'utf-8',
+    );
+    const lines = schemaSource.split(/\r?\n/);
+    const objects = lines.filter((line) => line.includes('z.object(')).length;
+    const enums = lines.filter((line) => line.includes('z.enum(')).length;
+    const claims = readFileSync(join(repoRoot, 'docs', 'CLAIMS.md'), 'utf-8');
+
+    expect(claims).toContain(`# Schemas Zod (esperado: ${objects} objetos, ${enums} enums)`);
+    expect(claims).toContain(`**${objects}** \`z.object\` + **${enums}** \`z.enum\``);
   });
 
   it('does not back a withdrawn name with a real tool', () => {
@@ -572,12 +617,12 @@ describe('documented counts match the code', () => {
   it('derives the counts it is supposed to guard', () => {
     // A broken derivation would silently compare wrong numbers with wrong
     // numbers, so the derivation itself is pinned to the measured reality.
-    expect(measured.mcpTools).toBe(85);
+    expect(measured.mcpTools).toBe(86);
     expect(measured.mcpResources).toBe(2);
-    expect(measured.pluginTools).toBe(70);
+    expect(measured.pluginTools).toBe(71);
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
-    expect(measured.engines).toBe(47);
+    expect(measured.engines).toBe(48);
   });
 
   it('states the tool, resource, engine, DNA and table counts the code has', () => {

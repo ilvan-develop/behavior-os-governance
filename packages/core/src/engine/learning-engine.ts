@@ -1,3 +1,4 @@
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type {
   CodeFixProposal,
   EvolutionProposal,
@@ -7,6 +8,7 @@ import type {
   LearningStage,
   LearningTransition,
   LearningType,
+  Severity,
 } from '@behavior-os/schemas';
 
 export interface RecordOptions {
@@ -77,6 +79,328 @@ export type LearningAdvanceResult =
   | { ok: true; record: LearningRecord }
   | { ok: false; code: 'NOT_FOUND' | 'INVALID_TRANSITION' | 'EVIDENCE_REQUIRED'; message: string };
 
+// ---------------------------------------------------------------------------
+// Governed policy versioning (Sprint 2).
+//
+// A learning record that reaches the `policy` stage becomes a *candidate*
+// policy version. A version is an immutable snapshot: its content hash is
+// computed once and every validation/approval/activation is bound to that
+// exact `(versionId, contentHash)` pair, so a later edit can never reuse an
+// older validation. Activation requires a passing validation **and** an
+// approval authored by a human actor; the engine refuses `agent`/`llm`/`system`
+// actors for approval, activation, deactivation and rollback.
+// ---------------------------------------------------------------------------
+
+export type PolicyActorKind = 'human' | 'agent' | 'llm' | 'system';
+
+export interface PolicyActor {
+  id: string;
+  kind: PolicyActorKind;
+}
+
+export type PolicyVersionStatus = 'candidate' | 'validated' | 'approved' | 'active' | 'retired';
+
+export interface PolicyVersionProvenance {
+  source: string;
+  actor: string;
+  actorKind: PolicyActorKind;
+  createdAt: string;
+  reason?: string;
+  mission?: string;
+}
+
+export type PolicyEnforcementAction = 'block' | 'escalate' | 'require' | 'warn';
+
+/**
+ * Optional machine-readable enforcement attached to a policy version. Without
+ * it the version is documentation only; with it, activation makes the policy
+ * affect `evaluateGovernance` for matching actions.
+ */
+export interface PolicyEnforcement {
+  action: PolicyEnforcementAction;
+  /** `*` for every action, otherwise a case-insensitive substring match. */
+  match: string;
+  severity: Severity;
+  description?: string;
+}
+
+export interface PolicyVersion {
+  /** Stable identity: the same logical policy keeps this id across restarts. */
+  policyId: string;
+  /** `${policyId}@${version}`; unique and deterministic. */
+  versionId: string;
+  version: number;
+  content: string;
+  /** SHA-256 over `{policyId, content, enforcement?}` in canonical JSON order. */
+  contentHash: string;
+  learningId?: string;
+  enforcement?: PolicyEnforcement;
+  provenance: PolicyVersionProvenance;
+  createdAt: string;
+}
+
+export interface PolicyValidation {
+  versionId: string;
+  contentHash: string;
+  valid: boolean;
+  issues: string[];
+  checkedAt: string;
+  checkedBy: PolicyActor;
+}
+
+export interface PolicyApproval {
+  versionId: string;
+  contentHash: string;
+  approvedBy: string;
+  approvedAt: string;
+  rationale: string;
+  /** Only a human approver can create this record. */
+  actorKind: 'human';
+  /** How the human gate was verified: HMAC token or the actor-kind contract. */
+  verification: 'hmac' | 'actor-kind';
+}
+
+export interface PolicyActivationRecord {
+  versionId: string;
+  contentHash: string;
+  action: 'activated' | 'deactivated' | 'rolled-back';
+  at: string;
+  actor: PolicyActor;
+  basis: 'governed' | 'legacy-import';
+  fromVersionId?: string;
+  reason?: string;
+}
+
+export type PolicyLedgerEventType =
+  | 'candidate-created'
+  | 'validated'
+  | 'validation-failed'
+  | 'approval-rejected'
+  | 'approved'
+  | 'activation-rejected'
+  | 'activated'
+  | 'deactivated'
+  | 'rollback-rejected'
+  | 'rolled-back'
+  | 'monitored'
+  | 'monitor-failed'
+  | 'legacy-imported';
+
+/** Append-only audit event: every lifecycle transition produces one. */
+export interface PolicyLedgerEvent {
+  id: string;
+  at: string;
+  type: PolicyLedgerEventType;
+  policyId: string;
+  versionId?: string;
+  contentHash?: string;
+  actor: PolicyActor;
+  reason?: string;
+  fromVersionId?: string;
+  toVersionId?: string;
+}
+
+export interface PolicyMonitoring {
+  checks: number;
+  failures: number;
+  lastCheckedAt?: string;
+  lastDetail?: string;
+}
+
+/** Plain-JSON ledger persisted in the existing `meta` table. */
+export interface PolicyLedgerState {
+  versions: PolicyVersion[];
+  validations: PolicyValidation[];
+  approvals: PolicyApproval[];
+  activations: PolicyActivationRecord[];
+  events: PolicyLedgerEvent[];
+  active: Record<string, string>;
+  monitoring: Record<string, PolicyMonitoring>;
+}
+
+export type PolicyErrorCode =
+  | 'NOT_FOUND'
+  | 'INVALID_INPUT'
+  | 'VALIDATION_REQUIRED'
+  | 'HUMAN_APPROVAL_REQUIRED'
+  | 'APPROVAL_REQUIRED'
+  | 'APPROVAL_TOKEN_REQUIRED'
+  | 'APPROVAL_TOKEN_INVALID'
+  | 'NOT_ACTIVE'
+  | 'HASH_MISMATCH';
+
+export type PolicyFailure = { ok: false; code: PolicyErrorCode; message: string };
+export type PolicyCandidateResult = { ok: true; version: PolicyVersion } | PolicyFailure;
+export type PolicyValidationResult = { ok: true; validation: PolicyValidation } | PolicyFailure;
+export type PolicyApprovalResult = { ok: true; approval: PolicyApproval } | PolicyFailure;
+export type PolicyActivationResult = { ok: true; version: PolicyVersion } | PolicyFailure;
+export type PolicyDeactivationResult = { ok: true; policyId: string } | PolicyFailure;
+export type PolicyRollbackResult = { ok: true; version: PolicyVersion } | PolicyFailure;
+export type PolicyMonitorResult = { ok: true; monitoring: PolicyMonitoring } | PolicyFailure;
+
+export interface PolicyEnforcementMatch {
+  policyId: string;
+  versionId: string;
+  action: PolicyEnforcementAction;
+  severity: Severity;
+  /** Stable rule id surfaced in governance decisions and metrics. */
+  ruleId: string;
+  reason: string;
+}
+
+export interface PolicyEnforcementEvaluation {
+  verdict: 'allow' | 'warn' | 'escalate' | 'deny';
+  matches: PolicyEnforcementMatch[];
+}
+
+export interface CreatePolicyCandidateOptions {
+  /** Stable policy identity. Defaults to `policy:<learningId>` when omitted. */
+  policyId?: string;
+  /** Optional originating learning record; must exist when provided. */
+  learningId?: string;
+  content: string;
+  source?: string;
+  actor: PolicyActor;
+  reason?: string;
+  mission?: string;
+  /** Optional machine-readable enforcement applied when this version is active. */
+  enforcement?: PolicyEnforcement;
+}
+
+/** Canonical JSON: sorted keys, stable across processes, hash-safe. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+}
+
+function policyContentHash(
+  policyId: string,
+  content: string,
+  enforcement?: PolicyEnforcement,
+): string {
+  return createHash('sha256')
+    .update(canonicalJson({ policyId, content, ...(enforcement ? { enforcement } : {}) }))
+    .digest('hex');
+}
+
+function cloneVersion(version: PolicyVersion): PolicyVersion {
+  return {
+    ...version,
+    provenance: { ...version.provenance },
+    ...(version.enforcement ? { enforcement: { ...version.enforcement } } : {}),
+  };
+}
+
+const ENFORCEMENT_ACTIONS: readonly PolicyEnforcementAction[] = [
+  'block',
+  'escalate',
+  'require',
+  'warn',
+];
+const SEVERITIES: readonly Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
+
+/** Validate and normalize optional enforcement before it becomes immutable. */
+function normalizeEnforcement(
+  input: PolicyEnforcement | undefined,
+): { ok: true; enforcement?: PolicyEnforcement } | { ok: false; message: string } {
+  if (!input) return { ok: true };
+  if (!ENFORCEMENT_ACTIONS.includes(input.action)) {
+    return { ok: false, message: `Unknown enforcement action "${String(input.action)}"` };
+  }
+  if (!SEVERITIES.includes(input.severity)) {
+    return { ok: false, message: `Unknown enforcement severity "${String(input.severity)}"` };
+  }
+  const match = input.match?.trim();
+  if (!match) {
+    return {
+      ok: false,
+      message: 'Enforcement requires a non-empty match (use "*" for any action)',
+    };
+  }
+  const description = input.description?.trim();
+  return {
+    ok: true,
+    enforcement: {
+      action: input.action,
+      match,
+      severity: input.severity,
+      ...(description ? { description } : {}),
+    },
+  };
+}
+
+function cloneValidation(validation: PolicyValidation): PolicyValidation {
+  return { ...validation, issues: [...validation.issues], checkedBy: { ...validation.checkedBy } };
+}
+
+function cloneApproval(approval: PolicyApproval): PolicyApproval {
+  return { ...approval };
+}
+
+function cloneActivation(activation: PolicyActivationRecord): PolicyActivationRecord {
+  return { ...activation, actor: { ...activation.actor } };
+}
+
+function cloneEvent(event: PolicyLedgerEvent): PolicyLedgerEvent {
+  return { ...event, actor: { ...event.actor } };
+}
+
+/** Environment variable that enables HMAC-verified human approvals. */
+export const POLICY_APPROVAL_KEY_ENV = 'BEHAVIOR_OS_APPROVAL_KEY';
+
+function approvalMacInput(version: PolicyVersion, rationale: string): string {
+  return `${version.policyId}|${version.versionId}|${version.contentHash}|${rationale}`;
+}
+
+/**
+ * When `BEHAVIOR_OS_APPROVAL_KEY` is set, a human approval must carry an HMAC
+ * token over the exact version, content hash and rationale. Without the key the
+ * engine keeps the documented actor-kind contract for local development.
+ */
+function verifyApprovalToken(
+  version: PolicyVersion,
+  rationale: string,
+  token: string | undefined,
+):
+  | { ok: true; verification: 'hmac' | 'actor-kind' }
+  | { ok: false; code: PolicyErrorCode; message: string } {
+  const key = process.env[POLICY_APPROVAL_KEY_ENV];
+  if (!key) return { ok: true, verification: 'actor-kind' };
+  if (!token || token.trim().length === 0) {
+    return {
+      ok: false,
+      code: 'APPROVAL_TOKEN_REQUIRED',
+      message: `${POLICY_APPROVAL_KEY_ENV} is set; an HMAC approval token is required`,
+    };
+  }
+  const expected = createHmac('sha256', key)
+    .update(approvalMacInput(version, rationale))
+    .digest('hex');
+  const provided = token.trim().toLowerCase();
+  if (
+    expected.length !== provided.length ||
+    !timingSafeEqual(Buffer.from(expected), Buffer.from(provided))
+  ) {
+    return {
+      ok: false,
+      code: 'APPROVAL_TOKEN_INVALID',
+      message: 'The approval token does not match this version and rationale',
+    };
+  }
+  return { ok: true, verification: 'hmac' };
+}
+
+/** Export the MAC payload contract so CLI tooling can issue tokens. */
+export function policyApprovalPayload(
+  version: Pick<PolicyVersion, 'policyId' | 'versionId' | 'contentHash'>,
+  rationale: string,
+): string {
+  return `${version.policyId}|${version.versionId}|${version.contentHash}|${rationale}`;
+}
+
 /** Drop empty/duplicate evidence strings so promotion checks stay meaningful. */
 function normalizeEvidence(evidence: readonly string[] | undefined): string[] {
   if (!Array.isArray(evidence)) return [];
@@ -88,6 +412,14 @@ export class LearningEngine {
   private patterns: Map<string, DetectedPattern> = new Map();
   /** Governed lifecycle records, independent of the raw event stream. */
   private records: LearningRecord[] = [];
+  /** Policy version history, keyed by stable policy id. Append-only. */
+  private policyVersions = new Map<string, PolicyVersion[]>();
+  private policyValidations: PolicyValidation[] = [];
+  private policyApprovals: PolicyApproval[] = [];
+  private policyActivations: PolicyActivationRecord[] = [];
+  private policyEvents: PolicyLedgerEvent[] = [];
+  private activePolicyVersions = new Map<string, string>();
+  private policyMonitoring = new Map<string, PolicyMonitoring>();
 
   record(options: RecordOptions): LearningEvent {
     const event: LearningEvent = {
@@ -378,6 +710,24 @@ export class LearningEngine {
     record.transitions.push(transition);
     record.updatedAt = at;
 
+    // Entering the `policy` stage opens an *inactive* candidate version. It
+    // does not become active until a validation and a human approval exist for
+    // this exact content hash.
+    if (to === 'policy') {
+      const policyId = `policy:${record.id}`;
+      if (!this.policyVersions.has(policyId)) {
+        this.createPolicyCandidate({
+          policyId,
+          learningId: record.id,
+          content: record.content,
+          source: record.source,
+          actor: { id: options.actor ?? 'system', kind: 'agent' },
+          ...(options.reason ? { reason: options.reason } : {}),
+          ...(record.relatedMission ? { mission: record.relatedMission } : {}),
+        });
+      }
+    }
+
     return {
       ok: true,
       record: {
@@ -414,6 +764,736 @@ export class LearningEngine {
           transitions: [...(record.transitions ?? [])],
         }))
       : [];
+  }
+
+  // Governed policy versioning ---------------------------------------------
+  private findPolicyVersion(policyId: string, versionId: string): PolicyVersion | undefined {
+    return this.policyVersions.get(policyId)?.find((version) => version.versionId === versionId);
+  }
+
+  private latestValidation(
+    versionId: string,
+    contentHash: string,
+    validOnly: boolean,
+  ): PolicyValidation | undefined {
+    for (let index = this.policyValidations.length - 1; index >= 0; index--) {
+      const validation = this.policyValidations[index];
+      if (validation.versionId !== versionId || validation.contentHash !== contentHash) continue;
+      if (validOnly && !validation.valid) continue;
+      return validation;
+    }
+    return undefined;
+  }
+
+  private hasApproval(versionId: string, contentHash: string): PolicyApproval | undefined {
+    return this.policyApprovals.find(
+      (approval) => approval.versionId === versionId && approval.contentHash === contentHash,
+    );
+  }
+
+  private appendPolicyEvent(input: Omit<PolicyLedgerEvent, 'id' | 'at'>): PolicyLedgerEvent {
+    const event: PolicyLedgerEvent = {
+      id: `policy-evt-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      at: new Date().toISOString(),
+      ...input,
+    };
+    this.policyEvents.push(event);
+    return event;
+  }
+
+  createPolicyCandidate(options: CreatePolicyCandidateOptions): PolicyCandidateResult {
+    const policyId = (
+      options.policyId ?? (options.learningId ? `policy:${options.learningId}` : '')
+    ).trim();
+    if (!policyId) {
+      return {
+        ok: false,
+        code: 'INVALID_INPUT',
+        message: 'A stable policyId (or a learningId to derive one) is required',
+      };
+    }
+    const content = options.content.trim();
+    if (!content) {
+      return { ok: false, code: 'INVALID_INPUT', message: 'Policy content is required' };
+    }
+    if (options.learningId) {
+      const record = this.records.find((candidate) => candidate.id === options.learningId);
+      if (!record) {
+        return {
+          ok: false,
+          code: 'NOT_FOUND',
+          message: `No learning record with id "${options.learningId}"`,
+        };
+      }
+    }
+    const normalized = normalizeEnforcement(options.enforcement);
+    if (!normalized.ok) {
+      return { ok: false, code: 'INVALID_INPUT', message: normalized.message };
+    }
+    const enforcement = normalized.enforcement;
+
+    const history = this.policyVersions.get(policyId) ?? [];
+    const versionNumber = history.length + 1;
+    const versionId = `${policyId}@${versionNumber}`;
+    const now = new Date().toISOString();
+    const version: PolicyVersion = {
+      policyId,
+      versionId,
+      version: versionNumber,
+      content,
+      contentHash: policyContentHash(policyId, content, enforcement),
+      ...(options.learningId ? { learningId: options.learningId } : {}),
+      ...(enforcement ? { enforcement } : {}),
+      provenance: {
+        source: options.source ?? 'learning',
+        actor: options.actor.id,
+        actorKind: options.actor.kind,
+        createdAt: now,
+        ...(options.reason ? { reason: options.reason } : {}),
+        ...(options.mission ? { mission: options.mission } : {}),
+      },
+      createdAt: now,
+    };
+
+    history.push(version);
+    this.policyVersions.set(policyId, history);
+    this.appendPolicyEvent({
+      type: 'candidate-created',
+      policyId,
+      versionId,
+      contentHash: version.contentHash,
+      actor: options.actor,
+      ...(options.reason ? { reason: options.reason } : {}),
+    });
+    return { ok: true, version: cloneVersion(version) };
+  }
+
+  validatePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; issues?: string[] },
+  ): PolicyValidationResult {
+    const version = this.findPolicyVersion(policyId, versionId);
+    if (!version) {
+      return {
+        ok: false,
+        code: 'NOT_FOUND',
+        message: `No policy version "${versionId}" for "${policyId}"`,
+      };
+    }
+
+    const issues = (options.issues ?? []).map((issue) => issue.trim()).filter(Boolean);
+    if (!version.content.trim()) issues.push('Policy content is empty');
+    if (!version.policyId.trim()) issues.push('Policy id is empty');
+    if (!version.provenance.actor.trim()) issues.push('Provenance actor is missing');
+    if (version.learningId && !this.records.some((record) => record.id === version.learningId)) {
+      issues.push(`Learning record "${version.learningId}" no longer exists`);
+    }
+    if (version.enforcement) {
+      const normalized = normalizeEnforcement(version.enforcement);
+      if (!normalized.ok) issues.push(normalized.message);
+      else if (normalized.enforcement) {
+        if (normalized.enforcement.match !== version.enforcement.match) {
+          issues.push('Enforcement match must not be empty or padded');
+        }
+      }
+    }
+    if (
+      policyContentHash(version.policyId, version.content, version.enforcement) !==
+      version.contentHash
+    ) {
+      issues.push('Content hash mismatch — the version content was modified');
+    }
+
+    const validation: PolicyValidation = {
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      valid: issues.length === 0,
+      issues,
+      checkedAt: new Date().toISOString(),
+      checkedBy: { ...options.actor },
+    };
+    this.policyValidations.push(validation);
+    this.appendPolicyEvent({
+      type: validation.valid ? 'validated' : 'validation-failed',
+      policyId,
+      versionId,
+      contentHash: version.contentHash,
+      actor: options.actor,
+      ...(issues.length > 0 ? { reason: issues.join('; ') } : {}),
+    });
+    return { ok: true, validation: cloneValidation(validation) };
+  }
+
+  approvePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; rationale: string; approvalToken?: string },
+  ): PolicyApprovalResult {
+    const version = this.findPolicyVersion(policyId, versionId);
+    if (!version) {
+      return {
+        ok: false,
+        code: 'NOT_FOUND',
+        message: `No policy version "${versionId}" for "${policyId}"`,
+      };
+    }
+
+    if (options.actor.kind !== 'human') {
+      const message = 'Only a human approver may approve a policy version';
+      this.appendPolicyEvent({
+        type: 'approval-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'HUMAN_APPROVAL_REQUIRED', message };
+    }
+
+    const rationale = options.rationale.trim();
+    if (rationale.length < 10) {
+      const message = 'A human approval requires a rationale of at least 10 characters';
+      this.appendPolicyEvent({
+        type: 'approval-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'INVALID_INPUT', message };
+    }
+
+    if (!this.latestValidation(version.versionId, version.contentHash, true)) {
+      const message = 'A passing validation for this exact version is required before approval';
+      this.appendPolicyEvent({
+        type: 'approval-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'VALIDATION_REQUIRED', message };
+    }
+
+    const tokenCheck = verifyApprovalToken(version, rationale, options.approvalToken);
+    if (!tokenCheck.ok) {
+      this.appendPolicyEvent({
+        type: 'approval-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: tokenCheck.message,
+      });
+      return { ok: false, code: tokenCheck.code, message: tokenCheck.message };
+    }
+
+    const existing = this.hasApproval(version.versionId, version.contentHash);
+    if (existing) return { ok: true, approval: cloneApproval(existing) };
+
+    const approval: PolicyApproval = {
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      approvedBy: options.actor.id,
+      approvedAt: new Date().toISOString(),
+      rationale,
+      actorKind: 'human',
+      verification: tokenCheck.verification,
+    };
+    this.policyApprovals.push(approval);
+    this.appendPolicyEvent({
+      type: 'approved',
+      policyId,
+      versionId,
+      contentHash: version.contentHash,
+      actor: options.actor,
+      reason: rationale,
+    });
+    return { ok: true, approval: cloneApproval(approval) };
+  }
+
+  activatePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; reason?: string },
+  ): PolicyActivationResult {
+    const version = this.findPolicyVersion(policyId, versionId);
+    if (!version) {
+      return {
+        ok: false,
+        code: 'NOT_FOUND',
+        message: `No policy version "${versionId}" for "${policyId}"`,
+      };
+    }
+    if (options.actor.kind !== 'human') {
+      const message = 'Only a human may activate a policy version';
+      this.appendPolicyEvent({
+        type: 'activation-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'HUMAN_APPROVAL_REQUIRED', message };
+    }
+    if (!this.latestValidation(version.versionId, version.contentHash, true)) {
+      const message = 'A passing validation for this exact version is required before activation';
+      this.appendPolicyEvent({
+        type: 'activation-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'VALIDATION_REQUIRED', message };
+    }
+    if (!this.hasApproval(version.versionId, version.contentHash)) {
+      const message = 'A human approval for this exact version is required before activation';
+      this.appendPolicyEvent({
+        type: 'activation-rejected',
+        policyId,
+        versionId,
+        contentHash: version.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'APPROVAL_REQUIRED', message };
+    }
+
+    const current = this.activePolicyVersions.get(policyId);
+    if (current === versionId) return { ok: true, version: cloneVersion(version) };
+
+    const at = new Date().toISOString();
+    this.policyActivations.push({
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      action: 'activated',
+      at,
+      actor: { ...options.actor },
+      basis: 'governed',
+      ...(current ? { fromVersionId: current } : {}),
+      ...(options.reason ? { reason: options.reason } : {}),
+    });
+    this.activePolicyVersions.set(policyId, versionId);
+    this.appendPolicyEvent({
+      type: 'activated',
+      policyId,
+      versionId,
+      contentHash: version.contentHash,
+      actor: options.actor,
+      ...(current ? { fromVersionId: current } : {}),
+      ...(options.reason ? { reason: options.reason } : {}),
+    });
+    return { ok: true, version: cloneVersion(version) };
+  }
+
+  deactivatePolicy(
+    policyId: string,
+    options: { actor: PolicyActor; reason: string },
+  ): PolicyDeactivationResult {
+    if (options.actor.kind !== 'human') {
+      const message = 'Only a human may deactivate a policy';
+      this.appendPolicyEvent({
+        type: 'activation-rejected',
+        policyId,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'HUMAN_APPROVAL_REQUIRED', message };
+    }
+    const current = this.activePolicyVersions.get(policyId);
+    if (!current) {
+      return {
+        ok: false,
+        code: 'NOT_ACTIVE',
+        message: `Policy "${policyId}" has no active version`,
+      };
+    }
+    const version = this.findPolicyVersion(policyId, current);
+    if (!version) {
+      return {
+        ok: false,
+        code: 'NOT_FOUND',
+        message: `Active version "${current}" is missing from the ledger`,
+      };
+    }
+    const reason = options.reason.trim();
+    if (reason.length < 10) {
+      return {
+        ok: false,
+        code: 'INVALID_INPUT',
+        message: 'Deactivation requires a reason of at least 10 characters',
+      };
+    }
+    this.policyActivations.push({
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      action: 'deactivated',
+      at: new Date().toISOString(),
+      actor: { ...options.actor },
+      basis: 'governed',
+      reason,
+    });
+    this.activePolicyVersions.delete(policyId);
+    this.appendPolicyEvent({
+      type: 'deactivated',
+      policyId,
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      actor: options.actor,
+      reason,
+    });
+    return { ok: true, policyId };
+  }
+
+  rollbackPolicy(
+    policyId: string,
+    toVersionId: string,
+    options: { actor: PolicyActor; reason: string },
+  ): PolicyRollbackResult {
+    if (options.actor.kind !== 'human') {
+      const message = 'Only a human may roll back a policy';
+      this.appendPolicyEvent({
+        type: 'rollback-rejected',
+        policyId,
+        toVersionId,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'HUMAN_APPROVAL_REQUIRED', message };
+    }
+    const reason = options.reason.trim();
+    if (reason.length < 10) {
+      return {
+        ok: false,
+        code: 'INVALID_INPUT',
+        message: 'A rollback requires a reason of at least 10 characters',
+      };
+    }
+    const target = this.findPolicyVersion(policyId, toVersionId);
+    if (!target) {
+      return {
+        ok: false,
+        code: 'NOT_FOUND',
+        message: `No policy version "${toVersionId}" for "${policyId}"`,
+      };
+    }
+    if (!this.latestValidation(target.versionId, target.contentHash, true)) {
+      const message = 'A rollback target must have a passing validation for its exact version';
+      this.appendPolicyEvent({
+        type: 'rollback-rejected',
+        policyId,
+        toVersionId,
+        contentHash: target.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'VALIDATION_REQUIRED', message };
+    }
+    const approved = this.hasApproval(target.versionId, target.contentHash);
+    const previouslyActive = this.policyActivations.some(
+      (activation) => activation.versionId === target.versionId,
+    );
+    if (!approved && !previouslyActive) {
+      const message = 'A rollback target must be approved or have been active before';
+      this.appendPolicyEvent({
+        type: 'rollback-rejected',
+        policyId,
+        toVersionId,
+        contentHash: target.contentHash,
+        actor: options.actor,
+        reason: message,
+      });
+      return { ok: false, code: 'APPROVAL_REQUIRED', message };
+    }
+
+    const current = this.activePolicyVersions.get(policyId);
+    if (current === toVersionId) return { ok: true, version: cloneVersion(target) };
+
+    this.policyActivations.push({
+      versionId: target.versionId,
+      contentHash: target.contentHash,
+      action: 'rolled-back',
+      at: new Date().toISOString(),
+      actor: { ...options.actor },
+      basis: 'governed',
+      ...(current ? { fromVersionId: current } : {}),
+      reason,
+    });
+    this.activePolicyVersions.set(policyId, toVersionId);
+    this.appendPolicyEvent({
+      type: 'rolled-back',
+      policyId,
+      versionId: toVersionId,
+      contentHash: target.contentHash,
+      actor: options.actor,
+      ...(current ? { fromVersionId: current } : {}),
+      toVersionId,
+      reason,
+    });
+    return { ok: true, version: cloneVersion(target) };
+  }
+
+  monitorPolicy(
+    policyId: string,
+    options: { actor: PolicyActor; success: boolean; detail?: string },
+  ): PolicyMonitorResult {
+    const current = this.activePolicyVersions.get(policyId);
+    if (!current) {
+      return {
+        ok: false,
+        code: 'NOT_ACTIVE',
+        message: `Policy "${policyId}" has no active version`,
+      };
+    }
+    const stats = this.policyMonitoring.get(policyId) ?? { checks: 0, failures: 0 };
+    const updated: PolicyMonitoring = {
+      ...stats,
+      checks: stats.checks + 1,
+      failures: stats.failures + (options.success ? 0 : 1),
+      lastCheckedAt: new Date().toISOString(),
+      ...(options.detail ? { lastDetail: options.detail } : {}),
+    };
+    this.policyMonitoring.set(policyId, updated);
+    this.appendPolicyEvent({
+      type: options.success ? 'monitored' : 'monitor-failed',
+      policyId,
+      versionId: current,
+      actor: options.actor,
+      ...(options.detail ? { reason: options.detail } : {}),
+    });
+    return { ok: true, monitoring: { ...updated } };
+  }
+
+  getPolicyVersions(policyId: string): PolicyVersion[] {
+    return (this.policyVersions.get(policyId) ?? []).map(cloneVersion);
+  }
+
+  getPolicyVersion(policyId: string, versionId: string): PolicyVersion | undefined {
+    const version = this.findPolicyVersion(policyId, versionId);
+    return version ? cloneVersion(version) : undefined;
+  }
+
+  getActivePolicyVersion(policyId: string): PolicyVersion | undefined {
+    const versionId = this.activePolicyVersions.get(policyId);
+    if (!versionId) return undefined;
+    const version = this.findPolicyVersion(policyId, versionId);
+    return version ? cloneVersion(version) : undefined;
+  }
+
+  /** Every currently active policy version, in stable policy-id order. */
+  getActivePolicies(): PolicyVersion[] {
+    return [...this.activePolicyVersions.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([policyId, versionId]) => this.findPolicyVersion(policyId, versionId))
+      .filter((version): version is PolicyVersion => version !== undefined)
+      .map(cloneVersion);
+  }
+
+  /**
+   * Evaluate the enforcement carried by active policy versions. Only `active`
+   * versions participate: a candidate, validated or approved version is
+   * documentation until a human activates it. The strongest action wins
+   * (`deny` > `escalate`/`require` > `warn` > `allow`).
+   */
+  evaluateActivePolicies(action: string): PolicyEnforcementEvaluation {
+    const normalizedAction = action.trim().toLowerCase();
+    const matches: PolicyEnforcementMatch[] = [];
+    for (const version of this.getActivePolicies()) {
+      const enforcement = version.enforcement;
+      if (!enforcement) continue;
+      const match = enforcement.match.trim().toLowerCase();
+      if (match !== '*' && !normalizedAction.includes(match)) continue;
+      matches.push({
+        policyId: version.policyId,
+        versionId: version.versionId,
+        action: enforcement.action,
+        severity: enforcement.severity,
+        ruleId: `policy:${version.versionId}`,
+        reason:
+          enforcement.description ??
+          `Active policy ${version.versionId} (${enforcement.action}) matched "${action}"`,
+      });
+    }
+
+    let verdict: PolicyEnforcementEvaluation['verdict'] = 'allow';
+    for (const match of matches) {
+      if (match.action === 'block') {
+        verdict = 'deny';
+        break;
+      }
+      if (match.action === 'escalate' || match.action === 'require') {
+        verdict = 'escalate';
+      } else if (match.action === 'warn' && verdict === 'allow') {
+        verdict = 'warn';
+      }
+    }
+    return { verdict, matches };
+  }
+
+  getPolicyStatus(policyId: string, versionId: string): PolicyVersionStatus | undefined {
+    const version = this.findPolicyVersion(policyId, versionId);
+    if (!version) return undefined;
+    if (this.activePolicyVersions.get(policyId) === versionId) return 'active';
+    // A version that was ever activated and is not active now (deactivated,
+    // superseded by a newer version, or rolled back from) is retired.
+    if (this.policyActivations.some((activation) => activation.versionId === versionId)) {
+      return 'retired';
+    }
+    if (this.hasApproval(version.versionId, version.contentHash)) return 'approved';
+    if (this.latestValidation(version.versionId, version.contentHash, true)) return 'validated';
+    return 'candidate';
+  }
+
+  getPolicyValidation(versionId: string): PolicyValidation | undefined {
+    for (let index = this.policyValidations.length - 1; index >= 0; index--) {
+      if (this.policyValidations[index].versionId === versionId) {
+        return cloneValidation(this.policyValidations[index]);
+      }
+    }
+    return undefined;
+  }
+
+  getPolicyApproval(versionId: string): PolicyApproval | undefined {
+    const approval = this.policyApprovals.find((candidate) => candidate.versionId === versionId);
+    return approval ? cloneApproval(approval) : undefined;
+  }
+
+  getPolicyActivations(policyId: string): PolicyActivationRecord[] {
+    return this.policyActivations
+      .filter((activation) => this.findPolicyVersion(policyId, activation.versionId) !== undefined)
+      .map(cloneActivation);
+  }
+
+  getPolicyLedgerEvents(policyId?: string): PolicyLedgerEvent[] {
+    return this.policyEvents
+      .filter((event) => !policyId || event.policyId === policyId)
+      .map(cloneEvent);
+  }
+
+  getPolicyMonitoring(policyId: string): PolicyMonitoring | undefined {
+    const stats = this.policyMonitoring.get(policyId);
+    return stats ? { ...stats } : undefined;
+  }
+
+  snapshotPolicyLedger(): PolicyLedgerState {
+    const versions: PolicyVersion[] = [];
+    for (const history of this.policyVersions.values()) {
+      for (const version of history) versions.push(cloneVersion(version));
+    }
+    return {
+      versions,
+      validations: this.policyValidations.map(cloneValidation),
+      approvals: this.policyApprovals.map(cloneApproval),
+      activations: this.policyActivations.map(cloneActivation),
+      events: this.policyEvents.map(cloneEvent),
+      active: Object.fromEntries(this.activePolicyVersions),
+      monitoring: Object.fromEntries(
+        [...this.policyMonitoring.entries()].map(([key, stats]) => [key, { ...stats }] as const),
+      ),
+    };
+  }
+
+  restorePolicyLedger(state: unknown): boolean {
+    if (!state || typeof state !== 'object') return false;
+    const candidate = state as Partial<PolicyLedgerState>;
+    if (
+      !Array.isArray(candidate.versions) ||
+      !Array.isArray(candidate.validations) ||
+      !Array.isArray(candidate.approvals) ||
+      !Array.isArray(candidate.activations) ||
+      !Array.isArray(candidate.events)
+    ) {
+      return false;
+    }
+    const versions = new Map<string, PolicyVersion[]>();
+    for (const version of candidate.versions) {
+      if (
+        !version ||
+        typeof version.policyId !== 'string' ||
+        typeof version.versionId !== 'string' ||
+        typeof version.content !== 'string' ||
+        typeof version.contentHash !== 'string' ||
+        !version.provenance
+      ) {
+        return false;
+      }
+      const history = versions.get(version.policyId) ?? [];
+      history.push(cloneVersion(version));
+      versions.set(version.policyId, history);
+    }
+    this.policyVersions = versions;
+    this.policyValidations = candidate.validations.map(cloneValidation);
+    this.policyApprovals = candidate.approvals.map(cloneApproval);
+    this.policyActivations = candidate.activations.map(cloneActivation);
+    this.policyEvents = candidate.events.map(cloneEvent);
+    this.activePolicyVersions = new Map(Object.entries(candidate.active ?? {}));
+    this.policyMonitoring = new Map(
+      Object.entries(candidate.monitoring ?? {}).map(
+        ([key, stats]) => [key, { ...stats }] as const,
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * Import learning records that predate the ledger. A record already at
+   * `policy`/`monitored` is registered as an active version 1 with a
+   * `legacy-import` activation basis, so legacy behavior is preserved while the
+   * exception stays visible in the audit trail.
+   */
+  importLegacyPolicies(): number {
+    let imported = 0;
+    for (const record of this.records) {
+      if (record.stage !== 'policy' && record.stage !== 'monitored') continue;
+      const policyId = `policy:${record.id}`;
+      if (this.policyVersions.has(policyId)) continue;
+      const content = record.content.trim() || record.title;
+      if (!content) continue;
+      const version: PolicyVersion = {
+        policyId,
+        versionId: `${policyId}@1`,
+        version: 1,
+        content,
+        contentHash: policyContentHash(policyId, content),
+        learningId: record.id,
+        provenance: {
+          source: 'legacy',
+          actor: 'system',
+          actorKind: 'system',
+          createdAt: record.updatedAt,
+          reason: 'Imported from a learning record that predates policy versioning',
+        },
+        createdAt: record.updatedAt,
+      };
+      this.policyVersions.set(policyId, [version]);
+      this.activePolicyVersions.set(policyId, version.versionId);
+      this.policyActivations.push({
+        versionId: version.versionId,
+        contentHash: version.contentHash,
+        action: 'activated',
+        at: record.updatedAt,
+        actor: { id: 'system', kind: 'system' },
+        basis: 'legacy-import',
+        reason: 'Legacy policy had no versioned activation record',
+      });
+      this.appendPolicyEvent({
+        type: 'legacy-imported',
+        policyId,
+        versionId: version.versionId,
+        contentHash: version.contentHash,
+        actor: { id: 'system', kind: 'system' },
+        reason: 'Legacy learning record imported as an active baseline version',
+      });
+      imported += 1;
+    }
+    return imported;
   }
 
   private generateRecommendation(type: string, count: number): string {

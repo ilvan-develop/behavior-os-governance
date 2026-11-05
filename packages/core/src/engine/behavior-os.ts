@@ -15,6 +15,7 @@ import type {
   DNA,
   DriftInfo,
   EvolutionProposal,
+  FairnessEvaluation,
   GovernanceAction,
   GovernanceDecision,
   LearningEvent,
@@ -40,6 +41,7 @@ import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
 import { CodeEditEngine, type CodeEditPreview } from './code-edit-engine.js';
 import type { DecideOptions } from './decision-engine.js';
+import type { FairnessInput } from './fairness-engine.js';
 import {
   type ConsensusEngine,
   type CrossDnaLearningEngine,
@@ -54,7 +56,21 @@ import {
 import type {
   AdvanceLearningRecordOptions,
   CreateLearningRecordOptions,
+  CreatePolicyCandidateOptions,
   LearningAdvanceResult,
+  PolicyActivationResult,
+  PolicyActor,
+  PolicyApprovalResult,
+  PolicyCandidateResult,
+  PolicyDeactivationResult,
+  PolicyLedgerEvent,
+  PolicyLedgerState,
+  PolicyMonitoring,
+  PolicyMonitorResult,
+  PolicyRollbackResult,
+  PolicyValidationResult,
+  PolicyVersion,
+  PolicyVersionStatus,
 } from './learning-engine.js';
 
 import type {
@@ -247,6 +263,8 @@ export interface BehaviorOSSnapshot {
   learnings: LearningEvent[];
   /** Governed lifecycle records (G-014). Optional for pre-G-014 snapshots. */
   learningRecords?: LearningRecord[];
+  /** Governed policy version ledger (Sprint 2). Optional for older snapshots. */
+  policyLedger?: PolicyLedgerState;
 }
 
 /** Deep-clone via JSON so a snapshot only ever contains persistable values. */
@@ -573,16 +591,50 @@ export class BehaviorOS {
 
     const startedAt = Date.now();
     const govEngine = this.registry.createGovernanceEngine(this.currentDNA);
-    const decision = govEngine.evaluate({
+    const dnaDecision = govEngine.evaluate({
       action,
       agentId: context.agent,
       context: (context.context || {}) as Record<string, unknown>,
     });
 
-    // Governance-level policy: in lenient mode, soften hard denials into
+    // Active governed policies are enforced at the same choke point as DNA
+    // rules. Only a human-activated version participates; candidates and
+    // approved-but-inactive versions remain documentation. A policy `deny` is
+    // intentionally not softened by the lenient governance level: activating a
+    // blocking policy is an explicit human decision.
+    const policyEvaluation = this.getLearningEngine().evaluateActivePolicies(action);
+    const policyDenied = policyEvaluation.verdict === 'deny';
+    const decision =
+      policyEvaluation.matches.length === 0
+        ? dnaDecision
+        : (() => {
+            const policyRules = policyEvaluation.matches.map((match) => match.ruleId);
+            const policyReason = policyEvaluation.matches.map((match) => match.reason).join('; ');
+            const verdict =
+              policyEvaluation.verdict === 'deny'
+                ? ('deny' as const)
+                : policyEvaluation.verdict === 'escalate' && dnaDecision.verdict === 'allow'
+                  ? ('escalate' as const)
+                  : dnaDecision.verdict;
+            const policyWarnings = policyEvaluation.matches
+              .filter((match) => match.action === 'warn')
+              .map((match) => match.reason);
+            return {
+              ...dnaDecision,
+              verdict,
+              reason: `${dnaDecision.reason} | Active policy: ${policyReason}`,
+              rulesEvaluated: [...dnaDecision.rulesEvaluated, ...policyRules],
+              firedRules: [...(dnaDecision.firedRules ?? []), ...policyRules],
+              ...(policyWarnings.length > 0
+                ? { warnings: [...(dnaDecision.warnings ?? []), ...policyWarnings] }
+                : {}),
+            };
+          })();
+
+    // Governance-level policy: in lenient mode, soften hard DNA denials into
     // escalations so autonomous agents can proceed with awareness of the risk.
     const finalDecision =
-      decision.verdict === 'deny' && this.config.governance?.level === 'lenient'
+      !policyDenied && decision.verdict === 'deny' && this.config.governance?.level === 'lenient'
         ? {
             ...decision,
             verdict: 'escalate' as const,
@@ -612,10 +664,18 @@ export class BehaviorOS {
    * only fire from the active DNA).
    */
   private firedRuleActions(decision: GovernanceDecision): Array<{ id: string; action: string }> {
-    return (decision.firedRules ?? []).map((id) => ({
-      id,
-      action: this.currentDNA?.governance.find((rule) => rule.id === id)?.action ?? 'unknown',
-    }));
+    const activePolicies = this.getLearningEngine().getActivePolicies();
+    return (decision.firedRules ?? []).map((id) => {
+      if (id.startsWith('policy:')) {
+        const versionId = id.slice('policy:'.length);
+        const version = activePolicies.find((candidate) => candidate.versionId === versionId);
+        return { id, action: version?.enforcement?.action ?? 'unknown' };
+      }
+      return {
+        id,
+        action: this.currentDNA?.governance.find((rule) => rule.id === id)?.action ?? 'unknown',
+      };
+    });
   }
 
   // Quality Gates
@@ -627,6 +687,17 @@ export class BehaviorOS {
     const qualityEngine = this.registry.createQualityEngine(this.currentDNA);
     const result = qualityEngine.evaluate(metrics);
     return { passed: result.passed, details: result };
+  }
+
+  // Responsible AI: fairness, provenance and human oversight
+  /**
+   * Evaluate group outcomes against fairness thresholds, then check data
+   * provenance and human oversight. Deterministic and side-effect free: it
+   * reports a verdict but never mutates the DNA or governance log.
+   */
+  evaluateFairness(input: FairnessInput): FairnessEvaluation {
+    const engine = this.registry.createFairnessEngine();
+    return engine.evaluate(input);
   }
 
   // Quality Engine
@@ -1068,6 +1139,167 @@ export class BehaviorOS {
 
   getLearningRecords(): LearningRecord[] {
     return this.getLearningEngine().getRecords();
+  }
+
+  // Governed policy versioning (Sprint 2) -----------------------------------
+  /**
+   * Open an inactive policy candidate version. Entering the learning `policy`
+   * stage calls this automatically; a caller may also supply a stable
+   * `policyId`. Nothing becomes active here.
+   */
+  createPolicyCandidate(options: CreatePolicyCandidateOptions): PolicyCandidateResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().createPolicyCandidate(options);
+    this.afterPolicyMutation(result.ok ? result.version.policyId : options.policyId, before);
+    return result;
+  }
+
+  /** Record a validation result bound to the exact version + content hash. */
+  validatePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; issues?: string[] },
+  ): PolicyValidationResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().validatePolicyVersion(policyId, versionId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  /** Approve a validated version. Only `actor.kind === 'human'` is accepted. */
+  approvePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; rationale: string; approvalToken?: string },
+  ): PolicyApprovalResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().approvePolicyVersion(policyId, versionId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  /** Activate an approved version; the previous active version is retired. */
+  activatePolicyVersion(
+    policyId: string,
+    versionId: string,
+    options: { actor: PolicyActor; reason?: string },
+  ): PolicyActivationResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().activatePolicyVersion(policyId, versionId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  /** Deactivate the active version without deleting or overwriting history. */
+  deactivatePolicy(
+    policyId: string,
+    options: { actor: PolicyActor; reason: string },
+  ): PolicyDeactivationResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().deactivatePolicy(policyId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  /** Roll back to a validated (and previously approved/active) version. */
+  rollbackPolicy(
+    policyId: string,
+    toVersionId: string,
+    options: { actor: PolicyActor; reason: string },
+  ): PolicyRollbackResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().rollbackPolicy(policyId, toVersionId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  /** Record a monitoring observation for the active version. */
+  monitorPolicy(
+    policyId: string,
+    options: { actor: PolicyActor; success: boolean; detail?: string },
+  ): PolicyMonitorResult {
+    const before = this.getLearningEngine().getPolicyLedgerEvents().length;
+    const result = this.getLearningEngine().monitorPolicy(policyId, options);
+    this.afterPolicyMutation(policyId, before);
+    return result;
+  }
+
+  getPolicyVersions(policyId: string): PolicyVersion[] {
+    return this.getLearningEngine().getPolicyVersions(policyId);
+  }
+
+  getPolicyVersion(policyId: string, versionId: string): PolicyVersion | undefined {
+    return this.getLearningEngine().getPolicyVersion(policyId, versionId);
+  }
+
+  getActivePolicyVersion(policyId: string): PolicyVersion | undefined {
+    return this.getLearningEngine().getActivePolicyVersion(policyId);
+  }
+
+  getPolicyStatus(policyId: string, versionId: string): PolicyVersionStatus | undefined {
+    return this.getLearningEngine().getPolicyStatus(policyId, versionId);
+  }
+
+  getPolicyActivations(policyId: string) {
+    return this.getLearningEngine().getPolicyActivations(policyId);
+  }
+
+  getPolicyValidation(versionId: string) {
+    return this.getLearningEngine().getPolicyValidation(versionId);
+  }
+
+  getPolicyApproval(versionId: string) {
+    return this.getLearningEngine().getPolicyApproval(versionId);
+  }
+
+  getPolicyLedgerEvents(policyId?: string): PolicyLedgerEvent[] {
+    return this.getLearningEngine().getPolicyLedgerEvents(policyId);
+  }
+
+  getPolicyMonitoring(policyId: string): PolicyMonitoring | undefined {
+    return this.getLearningEngine().getPolicyMonitoring(policyId);
+  }
+
+  getPolicyLedgerSnapshot(): PolicyLedgerState {
+    return this.getLearningEngine().snapshotPolicyLedger();
+  }
+
+  /** Write the policy ledger to the store's existing `meta` key-value table. */
+  private persistPolicyLedger(): void {
+    if (!this.store) return;
+    this.store.setMeta(
+      'policy-ledger',
+      JSON.stringify(this.getLearningEngine().snapshotPolicyLedger()),
+    );
+  }
+
+  /**
+   * Persist after a policy mutation and mirror the newest ledger event into the
+   * hash-chained governance log so every transition is auditable via
+   * `bos_get_log` / `bos_verify_audit_trail`.
+   */
+  private afterPolicyMutation(_policyId?: string, previousEventCount = 0): void {
+    this.persistPolicyLedger();
+    const allEvents = this.getLearningEngine().getPolicyLedgerEvents();
+    // A rejected/no-op call may not append a transition; never re-mirror an
+    // older event just because the newest event does not belong to this call.
+    if (allEvents.length <= previousEventCount) return;
+    const event = allEvents[allEvents.length - 1];
+    const rejected =
+      event.type.endsWith('-rejected') ||
+      event.type === 'validation-failed' ||
+      event.type === 'monitor-failed';
+    GovernanceLog.appendGovernanceLog({
+      kind: 'learning',
+      outcome: rejected ? 'deny' : 'info',
+      dna: this.currentDNA?.name ?? null,
+      step: this.agentState.currentStep,
+      mission: this.agentState.activeMission ?? null,
+      action: `policy:${event.type}`,
+      detail: `${event.policyId}${event.versionId ? ` ${event.versionId}` : ''} actor=${event.actor.id} (${event.actor.kind})${
+        event.reason ? ` reason=${event.reason}` : ''
+      }`,
+    });
   }
 
   // DNA evolution (learning-driven) -----------------------------------------
@@ -2406,6 +2638,7 @@ export class BehaviorOS {
       missions: this.getMissionEngine().snapshot(),
       learnings: this.getLearningEngine().snapshot(),
       learningRecords: this.getLearningEngine().snapshotRecords(),
+      policyLedger: this.getLearningEngine().snapshotPolicyLedger(),
     });
   }
 
@@ -2441,6 +2674,13 @@ export class BehaviorOS {
       this.getMissionEngine().restore(snapshot.missions ?? []);
       this.getLearningEngine().restore(snapshot.learnings ?? []);
       this.getLearningEngine().restoreRecords(snapshot.learningRecords ?? []);
+      if (snapshot.policyLedger) {
+        this.getLearningEngine().restorePolicyLedger(snapshot.policyLedger);
+      } else {
+        // Pre-ledger snapshots keep working: records already at policy/monitored
+        // become active baseline versions, visibly marked as legacy imports.
+        this.getLearningEngine().importLegacyPolicies();
+      }
       return true;
     } catch {
       return false;
@@ -2477,6 +2717,20 @@ export class BehaviorOS {
         // next record mutation re-persist a clean lifecycle.
       }
     }
+    // Policy version ledger hydrates from the same `meta` channel (no extra
+    // table). Without a ledger, legacy records at policy/monitored are imported.
+    const policyLedgerRaw = this.store.getMeta('policy-ledger');
+    if (policyLedgerRaw) {
+      try {
+        if (!this.getLearningEngine().restorePolicyLedger(JSON.parse(policyLedgerRaw))) {
+          this.getLearningEngine().importLegacyPolicies();
+        }
+      } catch {
+        this.getLearningEngine().importLegacyPolicies();
+      }
+    } else {
+      this.getLearningEngine().importLegacyPolicies();
+    }
   }
 
   /**
@@ -2492,6 +2746,7 @@ export class BehaviorOS {
       for (const mission of this.getMissionEngine().snapshot()) store.saveMission(mission);
       for (const event of this.getLearningEngine().snapshot()) store.saveLearning(event);
       this.persistLearningRecords();
+      this.persistPolicyLedger();
       for (const agent of this.agents.values()) store.saveAgent(agent);
       this.persistRolePolicyState();
     });
@@ -2567,7 +2822,16 @@ export class BehaviorOS {
     store: boolean | null;
     /** Error message when the store failed to initialise, null otherwise. */
     storeError: string | null;
+    /** Governed policy ledger summary, visible to every host (plugin, MCP, CLI). */
+    policies: {
+      active: number;
+      /** `${policyId}@${version}` ids of active versions. */
+      ids: string[];
+      /** Active versions that carry machine-readable enforcement. */
+      enforced: number;
+    };
   } {
+    const activePolicies = this.getLearningEngine().getActivePolicies();
     return {
       engine: true,
       dna: this.currentDNA?.name ?? null,
@@ -2582,6 +2846,11 @@ export class BehaviorOS {
       },
       store: this.store ? true : this.storeInitError ? false : null,
       storeError: this.storeInitError,
+      policies: {
+        active: activePolicies.length,
+        ids: activePolicies.map((version) => version.versionId),
+        enforced: activePolicies.filter((version) => version.enforcement !== undefined).length,
+      },
     };
   }
 }

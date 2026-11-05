@@ -392,6 +392,7 @@ describe('Persistent engineering control loop', () => {
       status: 'completed',
       outcome: 'PASS',
       attempts: 1,
+      assignedAgentId: 'fixer-prior',
       evidence: [evidence],
       completedAt: seeded.createdAt,
     };
@@ -404,6 +405,8 @@ describe('Persistent engineering control loop', () => {
     expect(state.status).toBe('done');
     expect(state.tasks[0].status).toBe('completed');
     expect(state.tasks[1].status).toBe('completed');
+    expect(state.tasks[0].assignedAgentId).toBe('fixer-prior');
+    expect(state.tasks[0].attempts).toBe(1);
     expect(calls).toEqual(['b']);
   });
 
@@ -608,10 +611,12 @@ describe('Persistent engineering control loop', () => {
       },
     });
     base.loop.retryBlocked(['retry'], 'adapter registered');
+    expect((base.loop.getState() as ControlLoopState).tasks[0].assignedAgentId).toBeUndefined();
     const state = await base.loop.run();
 
     expect(state.status).toBe('done');
     expect(state.outcome).toBe('PASS');
+    expect(state.tasks[0].assignedAgentId).toBe('agent-1');
     expect(calls).toEqual(['retry']);
   });
 
@@ -986,6 +991,21 @@ describe('Persistent engineering control loop', () => {
       (state.tasks[0] as unknown as Record<string, unknown>).idempotencyKey = '';
       writeFileSync(base.statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
       await expect(base.loop.run()).rejects.toThrow(/does not match the persisted state contract/);
+    });
+
+    it('rejects malformed requiredSkills elements at plan creation', () => {
+      const base = setup([task('t')]);
+      expect(() =>
+        createInitialControlState(
+          plan([
+            {
+              ...base.plan.tasks[0],
+              requiredSkills: [123 as unknown as string],
+            },
+          ]),
+          'agent-1',
+        ),
+      ).toThrow(/requiredSkills must be an array of skill names/);
     });
   });
 

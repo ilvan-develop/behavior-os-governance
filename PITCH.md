@@ -105,7 +105,7 @@ Behavior-OS se conecta aos principais tools via **Model Context Protocol (MCP)**
 | Revisão manual constante | Governança automatizada                          |
 | Erros se repetem         | Engine de aprendizado deteta padrões recorrentes |
 | Coordenação difícil      | Protocolo de 7 passos + missões rastreáveis      |
-| Infraestrutura ad-hoc    | 47 engines + CLI + SDK prontos                   |
+| Infraestrutura ad-hoc    | 48 + CLI + SDK prontos                   |
 
 ---
 
