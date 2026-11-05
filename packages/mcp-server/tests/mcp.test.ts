@@ -43,6 +43,18 @@ describe('MCP server structure', () => {
     expect(serverSource).toContain('approvalToken');
   });
 
+  it('gives every registered tool a description and an object input schema', () => {
+    const blocks = serverSource.split('server.registerTool(').slice(1);
+    expect(blocks).toHaveLength(toolNames.length);
+    for (const block of blocks) {
+      const name = block.match(/'([a-z_]+)'/)?.[1] ?? 'unknown';
+      expect(block, `tool ${name} is missing a description`).toContain('description:');
+      expect(block, `tool ${name} is missing an object inputSchema`).toMatch(
+        /inputSchema:\s*z\s*\.object/,
+      );
+    }
+  });
+
   it('exposes the consensus and cross-DNA transfer engines', () => {
     expect(toolNames).toContain('bos_resolve_consensus');
     expect(toolNames).toContain('bos_suggest_cross_dna_transfer');

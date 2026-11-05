@@ -398,23 +398,28 @@ Lacunas reais — abertas ou fechadas numa sessão recente, para que o estado me
 
 O gate de segurança tem uma só definição, `pnpm run security:audit`
 (`pnpm audit --audit-level=high`), executada pelo `verify:all` e pelo job
-`security` da CI. Medição de 2026-10-21: **0 vulnerabilidades**, exit 0, sem
-`auditConfig.ignoreCves` nem `ignoreGhsas`. As duas advisories _high_ foram
-fechadas por upgrade real, não por supressão: `@changesets/cli` 3 removeu a
-cadeia `@manypkg/get-packages → globby → micromatch → braces`, `lint-staged` 16
+`security` da CI. Medição de 2026-11-05: **0 vulnerabilidades**, exit 0, mesmo
+com `pnpm audit --audit-level=low`, sem `auditConfig.ignoreCves` nem
+`ignoreGhsas`. As duas advisories _high_ foram fechadas por upgrade real, não
+por supressão: `@changesets/cli` 3 removeu a cadeia
+`@manypkg/get-packages → globby → micromatch → braces`, `lint-staged` 16
 removeu o último `micromatch`, e `markdown-it` foi fixado em **14.3.3** (a versão
-corrigida dentro do range `^14.3.0` do typedoc). O gate precisa de acesso ao
-registry npm; offline falha em vez de produzir um falso verde. Um teste em
-`repo-scripts.test.ts` falha se o `verify:all` deixar de correr o gate, se a CI
-divergir dele, ou se alguém introduzir uma lista de advisories ignoradas.
+corrigida dentro do range `^14.3.0` do typedoc). O lote de 2026-11-05 fechou as
+11 advisories low/moderate restantes com overrides reais no `package.json`
+(`ip-address` 10.7.4, `fast-uri` 3.1.9, `qs` 6.16.1, `glob` 14.0.2,
+`minimatch` 11.0.1), validados pela suite completa e pelos gates de
+build/plugin. O gate precisa de acesso ao registry npm; offline falha em vez de
+produzir um falso verde. Um teste em `repo-scripts.test.ts` falha se o
+`verify:all` deixar de correr o gate, se a CI divergir dele, ou se alguém
+introduzir uma lista de advisories ignoradas.
 
 ## Estado dos testes
 
-Medido com `pnpm test` (não aspiracional): **110 ficheiros / 1201 casos**, exit 0,
+Medido com `pnpm test --force` (não aspiracional): **118 ficheiros / 1321 casos**, exit 0,
 `pnpm typecheck` 11/11 tarefas sem erros, `pnpm lint:check` (Biome) limpo,
 `pnpm build` 8/8 tarefas e `pnpm run security:audit` com **0 vulnerabilidades** (exit 0).
 `pnpm test:coverage` na raiz corre a mesma suite
-(**110 ficheiros / 1201 casos**). O harness de governação
+(**118 ficheiros / 1321 casos**). O harness de governação
 (`pnpm verify:governance`) prova **24/24** claims (100%), com 0 falhas, e o
 control plane OpenCode V2 (`pnpm verify:opencode`) prova **39/39** invariantes.
 Os números vivem nos próprios testes, que falham se a contagem derivar:

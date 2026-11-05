@@ -45,7 +45,7 @@ No MCP tool was added, so the documented MCP/plugin counts are unchanged.
 | `pnpm lint:check`                      | exit 0 — 464 files checked, no fixes applied                                                                   |
 | `pnpm --filter @behavior-os/core test` | exit 0 — 83 files, 870 tests                                                                                   |
 | `pnpm test --force`                    | exit 0 — 8/8 packages successful                                                                               |
-| Per-package test counts                | schemas 35, core 870, sdk 15, cli 22, mcp-server 46, orchestrator 149, plugin 178, examples 4 — **1319 total** |
+| Per-package test counts                | schemas 35, core 870, sdk 15, cli 22, mcp-server 47, orchestrator 149, plugin 179, examples 4 — **1321 total** |
 | `pnpm build`                           | exit 0 — 8/8 tasks successful                                                                                  |
 | `pnpm verify:publish`                  | exit 0 — 5 packages installable                                                                                |
 | `pnpm verify:plugin`                   | exit 0 — 72 tools surfaced                                                                                     |
@@ -53,7 +53,7 @@ No MCP tool was added, so the documented MCP/plugin counts are unchanged.
 | `pnpm verify:windows`                  | exit 0 — zero visible console windows                                                                          |
 | `pnpm smoke:mcp`                       | exit 0 — 2 resources, 21 DNA patterns, governance escalation matched                                           |
 | `pnpm verify:governance`               | exit 0 — 24/24 claims proven, 0 failures                                                                       |
-| `pnpm run security:audit`              | exit 0 — 11 vulnerabilities (2 low, 9 moderate, 0 high/critical)                                               |
+| `pnpm run security:audit`              | exit 0 — 0 vulnerabilities (`pnpm audit --audit-level=low` also exit 0)                                        |
 | `git diff --check`                     | exit 0                                                                                                         |
 
 `docs/analysis/governance-conformance.json` is a generated artifact; it was
@@ -90,6 +90,22 @@ CLI hosts can observe the active ruleset without a new tool.
 the end-to-end enforcement test (candidate → approved/inactive → active → deny
 → deactivate) and the HMAC approval test (missing token, invalid token, valid
 token).
+
+## Dependency security (2026-11-05)
+
+`pnpm audit --audit-level=low` now exits 0: the remaining 2 low and 9 moderate
+advisories were closed by real overrides, not by suppression. Root
+`pnpm.overrides` pins `ip-address` 10.7.4, `fast-uri` 3.1.9, `qs` 6.16.1,
+`glob` 14.0.2 and `minimatch` 11.0.1. The full suite, build, plugin and OpenCode
+gates were rerun after the install; no gate regressed.
+
+## Tool contract coverage
+
+Every registration is checked, not just the count: an MCP test asserts each of
+the 87 tools has a description and an object input schema, and a plugin test
+asserts each of the 72 tools has a non-empty description, an object input schema
+and an executable handler. The `bos_policy` e2e test additionally proves the
+lifecycle and its effect on `evaluateGovernance`.
 
 ## Test coverage (16 original tests, plus 2 hardening tests)
 

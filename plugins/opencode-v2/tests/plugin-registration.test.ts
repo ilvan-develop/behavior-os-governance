@@ -285,6 +285,27 @@ describe('behavior-os plugin registration', () => {
     }
   });
 
+  it('gives every tool an executable contract and an object input schema', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    expect(addedTools).toHaveLength(72);
+    for (const tool of addedTools) {
+      const meta = tool as unknown as {
+        name: string;
+        description?: string;
+        input?: { type?: string };
+        execute?: unknown;
+      };
+      expect(
+        meta.description?.trim().length ?? 0,
+        `tool ${meta.name} has no description`,
+      ).toBeGreaterThan(0);
+      expect(meta.input?.type, `tool ${meta.name} has no object input schema`).toBe('object');
+      expect(typeof meta.execute, `tool ${meta.name} is not executable`).toBe('function');
+    }
+  });
+
   it('loads DNA patterns from ctx.location.directory (not process.cwd())', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
