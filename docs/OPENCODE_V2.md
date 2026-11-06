@@ -110,12 +110,17 @@ the hooks that make governance visible:
   mission when the session needs one. Selection is task-scoped instead of
   permanent: a new task can move from Lean Factory to Surgical Team without a
   restart.
-- `session.context`: injects the current DNA, protocol step, mission and
-  identity into every step.
+- `session.context`: when a DNA is selected, injects the current DNA, protocol
+  step, active mission (or `none`) and identity; otherwise injects cold-start
+  guidance.
 - `agent.transform`: adds a short governed preamble to each agent prompt.
-- `tool.execute.before`: advisory escalation logging, never enforcement.
+- `tool.execute.before`: advisory escalation logging in human-in-the-loop mode;
+  in autonomous mode (`BEHAVIOROS_AUTONOMOUS=true`) it is a hard veto that
+  applies the deny-list, per-session quota and doom-loop guard before the call.
+  Both modes only run when a DNA is selected and the tool is governed.
 - `tool.execute.after`: records failures in the learning engine.
-- `tool.transform`: keeps the tool catalog consistent with the active DNA.
+- `tool.transform`: registers the 91 `bos_*` tools. Governance is applied per
+  call, so the catalog stays stable instead of hiding tools by DNA.
 
 `setup()` also detects a second Behavior-OS host. If the user-level or project
 MCP config registers `behavioros` while the plugin is loaded, the plugin

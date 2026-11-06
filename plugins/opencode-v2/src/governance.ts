@@ -439,5 +439,6 @@ export function buildGovernedPreamble(): string {
     GOVERNED_PREAMBLE_MARKER,
     '[Behavior-OS] This project is governed. Before mutating files or running risky commands, select a DNA pattern with bos_select_dna and follow the 7-step protocol: bos_list_dna -> bos_get_state -> bos_create_mission -> bos_start_mission -> bos_run_audit -> bos_record_learning.',
     'The active DNA, current step and mission are provided in the session context. Load the behavior-os skill for the intent-to-DNA map and the meaning of a governance block or escalation.',
+    'For multi-step or delegated work, prefer the orchestration tools (bos_start_loop, bos_resolve_consensus, bos_create_brainstorm) over ad-hoc execution; validate with bos_run_audit before bos_complete_mission.',
   ].join('\n');
 }

@@ -406,6 +406,7 @@ describe('behavior-os plugin registration', () => {
     expect(build?.system).toContain('You are the build agent.');
     expect(build?.system).toContain('<!-- behavior-os:governed -->');
     expect(build?.system).toContain('bos_select_dna');
+    expect(build?.system).toContain('bos_start_loop');
     // Agents without a system prompt still receive it.
     expect(review?.system).toContain('<!-- behavior-os:governed -->');
 
@@ -431,7 +432,7 @@ describe('behavior-os plugin registration', () => {
   });
 
   it('auto-selects a DNA pattern and opens a single mission from the prompt intent', async () => {
-    const { ctx, sessionHooks } = createFakeContext(repoRoot);
+    const { ctx, addedTools, sessionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
     const event = {
@@ -445,6 +446,15 @@ describe('behavior-os plugin registration', () => {
       /^mission-/,
     );
 
+    // The live mission must reach the model through the context hook, not only
+    // through tool responses; otherwise the model cannot audit or complete it.
+    const missionId = (event.metadata.behavioros as { autoMission?: string }).autoMission;
+    const contextEvent = { system: [] as Array<{ type: string; text: string }> };
+    await (sessionHooks.context as (e: unknown) => Promise<void>)(contextEvent);
+    const contextText = contextEvent.system.map((entry) => entry.text).join('\n');
+    expect(contextText).toContain(`Active mission: ${missionId}`);
+    expect(contextText).toMatch(/Active mission: mission-\S+ \(active\)/);
+
     // A second prompt must not spawn another mission while one is active.
     const second = {
       prompt: { text: 'Now deploy the changes to production' },
@@ -452,6 +462,19 @@ describe('behavior-os plugin registration', () => {
     };
     await (sessionHooks.prompt as (e: unknown) => Promise<void>)(second);
     expect(second.metadata.behavioros).toBeUndefined();
+
+    // Cancelling the live mission clears activeMission; the context hook must
+    // then tell the model to create and start a new one instead of implying an
+    // audit can run without a mission.
+    await runTool(addedTools, 'bos_cancel_mission', {
+      missionId,
+      reason: 'test cleanup',
+    });
+    const afterCancel = { system: [] as Array<{ type: string; text: string }> };
+    await (sessionHooks.context as (e: unknown) => Promise<void>)(afterCancel);
+    expect(afterCancel.system.map((entry) => entry.text).join('\n')).toContain(
+      'Active mission: none',
+    );
   });
 
   it('denies a production change through the permission hook once a DNA is selected', async () => {

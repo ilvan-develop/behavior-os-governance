@@ -4528,6 +4528,12 @@ export default Plugin.define({
         // Surface the governed identity so the model attributes audits and
         // governance entries to a DNA-derived role instead of its model name.
         const identity = bos.resolveAgentIdentity();
+        const activeMission = currentState.activeMission
+          ? bos.getMission(currentState.activeMission)
+          : null;
+        const missionLine = currentState.activeMission
+          ? `Active mission: ${currentState.activeMission} (${activeMission?.status ?? 'unknown'}) — use this missionId for audits and completion`
+          : 'Active mission: none — create and start one (bos_create_mission, then bos_start_mission) before mutating or auditing';
         event.system.push({
           type: 'text',
           text: [
@@ -4536,6 +4542,7 @@ export default Plugin.define({
               identity.persona ? ` (persona: ${identity.persona})` : ''
             } [${identity.source}] — use it as \`agentId\`, never the model name`,
             stepLine,
+            missionLine,
             `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
           ].join('\n'),
         });
