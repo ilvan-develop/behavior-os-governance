@@ -124,10 +124,19 @@ async function partA() {
         for (const tool of TOOLS_A) {
           let verdict = 'error';
           let reason = '';
+          let firedBlockRule = false;
           try {
             const decision = evaluate(provider, bos, tool, flags);
             verdict = decision.verdict;
             reason = decision.reason;
+            // A rule only applies when its own conditions matched. The engine
+            // reports fired rule ids, so we can tell "the block rule fired but
+            // the verdict allowed" (a real gap) from "the block rule's
+            // conditions do not describe this action" (not applicable).
+            const fired = decision.firedRules ?? [];
+            firedBlockRule = fired.some((id) =>
+              (dna.governance ?? []).some((rule) => rule.id === id && rule.action === 'block'),
+            );
           } catch (error) {
             reason = error instanceof Error ? error.message : String(error);
           }
@@ -141,8 +150,9 @@ async function partA() {
             verdict,
             reason,
             dnaHasBlockRule: blockRule,
+            blockRuleApplicable: blockRule && firedBlockRule,
             pluginBlocks: provider === 'plugin' && verdict === 'deny',
-            gap: blockRule && verdict === 'allow',
+            gap: blockRule && firedBlockRule && verdict === 'allow',
           });
         }
       }
@@ -306,12 +316,15 @@ async function runPhase(phase, tool, dnaSelected) {
       };
       if (registered) await permissionHooks.evaluate(event);
       const enforced = event.effect === 'deny' || event.effect === 'ask';
+      // Reading a production path is not a production change. Only a tool that
+      // can mutate state is expected to be blocked by the sterile-field rule.
+      const shouldEnforce = ['bash', 'write', 'edit'].includes(tool);
       return {
         hookRegistered: registered,
         effect: registered
           ? `permission hook ran (effect=${event.effect})`
           : 'no permission hook — cannot deny via the official mechanism',
-        gap: registered ? dnaSelected && !enforced : true,
+        gap: registered ? dnaSelected && shouldEnforce && !enforced : true,
       };
     }
     default:
@@ -386,6 +399,7 @@ const columns = [
   'level',
   'verdict',
   'dnaHasBlockRule',
+  'blockRuleApplicable',
   'pluginBlocks',
   'phase',
   'dnaSelected',
@@ -427,6 +441,9 @@ const summary = {
     scenariosWhereBlockRuleExistsButVerdictAllows: a.filter(
       (r) => r.dnaHasBlockRule && r.verdict === 'allow',
     ).length,
+    blockRuleApplicableScenarios: a.filter((r) => r.blockRuleApplicable).length,
+    blockRuleNotApplicableScenarios: a.filter((r) => r.dnaHasBlockRule && !r.blockRuleApplicable)
+      .length,
     gapScenarios: a.filter((r) => r.gap).length,
   },
   partB: {
@@ -472,6 +489,8 @@ console.log(
   '  Block-rule-but-allowed :',
   summary.partA.scenariosWhereBlockRuleExistsButVerdictAllows,
 );
+console.log('  Block rule applicable  :', summary.partA.blockRuleApplicableScenarios);
+console.log('  Block rule not applied :', summary.partA.blockRuleNotApplicableScenarios);
 console.log('  tool.execute.before threw   :', summary.partB.toolExecuteBeforeBlocks);
 console.log('  permission enforced         :', summary.partB.permissionEnforced);
 console.log('  context injections     :', summary.partB.modelContextInjected);

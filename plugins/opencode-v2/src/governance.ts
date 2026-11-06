@@ -146,6 +146,51 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
     context['production-change'] = true;
   }
 
+  // Domain-specific deployment/change signals. These are *performed* by an
+  // action that can execute or mutate, never by a read-only mention, and each
+  // maps to a block rule in exactly one DNA (model-validation, security-audit,
+  // pipeline-approval, app-store-compliance). They stay text-derived because
+  // the host exposes no structured signal for them.
+  if (canOperate) {
+    if (
+      hasPhrase(
+        'deploy model',
+        'model deployment',
+        'release model',
+        'promote model',
+        'model rollout',
+      )
+    ) {
+      context['model-deployment'] = true;
+    }
+    if (hasPhrase('deploy contract', 'contract deployment', 'publish contract')) {
+      context['contract-deployment'] = true;
+    }
+    if (hasPhrase('app store', 'play store', 'store submission', 'submit for review')) {
+      context['app-store-submission'] = true;
+    }
+  }
+
+  if (changesState) {
+    const pipelineResource = (signals.resources ?? []).some((resource) =>
+      /(?:\.github\/workflows\/|gitlab-ci|jenkinsfile|azure-pipelines|\.circleci)/i.test(resource),
+    );
+    if (
+      pipelineResource ||
+      hasPhrase(
+        'pipeline change',
+        'update pipeline',
+        'modify pipeline',
+        'ci/cd',
+        'ci pipeline',
+        'deployment pipeline',
+        'workflow file',
+      )
+    ) {
+      context['pipeline-change'] = true;
+    }
+  }
+
   // Destructive / critical actions.
   if (
     hasPhrase(

@@ -1,3 +1,4 @@
+import { BehaviorOS } from '@behavior-os/core';
 import { describe, expect, it } from 'vitest';
 import {
   buildGovernanceContext,
@@ -61,6 +62,72 @@ describe('buildGovernanceContext', () => {
     expect(context['critical-action']).toBe(true);
     expect(context['breaking-change']).toBe(true);
     expect(context['data-modification']).toBe(true);
+  });
+
+  it('activates the model-deployment signal only from an executing action', () => {
+    const deploy = buildGovernanceContext({
+      tool: 'bash',
+      action: 'bash',
+      text: 'deploy model v2 to production',
+    });
+    expect(deploy['model-deployment']).toBe(true);
+
+    const read = buildGovernanceContext({
+      tool: 'read',
+      text: 'deploy model v2 to production',
+    });
+    expect(read['model-deployment']).toBeUndefined();
+  });
+
+  it('activates the contract-deployment signal only from an executing action', () => {
+    const deploy = buildGovernanceContext({
+      tool: 'bash',
+      action: 'bash',
+      text: 'deploy contract to mainnet',
+    });
+    expect(deploy['contract-deployment']).toBe(true);
+
+    const read = buildGovernanceContext({
+      tool: 'read',
+      text: 'deploy contract to mainnet',
+    });
+    expect(read['contract-deployment']).toBeUndefined();
+  });
+
+  it('activates the pipeline-change signal from a workflow resource or phrase', () => {
+    const byResource = buildGovernanceContext({
+      tool: 'write',
+      resources: ['.github/workflows/ci.yml'],
+    });
+    expect(byResource['pipeline-change']).toBe(true);
+
+    const byPhrase = buildGovernanceContext({
+      tool: 'bash',
+      action: 'bash',
+      text: 'update pipeline configuration',
+    });
+    expect(byPhrase['pipeline-change']).toBe(true);
+
+    const read = buildGovernanceContext({
+      tool: 'read',
+      resources: ['.github/workflows/ci.yml'],
+    });
+    expect(read['pipeline-change']).toBeUndefined();
+  });
+
+  it('activates the app-store-submission signal only from an executing action', () => {
+    const submit = buildGovernanceContext({
+      tool: 'bash',
+      action: 'bash',
+      text: 'submit the build to the app store for review',
+    });
+    expect(submit['app-store-submission']).toBe(true);
+
+    const read = buildGovernanceContext({
+      tool: 'read',
+      text: 'submit the build to the app store for review',
+    });
+    expect(read['app-store-submission']).toBeUndefined();
   });
 
   it('flags sensitive data domains', () => {
@@ -185,6 +252,78 @@ describe('buildGovernanceContext', () => {
     const context = buildGovernanceContext({ text: `the customer ${token} is 123-45-6789` });
     const sensitiveKey = `${['p', 'i', 'i'].join('')}-data`;
     expect(context[sensitiveKey]).toBe(true);
+  });
+});
+
+describe('domain signals activate DNA block rules', () => {
+  const cases = [
+    {
+      dna: 'ai-ml-pipeline',
+      signal: 'model-deployment',
+      tool: 'bash',
+      action: 'bash',
+      text: 'deploy model v2 to production',
+      resources: undefined,
+    },
+    {
+      dna: 'blockchain-web3',
+      signal: 'contract-deployment',
+      tool: 'bash',
+      action: 'bash',
+      text: 'deploy contract to mainnet',
+      resources: undefined,
+    },
+    {
+      dna: 'devops-pipeline',
+      signal: 'pipeline-change',
+      tool: 'write',
+      action: undefined,
+      text: undefined,
+      resources: ['.github/workflows/ci.yml'],
+    },
+    {
+      dna: 'mobile-app',
+      signal: 'app-store-submission',
+      tool: 'bash',
+      action: 'bash',
+      text: 'submit the build to the app store for review',
+      resources: undefined,
+    },
+  ];
+
+  it.each(cases)('$dna: $signal blocks the matching action', async (testCase) => {
+    const bos = new BehaviorOS({
+      persistence: undefined,
+      governance: { level: 'strict' },
+    });
+    await bos.loadDNA({
+      name: `test-${testCase.signal}`,
+      version: '1.0.0',
+      description: 'domain signal test',
+      personas: [],
+      governance: [
+        {
+          id: `${testCase.signal}-guard`,
+          level: 'critical',
+          action: 'block',
+          conditions: [{ type: testCase.signal, value: true }],
+          description: `Block ${testCase.signal}`,
+        },
+      ],
+      quality: [],
+    } as never);
+
+    const context = buildGovernanceContext({
+      tool: testCase.tool,
+      action: testCase.action,
+      text: testCase.text,
+      resources: testCase.resources,
+    });
+    const decision = bos.evaluateGovernance(testCase.tool, { agent: 'test-agent', context });
+
+    expect(context[testCase.signal]).toBe(true);
+    expect(decision.verdict).toBe('deny');
+    expect(decision.firedRules).toContain(`${testCase.signal}-guard`);
   });
 });
 
