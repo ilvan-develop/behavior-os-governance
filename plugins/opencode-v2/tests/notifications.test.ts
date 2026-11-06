@@ -233,4 +233,22 @@ describe('NotificationCoalescer', () => {
       notificationKey(identity({ sessionID: 'b' })),
     );
   });
+
+  it('treats different mission-open decisions as distinct, not duplicates', () => {
+    const missionIdentity = (missionId: string) =>
+      identity({
+        kind: 'mission',
+        action: 'session.prompt',
+        reason: `Opened mission "${missionId}"`,
+      });
+
+    expect(notificationKey(missionIdentity('mission-a'))).not.toBe(
+      notificationKey(missionIdentity('mission-b')),
+    );
+
+    const { coalescer } = make({ maxPerWindow: 10 });
+    expect(coalescer.take(missionIdentity('mission-a')).send).toBe(true);
+    expect(coalescer.take(missionIdentity('mission-b')).send).toBe(true);
+    expect(coalescer.take(missionIdentity('mission-a')).suppressed).toBe('duplicate');
+  });
 });
