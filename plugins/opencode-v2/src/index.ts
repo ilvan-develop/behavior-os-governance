@@ -22,6 +22,10 @@ import {
 } from '@behavior-os/core';
 import type {
   DNA,
+  GovernanceDecision,
+  KnowledgeGraphEdge,
+  KnowledgeGraphNode,
+  KnowledgeQuery,
   LearningStage,
   MissionPriority,
   MissionStatus,
@@ -374,6 +378,20 @@ export type { ProtocolStep };
 // list the MCP `behavioros://protocol/steps` resource serves.
 export { PROTOCOL_STEPS };
 
+/**
+ * Human-readable protocol progress. `currentStep` is the 0-based index of the
+ * *next* step, so a completed protocol (currentStep === step count) must read
+ * "Protocol complete", never "step 8/7".
+ *
+ * Exported for the regression test that pins this boundary.
+ */
+export function describeProtocolProgress(currentStep: number): string {
+  const total = PROTOCOL_STEPS.length;
+  return currentStep >= total
+    ? `Protocol complete (${total}/${total})`
+    : `Protocol step ${currentStep + 1}/${total}`;
+}
+
 export default Plugin.define({
   id: 'behavior-os',
   async setup(ctx: Context): Promise<(() => Promise<void> | void) | void> {
@@ -680,7 +698,7 @@ export default Plugin.define({
             'protocol',
             'info',
             'bos_list_dna',
-            `Listed ${patterns.length} patterns (protocol step ${bos.getState().currentStep + 1})`,
+            `Listed ${patterns.length} patterns (${describeProtocolProgress(bos.getState().currentStep).toLowerCase()})`,
           );
           return {
             content: JSON.stringify({ patterns, total: patterns.length }, null, 2),
@@ -1707,7 +1725,7 @@ export default Plugin.define({
             'protocol',
             'info',
             'bos_get_state',
-            `Protocol step ${bos.getState().currentStep + 1}: ${bos.getState().selectedDna ?? 'no DNA'}`,
+            `${describeProtocolProgress(bos.getState().currentStep)}: ${bos.getState().selectedDna ?? 'no DNA'}`,
           );
           const state = bos.getState();
           return {
@@ -2832,15 +2850,27 @@ export default Plugin.define({
           type: 'object',
           properties: {
             text: { type: 'string', description: 'Natural language rule text' },
+            rule: { type: 'string', description: 'Alias accepted by the MCP host' },
+            ruleId: { type: 'string', description: 'Optional custom rule ID' },
           },
-          required: ['text'],
+          // `text` and `rule` are alternatives; `required` cannot express an
+          // anyOf here without rejecting one host's canonical field name.
+          required: [],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { rule: string; ruleId?: string };
+          // Accept both the advertised `text` field and the MCP server's
+          // canonical `rule` field so the two hosts cannot drift apart.
+          const params = (input ?? {}) as { text?: string; rule?: string; ruleId?: string };
+          const ruleText = params.text ?? params.rule;
           try {
+            if (!ruleText) {
+              return {
+                content: JSON.stringify({ success: false, error: 'rule text is required' }),
+              };
+            }
             const engine = bos.getNaturalLanguageEngine();
             const result = engine.parseRule(
-              params.rule,
+              ruleText,
               params.ruleId ? { ruleId: params.ruleId } : {},
             );
             return { content: JSON.stringify(result, null, 2) };
@@ -2862,14 +2892,23 @@ export default Plugin.define({
               items: { type: 'string' },
               description: 'Array of natural language rule texts',
             },
+            rules: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Alias accepted by the MCP host',
+            },
           },
-          required: ['texts'],
+          // `texts` and `rules` are alternatives; see bos_parse_rule above.
+          required: [],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { texts: string[] };
+          // Accept the advertised `texts` field and the MCP server's `rules`
+          // alias so callers can use one contract across both hosts.
+          const params = (input ?? {}) as { texts?: string[]; rules?: string[] };
+          const texts = params.texts ?? params.rules ?? [];
           try {
             const engine = bos.getNaturalLanguageEngine();
-            const result = engine.parseRulesBatch(params.texts);
+            const result = engine.parseRulesBatch(texts);
             return { content: JSON.stringify(result, null, 2) };
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -3194,7 +3233,7 @@ export default Plugin.define({
           try {
             bos.addKnowledgeNode({
               id: params.id,
-              type: params.type as any,
+              type: params.type as KnowledgeGraphNode['type'],
               label: params.label,
               properties: params.properties ?? {},
               createdAt: new Date().toISOString(),
@@ -3251,7 +3290,7 @@ export default Plugin.define({
               id: params.id,
               from: params.from,
               to: params.to,
-              type: params.type as any,
+              type: params.type as KnowledgeGraphEdge['type'],
               weight: params.weight ?? 1,
               properties: params.properties,
               createdAt: new Date().toISOString(),
@@ -3321,11 +3360,11 @@ export default Plugin.define({
           try {
             const result = bos.queryKnowledgeGraph({
               startNode: params.startNode,
-              nodeType: (params.nodeType ?? 'any') as any,
-              edgeType: (params.edgeType ?? 'any') as any,
+              nodeType: (params.nodeType ?? 'any') as KnowledgeQuery['nodeType'],
+              edgeType: (params.edgeType ?? 'any') as KnowledgeQuery['edgeType'],
               depth: params.depth ?? 3,
               properties: params.properties,
-              sortBy: (params.sortBy ?? 'createdAt') as any,
+              sortBy: (params.sortBy ?? 'createdAt') as KnowledgeQuery['sortBy'],
               sortOrder: 'desc',
             });
             return { content: JSON.stringify(result, null, 2) };
@@ -3367,7 +3406,7 @@ export default Plugin.define({
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
-            decision: any;
+            decision: GovernanceDecision;
             context?: Record<string, unknown>;
             agentId?: string;
             dnaPattern?: string;
@@ -3443,7 +3482,7 @@ export default Plugin.define({
             bos.saveMemory(
               {
                 id: params.id,
-                type: params.type as any,
+                type: params.type as KnowledgeGraphNode['type'],
                 label: params.label,
                 properties: params.properties ?? {},
                 createdAt: new Date().toISOString(),

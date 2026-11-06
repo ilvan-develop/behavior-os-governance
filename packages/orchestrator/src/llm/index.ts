@@ -19,6 +19,16 @@ export type {
 } from './context-builder.js';
 export { LlmContextBuilder } from './context-builder.js';
 export type {
+  FetchLike,
+  HttpRequestInitLike,
+  HttpResponseLike,
+  OpenAICompatibleProviderConfig,
+} from './openai-compatible-provider.js';
+export {
+  OpenAICompatibleProvider,
+  openAICompatibleProviderFromEnv,
+} from './openai-compatible-provider.js';
+export type {
   LlmError,
   LlmErrorCode,
   LlmOutcome,

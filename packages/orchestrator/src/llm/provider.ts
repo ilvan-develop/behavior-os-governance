@@ -10,8 +10,8 @@
  * Provider implementations must classify their own failures into
  * `LlmErrorCode` values instead of throwing unclassified errors, so the router
  * can make deterministic fallback decisions (ADR-002: deterministic local
- * providers ship first; vendor adapters are BLOCKED until real credentials
- * exist).
+ * providers ship first; the vendor adapter stays opt-in behind real
+ * credentials — see `openai-compatible-provider.ts`).
  */
 
 import type { LlmSchemaParser } from './schema.js';

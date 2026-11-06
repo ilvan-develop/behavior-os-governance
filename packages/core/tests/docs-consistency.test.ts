@@ -159,6 +159,18 @@ const PNPM_BUILTINS = new Set([
 const WITHDRAWN_ENV_VARS = ['BEHAVIOROS_LOG_LEVEL', 'BEHAVIOROS_PROJECT', 'BEHAVIOROS_STATE_DIR'];
 
 /**
+ * Environment variables consumed only by gated live integration tests. They are
+ * documented (so operators can reproduce the evidence) but are deliberately
+ * never read by production source. The assertion below proves each listed name
+ * is still used by a real test, so the allowlist cannot hide a stale claim.
+ */
+const TEST_ONLY_ENV_VARS = [
+  'BEHAVIOROS_LLM_LIVE',
+  'BEHAVIOROS_POSTGRES_LIVE',
+  'BEHAVIOROS_POSTGRES_URL',
+];
+
+/**
  * The typedoc output directory, read from `typedoc.json` so this exclusion keeps
  * working if the path changes. Generated API markdown must never be treated as a
  * hand-written document (it names only symbols from source and is not authored).
@@ -506,10 +518,27 @@ describe('documentation consistency', () => {
       );
       for (const name of vars) {
         expect(
-          source.includes(name) || WITHDRAWN_ENV_VARS.includes(name),
+          source.includes(name) ||
+            WITHDRAWN_ENV_VARS.includes(name) ||
+            TEST_ONLY_ENV_VARS.includes(name),
           `${rel(file)} references unused env var ${name}`,
         ).toBe(true);
       }
+    }
+  });
+
+  it('keeps the test-only env allowlist honest', () => {
+    const liveTests = [
+      join(repoRoot, 'packages', 'orchestrator', 'tests', 'llm-live.integration.test.ts'),
+      join(repoRoot, 'packages', 'core', 'tests', 'postgres-live.integration.test.ts'),
+    ]
+      .map((file) => readFileSync(file, 'utf-8'))
+      .join('\n');
+    for (const name of TEST_ONLY_ENV_VARS) {
+      expect(
+        liveTests.includes(name),
+        `${name} is allowlisted but unused by a live integration test`,
+      ).toBe(true);
     }
   });
 });

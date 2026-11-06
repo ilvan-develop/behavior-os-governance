@@ -61,6 +61,12 @@ export interface PostgresStoreConfig {
   table?: string;
   /** Pool factory override (tests / custom drivers). Defaults to loading `pg`. */
   createPool?: (config: PostgresStoreConfig) => Promise<PgPoolLike>;
+  /**
+   * Module loader override. Defaults to `createRequire(import.meta.url)('pg')`.
+   * Tests inject a loader that throws to simulate a project where the optional
+   * driver is not installed, without depending on the host's `node_modules`.
+   */
+  loadPg?: () => { Pool?: new (options: Record<string, unknown>) => PgPoolLike };
 }
 
 type Kind =
@@ -85,8 +91,12 @@ const TABLE_PATTERN = /^[a-z_][a-z0-9_]*$/i;
 async function defaultCreatePool(config: PostgresStoreConfig): Promise<PgPoolLike> {
   let pg: { Pool?: new (options: Record<string, unknown>) => PgPoolLike };
   try {
-    const require = createRequire(import.meta.url);
-    pg = require('pg') as typeof pg;
+    if (config.loadPg) {
+      pg = config.loadPg();
+    } else {
+      const require = createRequire(import.meta.url);
+      pg = require('pg') as typeof pg;
+    }
   } catch (error) {
     throw new Error(
       `PostgresStore requires the optional "pg" package (pnpm add pg), or pass createPool. Cause: ${

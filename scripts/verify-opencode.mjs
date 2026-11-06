@@ -178,15 +178,17 @@ check('broad shell rules precede exceptions', () => {
   return 'last-match-wins order verified';
 });
 
-check('release actions are denied', () => {
-  const denied = (resource) =>
-    config.permissions.some(
-      (rule) => rule.action === 'shell' && rule.resource === resource && rule.effect === 'deny',
-    );
+check('release actions are human-gated', () => {
+  // AGENTS.md rule 7: release actions are human gates. They must prompt the
+  // operator (ask) and must never be implicitly allowed.
+  const effectOf = (resource) =>
+    config.permissions.find((rule) => rule.action === 'shell' && rule.resource === resource)
+      ?.effect;
   for (const resource of ['git push *', 'pnpm publish *', 'npm publish *']) {
-    if (!denied(resource)) fail(`missing deny rule for "${resource}"`);
+    const effect = effectOf(resource);
+    if (effect !== 'ask') fail(`"${resource}" must be gated with effect "ask", got "${effect}"`);
   }
-  return 'push and publish denied';
+  return 'push and publish require approval';
 });
 
 check('secrets stay unreadable', () => {
@@ -482,23 +484,27 @@ check('control-plane files are not git-ignored', () => {
   // Batch all checks into a single `git check-ignore` call: one hidden spawn
   // instead of one per file. git exits 0 when at least one listed path is
   // ignored, and 1 when none are â€” so exit 1 is the expected green result.
-  const batch = spawnSync('git', ['check-ignore', '--quiet', ...files], {
+  const batch = spawnSync('git', ['check-ignore', ...files], {
     cwd: repoRoot,
     stdio: 'ignore',
     windowsHide: true,
   });
-  if (batch.status === 0) {
-    // At least one file is (wrongly) ignored â€” identify which with per-file calls.
-    for (const file of files) {
-      const ignored =
-        spawnSync('git', ['check-ignore', '--quiet', file], {
-          cwd: repoRoot,
-          stdio: 'ignore',
-          windowsHide: true,
-        }).status === 0;
-      if (ignored) fail(`${file} is git-ignored and would never reach another machine`);
+  if (batch.status !== 1) {
+    if (batch.status === 0) {
+      // At least one file is (wrongly) ignored â€” identify which with per-file calls.
+      for (const file of files) {
+        const ignored =
+          spawnSync('git', ['check-ignore', '--quiet', file], {
+            cwd: repoRoot,
+            stdio: 'ignore',
+            windowsHide: true,
+          }).status === 0;
+        if (ignored) fail(`${file} is git-ignored and would never reach another machine`);
+      }
+      fail('git check-ignore reported an ignored file but no per-file call matched');
     }
-    fail('git check-ignore reported an ignored file but no per-file call matched');
+    // status null means git could not run; that is not a green result.
+    fail(`git check-ignore failed (status ${String(batch.status)})`);
   }
   return `${files.length} files trackable`;
 });

@@ -12,6 +12,7 @@ coverage/
 !.opencode/agents/
 .opencode/agents/*
 !.opencode/agents/auditor.md
+!.opencode/agents/builder.md
 !.opencode/agents/planner.md
 !.opencode/agents/researcher.md
 !.opencode/agents/reviewer.md

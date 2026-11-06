@@ -224,14 +224,21 @@ describe('PostgresStore', () => {
   });
 
   it('explains how to install pg when the driver is absent', async () => {
-    const store = new PostgresStore({ connectionString: 'postgres://localhost/none' });
-    try {
-      await store.connect();
-      // `pg` happens to be installed here: nothing to assert about the error.
-      await store.closeAsync();
-    } catch (error) {
-      expect(String(error)).toContain('pg');
-    }
+    const store = new PostgresStore({
+      connectionString: 'postgres://localhost/none',
+      loadPg: () => {
+        throw new Error('Cannot find module pg');
+      },
+    });
+    await expect(store.connect()).rejects.toThrow(/optional "pg" package/);
+    await expect(
+      new PostgresStore({
+        connectionString: 'postgres://localhost/none',
+        loadPg: () => {
+          throw new Error('Cannot find module pg');
+        },
+      }).connect(),
+    ).rejects.toThrow(/pnpm add pg/);
   });
 
   it('wraps a callback in BEGIN / COMMIT and replays the mirror atomically', async () => {

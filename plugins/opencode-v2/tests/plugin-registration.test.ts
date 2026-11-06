@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import plugin from '../src/index';
+import plugin, { describeProtocolProgress } from '../src/index';
 
 interface CapturedTool {
   name: string;
@@ -778,6 +778,80 @@ describe('behavior-os plugin tool execution', () => {
     const verdict = JSON.parse(result.content) as { verdict: string };
 
     expect(verdict.verdict).toBe('deny');
+  });
+
+  it('bos_parse_rule parses the text field its schema advertises', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rule').execute({
+      text: 'Block production deploys when tests are failing',
+    });
+    const parsed = JSON.parse(result.content) as {
+      success?: boolean;
+      error?: string;
+      rule?: { action?: string };
+    };
+
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.success).toBe(true);
+    expect(parsed.rule?.action).toBe('block');
+  });
+
+  it('bos_parse_rule accepts the MCP canonical rule alias', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rule').execute({
+      rule: 'Warn before large transfers if amount exceeds threshold',
+    });
+    const parsed = JSON.parse(result.content) as {
+      success?: boolean;
+      error?: string;
+      rule?: { action?: string };
+    };
+
+    expect(parsed.error).toBeUndefined();
+    expect(parsed.success).toBe(true);
+    expect(parsed.rule?.action).toBe('warn');
+  });
+
+  it('bos_parse_rule returns a structured error instead of throwing when no text is supplied', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rule').execute(undefined);
+    const parsed = JSON.parse(result.content) as { success?: boolean; error?: string };
+
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe('rule text is required');
+  });
+
+  it('bos_parse_rules_batch parses the texts field its schema advertises', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rules_batch').execute({
+      texts: ['Block deletes', 'Warn on low coverage'],
+    });
+    const parsed = JSON.parse(result.content) as Array<{ rule?: { action?: string } }>;
+
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.rule?.action).toBe('block');
+    expect(parsed[1]?.rule?.action).toBe('warn');
+  });
+
+  it('bos_parse_rules_batch accepts the MCP canonical rules alias', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rules_batch').execute({
+      rules: ['Block deletes', 'Warn on low coverage'],
+    });
+    const parsed = JSON.parse(result.content) as Array<{ rule?: { action?: string } }>;
+
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(2);
+  });
+
+  it('bos_parse_rules_batch returns an empty list instead of throwing on missing input', async () => {
+    const byName = await setupTools();
+    const result = await byName('bos_parse_rules_batch').execute(undefined);
+    const parsed = JSON.parse(result.content) as unknown[];
+
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(0);
   });
 });
 
@@ -1773,5 +1847,14 @@ describe('behavior-os governance log', () => {
     // without a store, plugin sessions never persist records/roles/decisions.
     expect(src).toContain('process.env.BEHAVIOROS_DB_PATH');
     expect(src).toContain('persistence:');
+  });
+});
+
+describe('describeProtocolProgress', () => {
+  it('never reports a step beyond the protocol length at completion', () => {
+    expect(describeProtocolProgress(0)).toBe('Protocol step 1/7');
+    expect(describeProtocolProgress(6)).toBe('Protocol step 7/7');
+    expect(describeProtocolProgress(7)).toBe('Protocol complete (7/7)');
+    expect(describeProtocolProgress(9)).toBe('Protocol complete (7/7)');
   });
 });

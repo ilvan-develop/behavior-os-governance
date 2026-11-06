@@ -158,7 +158,7 @@ describe('OpenCode V2 project configuration', () => {
     }
   });
 
-  it('allows the verification ladder and denies release actions', () => {
+  it('allows the verification ladder and human-gates release actions', () => {
     const find = (action: string, resource: string) =>
       permissions.find((rule) => rule.action === action && rule.resource === resource);
 
@@ -172,8 +172,10 @@ describe('OpenCode V2 project configuration', () => {
       expect(find('shell', gate)?.effect, `${gate} must be allowed`).toBe('allow');
     }
 
-    for (const blocked of ['git push *', 'pnpm publish *', 'npm publish *']) {
-      expect(find('shell', blocked)?.effect, `${blocked} must be denied`).toBe('deny');
+    // Release actions are human gates (AGENTS.md rule 7). The operator must
+    // approve each push/publish, so the effect is "ask" — never "allow".
+    for (const gated of ['git push *', 'pnpm publish *', 'npm publish *']) {
+      expect(find('shell', gated)?.effect, `${gated} must require approval`).toBe('ask');
     }
   });
 
@@ -426,14 +428,17 @@ describe('control-plane verification gates', () => {
     // spawn overhead on Windows, which causes this test to exceed the 5s timeout.
     // git exits 0 when at least one listed path is ignored; here all paths must
     // be trackable, so any exit 0 fails the check.
-    const result = spawnSync('git', ['check-ignore', '--quiet', ...files], {
+    // `--quiet` is only valid with a single pathname, so the batch call must
+    // not use it. Without it git exits 0 when at least one path is ignored,
+    // 1 when none are, and >1 on error.
+    const result = spawnSync('git', ['check-ignore', ...files], {
       cwd: repoRoot,
       stdio: 'ignore',
       windowsHide: true,
     });
-    // A non-zero exit means none of the listed files is ignored, which is the
-    // passing condition. An exit of 0 would mean at least one control-plane
-    // file is git-ignored and would never reach another machine.
-    expect(result.status).not.toBe(0);
+    // Exit 1 means none of the listed files is ignored, which is the passing
+    // condition. Exit 0 means at least one control-plane file is git-ignored;
+    // any other status means git could not evaluate the paths. Neither is green.
+    expect(result.status).toBe(1);
   });
 });
