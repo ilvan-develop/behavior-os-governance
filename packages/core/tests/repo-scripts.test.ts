@@ -31,6 +31,12 @@ interface TurboConfig {
   tasks?: Record<string, unknown>;
 }
 
+interface BiomeConfig {
+  files?: {
+    includes?: string[];
+  };
+}
+
 function readJson<T>(file: string): T {
   return JSON.parse(readFileSync(file, 'utf-8')) as T;
 }
@@ -226,6 +232,23 @@ describe('dependency security gate', () => {
       rootManifest.pnpm?.auditConfig?.ignoreGhsas ?? [],
       'audit ignores must be empty: fix, upgrade or document the risk explicitly instead',
     ).toEqual([]);
+  });
+});
+
+describe('generated evidence stays out of the lint gate', () => {
+  it('excludes artifacts and pipeline evidence from Biome (n)', () => {
+    const biome = readJson<BiomeConfig>(join(repoRoot, 'biome.json'));
+    const includes = biome.files?.includes ?? [];
+
+    // The 1,000-scenario harness rewrites artifacts/*.json with plain
+    // JSON.stringify. If Biome lints them, `pnpm lint:check` passes or fails
+    // depending on whether the harness ran before or after it — a gate whose
+    // result depends on run order is not a gate.
+    expect(
+      includes,
+      'generated evidence under artifacts/ must be excluded from Biome: the scenario harness writes it unformatted',
+    ).toContain('!**/artifacts');
+    expect(includes, 'pipeline-loop evidence is generated, not source').toContain('!**/.pipeline');
   });
 });
 
