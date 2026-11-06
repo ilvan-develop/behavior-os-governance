@@ -24,6 +24,14 @@ import { fileURLToPath } from 'node:url';
 import { BehaviorOS } from '../packages/core/dist/index.js';
 import plugin from '../plugins/opencode-v2/dist/index.js';
 
+// The harness boots the real plugin in-process. Unless pinned, the plugin uses
+// the operator's live SQLite store (~/.config/opencode/behavioros.db) and honours
+// any durable audit sink exported by the shell. That turned a read-only gate
+// into a writer of test missions into operator state. Pin both to isolation so
+// conformance can never mutate the operator's database or audit trail.
+process.env.BEHAVIOROS_DB_PATH = ':memory:';
+process.env.BEHAVIOR_OS_AUDIT_LOG = '';
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPORT_PATH = path.join(repoRoot, 'docs', 'analysis', 'governance-conformance.json');
 

@@ -252,6 +252,27 @@ describe('generated evidence stays out of the lint gate', () => {
   });
 });
 
+describe('governance conformance harness isolation', () => {
+  it('pins plugin persistence and audit sink before booting the plugin (o)', () => {
+    const source = readFileSync(join(repoRoot, 'scripts', 'governance-conformance.mjs'), 'utf-8');
+
+    // The conformance harness boots the real plugin. If it does not pin these
+    // two variables, the plugin writes test missions into the operator's live
+    // SQLite store and appends conformance noise to the operator's audit sink.
+    expect(source).toContain("process.env.BEHAVIOROS_DB_PATH = ':memory:'");
+    expect(source).toContain("process.env.BEHAVIOR_OS_AUDIT_LOG = ''");
+
+    const isolationAt = source.indexOf('process.env.BEHAVIOROS_DB_PATH');
+    const mainAt = source.indexOf('async function main()');
+    expect(isolationAt, 'the persistence pin must exist').toBeGreaterThan(-1);
+    expect(mainAt, 'the harness entrypoint must exist').toBeGreaterThan(-1);
+    expect(
+      isolationAt,
+      'the persistence pin must run before the plugin is booted in main()',
+    ).toBeLessThan(mainAt);
+  });
+});
+
 describe('registry publish gate', () => {
   it('defines one publish gate and runs it in the ladder (k)', () => {
     expect(
