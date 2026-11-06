@@ -49,6 +49,9 @@ coverage/
 # produced by an audit session, not by the product. Biome reads .gitignore, so
 # ignoring them keeps another session's evidence out of the lint gate.
 .pipeline/
+# Session evidence (gate logs, scenario results, delivery report) is local proof,
+# not product source; keep it out of commits while preserving it on disk.
+artifacts/
 # Local SQLite persistence files must never be committed.
 *.db
 *.db-wal
