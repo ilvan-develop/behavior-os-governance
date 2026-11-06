@@ -26,6 +26,11 @@ const repoRoot = path.resolve(here, '..');
 const pluginDir = path.join(repoRoot, 'plugins', 'opencode-v2');
 const outDir = path.join(repoRoot, 'docs', 'analysis');
 
+// The analyser boots the real plugin hooks and can trigger prompt-driven
+// auto-missions. Keep the run hermetic so it never mutates operator state.
+process.env.BEHAVIOROS_DB_PATH = ':memory:';
+process.env.BEHAVIOR_OS_AUDIT_LOG = '';
+
 const requireFromPlugin = createRequire(path.join(pluginDir, 'package.json'));
 const yaml = requireFromPlugin('js-yaml');
 

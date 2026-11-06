@@ -14,6 +14,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import plugin from '../plugins/opencode-v2/dist/index.js';
 
+// This verifier boots the real plugin and exercises the prompt hook, which
+// opens auto-missions. Pin an ephemeral store so verification never writes
+// test missions into the operator's live database or durable audit sink.
+process.env.BEHAVIOROS_DB_PATH = ':memory:';
+process.env.BEHAVIOR_OS_AUDIT_LOG = '';
+
 let exitCode = 0;
 
 function fail(message) {

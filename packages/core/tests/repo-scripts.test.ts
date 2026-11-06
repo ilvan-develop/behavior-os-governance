@@ -252,24 +252,32 @@ describe('generated evidence stays out of the lint gate', () => {
   });
 });
 
-describe('governance conformance harness isolation', () => {
+describe('plugin-booting script isolation', () => {
   it('pins plugin persistence and audit sink before booting the plugin (o)', () => {
-    const source = readFileSync(join(repoRoot, 'scripts', 'governance-conformance.mjs'), 'utf-8');
+    const scriptsDir = join(repoRoot, 'scripts');
+    const booters = readdirSync(scriptsDir)
+      .filter((file) => file.endsWith('.mjs'))
+      .filter((file) => {
+        const source = readFileSync(join(scriptsDir, file), 'utf-8');
+        return /\b(?:plugin|pluginModule)\.setup\(/.test(source);
+      });
 
-    // The conformance harness boots the real plugin. If it does not pin these
-    // two variables, the plugin writes test missions into the operator's live
-    // SQLite store and appends conformance noise to the operator's audit sink.
-    expect(source).toContain("process.env.BEHAVIOROS_DB_PATH = ':memory:'");
-    expect(source).toContain("process.env.BEHAVIOR_OS_AUDIT_LOG = ''");
+    expect(booters, 'expected at least one plugin-booting script').not.toHaveLength(0);
+    for (const file of booters) {
+      const source = readFileSync(join(scriptsDir, file), 'utf-8');
+      const pinAt = source.indexOf('process.env.BEHAVIOROS_DB_PATH');
+      const setupAt = source.search(/\b(?:plugin|pluginModule)\.setup\(/);
 
-    const isolationAt = source.indexOf('process.env.BEHAVIOROS_DB_PATH');
-    const mainAt = source.indexOf('async function main()');
-    expect(isolationAt, 'the persistence pin must exist').toBeGreaterThan(-1);
-    expect(mainAt, 'the harness entrypoint must exist').toBeGreaterThan(-1);
-    expect(
-      isolationAt,
-      'the persistence pin must run before the plugin is booted in main()',
-    ).toBeLessThan(mainAt);
+      expect(source, `${file} must pin BEHAVIOROS_DB_PATH`).toContain(
+        "process.env.BEHAVIOROS_DB_PATH = ':memory:'",
+      );
+      expect(source, `${file} must disable the durable audit sink`).toContain(
+        "process.env.BEHAVIOR_OS_AUDIT_LOG = ''",
+      );
+      expect(pinAt, `${file} must pin persistence before booting the plugin`).toBeGreaterThan(-1);
+      expect(setupAt, `${file} must boot the plugin`).toBeGreaterThan(-1);
+      expect(pinAt, `${file} must pin persistence before booting the plugin`).toBeLessThan(setupAt);
+    }
   });
 });
 
