@@ -403,11 +403,16 @@ they reach the host:
   decisions never share a key.
 - **Window**: 60 s per session, starting at the first admitted notice.
 - **Cap**: at most 3 notices per session per window.
-- **Reset**: only the `session.prompt` hook resets a window. OpenCode does not
-  run that hook for synthetic messages, so a notice cannot re-enable itself.
+- **Dedupe TTL**: a decision identity is remembered for 10 minutes,
+  independent of the 60 s cap window. A real prompt resets the cap counters but
+  does **not** forget recent identities, so a host that re-evaluates the same
+  pending permission request cannot re-notify it on every turn. The identity is
+  admitted again only after its own TTL expires.
+- **Reset**: only the `session.prompt` hook resets the cap window. OpenCode does
+  not run that hook for synthetic messages, so a notice cannot re-enable itself.
   The hook runs before admission, so a prompt that fails preparation reopens
   the window early; that errs toward more notices, never fewer.
-- **Persistence**: the window and keys are snapshotted into `ctx.storage`
+- **Persistence**: the window and dedupe keys are snapshotted into `ctx.storage`
   (`behavioros:notifications:v1`). `take()` is synchronous, so the duplicate
   check and the record cannot interleave; snapshot writes are serialized.
 - **Observability**: each suppression appends one `advisory` governance-log

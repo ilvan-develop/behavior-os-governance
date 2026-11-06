@@ -65,8 +65,8 @@ describe('NotificationCoalescer', () => {
     expect(other.take(identity({ reason: 'Blocked by rule.' })).send).toBe(true);
   });
 
-  it('expires the window exactly at the boundary', () => {
-    const { coalescer, clock } = make({ windowMs: 1_000 });
+  it('expires the cap window exactly at the boundary', () => {
+    const { coalescer, clock } = make({ windowMs: 1_000, dedupeTtlMs: 1_000 });
     expect(coalescer.take(identity()).send).toBe(true);
 
     clock.now += 999;
@@ -92,8 +92,8 @@ describe('NotificationCoalescer', () => {
     expect(coalescer.take(identity({ reason: 'rule three' })).send).toBe(true);
   });
 
-  it('resets only when asked and reports the closed window', () => {
-    const { coalescer } = make();
+  it('resets the cap window but keeps recent dedupe identities', () => {
+    const { coalescer, clock } = make({ windowMs: 1_000, dedupeTtlMs: 5_000 });
     expect(coalescer.take(identity()).send).toBe(true);
     expect(coalescer.take(identity()).suppressed).toBe('duplicate');
 
@@ -102,15 +102,44 @@ describe('NotificationCoalescer', () => {
       suppressedDuplicate: 1,
       suppressedCap: 0,
     });
-    expect(coalescer.reset('ses-test')).toBeUndefined();
+    // A second reset with only retained dedupe keys still reports the (now
+    // empty) cap window instead of forgetting the identity.
+    expect(coalescer.reset('ses-test')).toEqual({
+      sent: 0,
+      suppressedDuplicate: 0,
+      suppressedCap: 0,
+    });
+    expect(coalescer.take(identity()).suppressed).toBe('duplicate');
+
+    // A distinct decision is not blocked by the retained identity.
+    expect(coalescer.take(identity({ reason: 'another rule' })).send).toBe(true);
+
+    // The identity is forgotten only after its own TTL.
+    clock.now += 5_000;
     expect(coalescer.take(identity()).send).toBe(true);
   });
 
-  it('restores a snapshot and keeps suppressing inside the window', () => {
-    const first = make();
+  it('keeps suppressing a re-evaluated request across prompt resets', () => {
+    const { coalescer, clock } = make({ windowMs: 1_000, dedupeTtlMs: 5_000 });
+    expect(coalescer.take(identity()).send).toBe(true);
+
+    for (let turn = 0; turn < 4; turn += 1) {
+      clock.now += 1_000;
+      coalescer.reset('ses-test');
+      const decision = coalescer.take(identity());
+      expect(decision.send).toBe(false);
+      expect(decision.suppressed).toBe('duplicate');
+    }
+
+    clock.now += 1_000;
+    expect(coalescer.take(identity()).send).toBe(true);
+  });
+
+  it('restores a snapshot and keeps suppressing inside the dedupe TTL', () => {
+    const first = make({ dedupeTtlMs: 60_000 });
     first.coalescer.take(identity());
 
-    const second = make();
+    const second = make({ dedupeTtlMs: 60_000 });
     expect(second.coalescer.restore(first.coalescer.snapshot())).toBe(true);
     expect(second.coalescer.take(identity()).suppressed).toBe('duplicate');
 
@@ -190,6 +219,12 @@ describe('NotificationCoalescer', () => {
     expect(() => new NotificationCoalescer({ windowMs: Number.NaN, maxPerWindow: 1 })).toThrow();
     expect(() => new NotificationCoalescer({ windowMs: 1, maxPerWindow: 0 })).toThrow();
     expect(() => new NotificationCoalescer({ windowMs: 1, maxPerWindow: 1.5 })).toThrow();
+    expect(
+      () => new NotificationCoalescer({ windowMs: 1, maxPerWindow: 1, dedupeTtlMs: 0 }),
+    ).toThrow();
+    expect(
+      () => new NotificationCoalescer({ windowMs: 1, maxPerWindow: 1, dedupeTtlMs: Number.NaN }),
+    ).toThrow();
   });
 
   it('derives a stable key and never merges different sessions', () => {

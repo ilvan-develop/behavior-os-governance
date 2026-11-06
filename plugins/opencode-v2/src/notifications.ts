@@ -7,6 +7,11 @@
  * source: redundant notices for the same decision are collapsed, and a session
  * may enqueue at most a fixed number of notices per window.
  *
+ * Duplicate suppression outlives a prompt window. A real user prompt resets the
+ * cap window, but the decision identity is remembered for `dedupeTtlMs` so a
+ * host that re-evaluates the same pending permission request cannot re-notify
+ * it on every turn.
+ *
  * Deliberately out of scope: the host inbox consumer. This module does not
  * acknowledge, expire, delete or replay inbox records, and it must never be
  * used to claim that a notice was delivered. Late delivery, delivery cursors
@@ -14,6 +19,14 @@
  */
 
 export const NOTIFICATION_STATE_VERSION = 2;
+
+/**
+ * How long the coalescer remembers a decision identity for duplicate
+ * suppression. Independent of the per-window cap: a real user prompt resets
+ * the cap window but must not let the host re-notify the same pending decision
+ * on every turn.
+ */
+export const DEFAULT_DEDUPE_TTL_MS = 10 * 60_000;
 
 /** Governance decision families that produce a user-visible notice. */
 export type NotificationKind = 'deny' | 'escalate' | 'dna' | 'mission';
@@ -47,6 +60,15 @@ export interface CoalescerOptions {
   windowMs: number;
   /** Maximum notices enqueued per session per window; positive integer. */
   maxPerWindow: number;
+  /**
+   * How long a decision identity is remembered for duplicate suppression,
+   * independent of the per-window cap. Must be positive and finite.
+   *
+   * This survives `reset()` on a real user prompt: a host that re-evaluates the
+   * same pending permission request cannot re-notify it on every turn. The cap
+   * still resets per window, so genuinely new decisions are not blocked.
+   */
+  dedupeTtlMs?: number;
   /** Injectable clock, used by tests. */
   now?: () => number;
 }
@@ -119,6 +141,7 @@ function isValidSession(value: unknown): value is SessionState {
 export class NotificationCoalescer {
   private readonly windowMs: number;
   private readonly maxPerWindow: number;
+  private readonly dedupeTtlMs: number;
   private readonly now: () => number;
   private sessions = new Map<string, SessionState>();
   /** Monotonic total of notices sent; used for cross-restart loss detection. */
@@ -131,8 +154,13 @@ export class NotificationCoalescer {
     if (!Number.isInteger(options.maxPerWindow) || options.maxPerWindow <= 0) {
       throw new Error('maxPerWindow must be a positive integer');
     }
+    const dedupeTtlMs = options.dedupeTtlMs ?? DEFAULT_DEDUPE_TTL_MS;
+    if (!Number.isFinite(dedupeTtlMs) || dedupeTtlMs <= 0) {
+      throw new Error('dedupeTtlMs must be a positive finite number');
+    }
     this.windowMs = options.windowMs;
     this.maxPerWindow = options.maxPerWindow;
+    this.dedupeTtlMs = dedupeTtlMs;
     this.now = options.now ?? (() => Date.now());
   }
 
@@ -148,9 +176,13 @@ export class NotificationCoalescer {
     const key = notificationKey(identity);
     const session = this.session(identity.sessionID, at);
 
-    if (session.keys[key] !== undefined) {
-      session.suppressedDuplicate += 1;
-      return { send: false, key, at, suppressed: 'duplicate' };
+    const seenAt = session.keys[key];
+    if (seenAt !== undefined) {
+      if (at - seenAt < this.dedupeTtlMs) {
+        session.suppressedDuplicate += 1;
+        return { send: false, key, at, suppressed: 'duplicate' };
+      }
+      delete session.keys[key];
     }
     if (session.sent >= this.maxPerWindow) {
       session.suppressedCap += 1;
@@ -175,21 +207,34 @@ export class NotificationCoalescer {
   }
 
   /**
-   * Forget one session's window and return its counters.
+   * Close one session's cap window and return its counters.
    *
    * Call this only for a real user prompt (`session.prompt`). Synthetic
    * messages do not run that hook, so a synthetic notice can never reset the
-   * window and re-enable itself.
+   * window and re-enable itself. Duplicate identities are retained until
+   * `dedupeTtlMs` so a host that re-evaluates the same pending request cannot
+   * re-notify it on every turn; only the per-window cap counters reset.
    */
   reset(sessionID: string): NotificationStats | undefined {
     const session = this.sessions.get(sessionID);
     if (!session) return undefined;
-    this.sessions.delete(sessionID);
-    return {
+    const at = this.now();
+    for (const [key, seenAt] of Object.entries(session.keys)) {
+      if (at - seenAt >= this.dedupeTtlMs) delete session.keys[key];
+    }
+    const stats = {
       sent: session.sent,
       suppressedDuplicate: session.suppressedDuplicate,
       suppressedCap: session.suppressedCap,
     };
+    session.windowStartedAt = at;
+    session.sent = 0;
+    session.suppressedDuplicate = 0;
+    session.suppressedCap = 0;
+    if (Object.keys(session.keys).length === 0) {
+      this.sessions.delete(sessionID);
+    }
+    return stats;
   }
 
   /** Deep copy suitable for durable storage. */
@@ -227,7 +272,7 @@ export class NotificationCoalescer {
 
   private session(sessionID: string, at: number): SessionState {
     let session = this.sessions.get(sessionID);
-    if (!session || at - session.windowStartedAt >= this.windowMs) {
+    if (!session) {
       session = {
         windowStartedAt: at,
         sent: 0,
@@ -236,6 +281,19 @@ export class NotificationCoalescer {
         suppressedCap: 0,
       };
       this.sessions.set(sessionID, session);
+      return session;
+    }
+
+    // Dedupe keys outlive the cap window; prune only after their own TTL.
+    for (const [key, seenAt] of Object.entries(session.keys)) {
+      if (at - seenAt >= this.dedupeTtlMs) delete session.keys[key];
+    }
+
+    if (at - session.windowStartedAt >= this.windowMs) {
+      session.windowStartedAt = at;
+      session.sent = 0;
+      session.suppressedDuplicate = 0;
+      session.suppressedCap = 0;
     }
     return session;
   }

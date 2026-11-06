@@ -1309,7 +1309,7 @@ describe('behavior-os governance log', () => {
     expect(syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(4);
   });
 
-  it('restores the coalescer window across a simulated restart', async () => {
+  it('restores the coalescer dedupe keys across a simulated restart', async () => {
     const storageData = new Map<string, unknown>();
     const first = createFakeContext(repoRoot, storageData);
     await plugin.setup(first.ctx as never);
@@ -1342,12 +1342,23 @@ describe('behavior-os governance log', () => {
 
     expect(second.syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(0);
 
-    // The restored window is the one wired to the hook: a real prompt clears
-    // it, so the same decision is admitted again.
+    // A real prompt resets the cap window but retains recent decision
+    // identities, so a host that re-evaluates the same pending request is not
+    // re-notified on every turn.
     const prompt = second.sessionHooks.prompt as (event: unknown) => Promise<void>;
     await prompt({ sessionID: 'ses-restart', prompt: { text: 'hello' } });
     await secondPermission({
       action: 'bash',
+      resources: ['deploy to production'],
+      sessionID: 'ses-restart',
+      agent: 'test',
+      effect: 'allow',
+    });
+    expect(second.syntheticCalls.filter((call) => call.text.includes('⛔'))).toHaveLength(0);
+
+    // A distinct decision is still admitted after the prompt reset.
+    await secondPermission({
+      action: 'edit',
       resources: ['deploy to production'],
       sessionID: 'ses-restart',
       agent: 'test',

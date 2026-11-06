@@ -46,7 +46,11 @@ import {
   isMutating,
 } from './governance.js';
 import { LoopManager, type LoopTaskInput } from './loop-manager.js';
-import { NotificationCoalescer, type NotificationIdentity } from './notifications.js';
+import {
+  DEFAULT_DEDUPE_TTL_MS,
+  NotificationCoalescer,
+  type NotificationIdentity,
+} from './notifications.js';
 import {
   detectOvertake,
   mergeSnapshots,
@@ -587,6 +591,7 @@ export default Plugin.define({
     const notifications = new NotificationCoalescer({
       windowMs: NOTIFICATION_WINDOW_MS,
       maxPerWindow: NOTIFICATION_MAX_PER_WINDOW,
+      dedupeTtlMs: DEFAULT_DEDUPE_TTL_MS,
     });
     const notificationStorage = ctx.storage;
     const storedNotifications =
@@ -4392,9 +4397,9 @@ export default Plugin.define({
       const text = event.prompt?.text?.trim() ?? '';
       if (!text) return;
 
-      // A real user prompt starts a new notification window. OpenCode does not
-      // run this hook for synthetic messages, so a notice can never reset the
-      // window that suppressed it.
+      // A real user prompt starts a new cap window. Recent decision identities
+      // are retained, so a host that re-evaluates the same pending permission
+      // request is suppressed across turns instead of notifying on every prompt.
       const previousWindow = notifications.reset(event.sessionID);
       if (previousWindow) {
         recordLog(
