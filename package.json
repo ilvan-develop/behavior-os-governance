@@ -24,7 +24,7 @@
     "release": "changeset publish",
     "prepare": "husky",
     "mcp:start": "pnpm --filter @behavior-os/mcp-server start",
-    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs && node scripts/smoke-dna-library.mjs",
     "verify:plugin": "node scripts/verify-plugin.mjs",
     "verify:governance": "node scripts/governance-conformance.mjs",
     "verify:publish": "node scripts/verify-publish.mjs",
