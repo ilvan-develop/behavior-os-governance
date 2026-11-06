@@ -4325,10 +4325,39 @@ export default Plugin.define({
 
       // ── DNA evaluation (advisory in normal mode, hard in autonomous if escalated) ─
       try {
-        const context = buildGovernanceContext({
-          tool: toolName,
-          metadata: asRecord(eventTyped.input),
-        });
+        // The host's tool `input` is the *arguments of the call*, not a
+        // summary of the target's contents. For an `edit` it is `{path,
+        // oldString, newString, replaceAll}` and the caller's diff can
+        // legitimately quote regulated data in one line while the file itself
+        // is mostly benign. Scanning every value of `input` (as `metadata`)
+        // is what makes the C9 claims-table edit — a diff that adds nothing
+        // regulated — trip the data-protection rule. We therefore pass
+        // only the *changed* strings (`oldString` + `newString`) and the
+        // action's own labels; `input` as a whole remains available via
+        // `metadata` for non-mutating tools, where the host's own content
+        // is the source of the signals.
+        const inputRecord = asRecord(eventTyped.input);
+        const isMutTool = isMutating(toolName);
+        const context = isMutTool
+          ? buildGovernanceContext({
+              tool: toolName,
+              action: toolName,
+              // For mutating tools the *new/changed* content is the diff the
+              // caller is about to apply. That is the only content-domain
+              // signal that should fire — the target's pre-edit document is
+              // not the risk.
+              text: inputRecord
+                ? [inputRecord.newString, inputRecord.oldString].filter(Boolean).join(' ')
+                : undefined,
+              metadata: {
+                path: inputRecord?.path,
+              },
+            })
+          : buildGovernanceContext({
+              tool: toolName,
+              action: toolName,
+              metadata: inputRecord,
+            });
         const decision = bos.evaluateGovernance(toolName, {
           agent: bos.resolveAgentIdentity().agentId,
           context,
