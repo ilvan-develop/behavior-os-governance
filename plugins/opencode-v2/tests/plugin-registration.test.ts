@@ -186,6 +186,7 @@ const EXPECTED_TOOLS = [
   'bos_add_knowledge_edge',
   'bos_add_knowledge_node',
   'bos_add_temporal_rule',
+  'bos_adjust_policy_for_risk',
   'bos_analyze_workload',
   'bos_antipattern_report',
   'bos_apply_code_fixes',
@@ -203,6 +204,7 @@ const EXPECTED_TOOLS = [
   'bos_check_temporal',
   'bos_code_edit',
   'bos_code_fixes',
+  'bos_collective_decision',
   'bos_complete_mission',
   'bos_complete_task',
   'bos_consolidate_memory',
@@ -213,12 +215,16 @@ const EXPECTED_TOOLS = [
   'bos_create_mission',
   'bos_decide',
   'bos_define_policy',
+  'bos_detect_anomalies',
   'bos_drift',
   'bos_evaluate_dna_temporal',
   'bos_evaluate_fairness',
   'bos_evaluate_governance',
+  'bos_evaluate_hybrid',
   'bos_evaluate_role_action',
   'bos_evolution',
+  'bos_explainable_report',
+  'bos_export_audit_to_siem',
   'bos_fail_mission',
   'bos_fix_antipatterns',
   'bos_get_insights',
@@ -228,6 +234,7 @@ const EXPECTED_TOOLS = [
   'bos_get_metrics',
   'bos_get_state',
   'bos_get_status',
+  'bos_governance_as_code',
   'bos_list_audit_reports',
   'bos_list_brainstorms',
   'bos_list_code_edits',
@@ -239,6 +246,7 @@ const EXPECTED_TOOLS = [
   'bos_list_pipeline_runs',
   'bos_list_roles',
   'bos_loop_status',
+  'bos_map_compliance',
   'bos_override_rule',
   'bos_parse_rule',
   'bos_parse_rules_batch',
@@ -250,6 +258,7 @@ const EXPECTED_TOOLS = [
   'bos_recall_memory',
   'bos_recall_relevant',
   'bos_recommend_assignment',
+  'bos_recommend_circuit_breaker',
   'bos_recommendations',
   'bos_reconstruct_context',
   'bos_record_learning',
@@ -264,12 +273,14 @@ const EXPECTED_TOOLS = [
   'bos_save_memory',
   'bos_scan_antipatterns',
   'bos_select_dna',
+  'bos_select_gates_by_confidence',
   'bos_set_agent',
   'bos_start_conversation',
   'bos_start_loop',
   'bos_start_mission',
   'bos_suggest_cross_dna_transfer',
   'bos_teach_behavior',
+  'bos_transfer_across_domains',
   'bos_verify_audit_trail',
   'bos_vote_idea',
   'bos_whoami',
@@ -285,7 +296,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 91 bos_* tools', async () => {
+  it('registers exactly the 102 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -297,7 +308,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(91);
+    expect(addedTools).toHaveLength(102);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -308,7 +319,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(91);
+    expect(addedTools).toHaveLength(102);
     for (const tool of addedTools) {
       const meta = tool as unknown as {
         name: string;
@@ -351,7 +362,7 @@ describe('behavior-os plugin registration', () => {
       const { ctx, addedTools } = createFakeContext(repoRoot);
       await plugin.setup(ctx as never);
 
-      expect(addedTools).toHaveLength(91);
+      expect(addedTools).toHaveLength(102);
       const select = addedTools.find((t) => t.name === 'bos_select_dna');
       const enumValues = (
         select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined
@@ -381,6 +392,42 @@ describe('behavior-os plugin registration', () => {
     expect(typeof sessionHooks.context).toBe('function');
     expect(typeof sessionHooks.prompt).toBe('function');
     expect(typeof permissionHooks.evaluate).toBe('function');
+  });
+
+  it('exposes the 11 isolated engines as dedicated read-only tools', async () => {
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const byName = Object.fromEntries(addedTools.map((t) => [t.name, t]));
+    const exposed = [
+      'bos_detect_anomalies',
+      'bos_recommend_circuit_breaker',
+      'bos_collective_decision',
+      'bos_map_compliance',
+      'bos_select_gates_by_confidence',
+      'bos_transfer_across_domains',
+      'bos_adjust_policy_for_risk',
+      'bos_explainable_report',
+      'bos_export_audit_to_siem',
+      'bos_governance_as_code',
+      'bos_evaluate_hybrid',
+    ];
+    for (const name of exposed) {
+      expect(byName[name], `${name} not registered`).toBeDefined();
+      expect(typeof byName[name].execute).toBe('function');
+    }
+
+    // A thin wrapper is exercised end-to-end: it must run the engine and
+    // return JSON without throwing on empty inputs.
+    const circuit = byName.bos_recommend_circuit_breaker;
+    if (!circuit?.execute) throw new Error('circuit breaker tool missing');
+    const result = await circuit.execute({});
+    expect(JSON.parse((result as { content: string }).content).ok).toBe(true);
+
+    const reportTool = byName.bos_explainable_report;
+    if (!reportTool?.execute) throw new Error('explainable report tool missing');
+    const report = await reportTool.execute({ agentId: 'a', decisions: [] });
+    expect(JSON.parse((report as { content: string }).content).ok).toBe(true);
   });
 
   it('injects cold-start guidance into the session context even without a DNA', async () => {

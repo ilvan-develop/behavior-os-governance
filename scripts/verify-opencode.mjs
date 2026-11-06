@@ -389,12 +389,17 @@ check('plugin loader points at the versioned build', () => {
   return 'auto-discovered loader';
 });
 
-check('plugin exposes 91 unique bos_* tools', () => {
+check('plugin exposes 102 unique bos_* tools', () => {
   const source = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
   const inline = [...source.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
   const viaHelper = [...source.matchAll(/addJson\(\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
-  const names = [...inline, ...viaHelper].filter((name) => name.startsWith('bos_'));
-  if (names.length !== 91) fail(`expected 91 bos_* tools, found ${names.length}`);
+  // The 11 isolated-engine tools are registered through a loop over
+  // EXPOSED_ENGINES (plugins/opencode-v2/src/exposed-engines.ts), so count
+  // their `name:` fields too.
+  const exposedSource = readText(join('plugins', 'opencode-v2', 'src', 'exposed-engines.ts'));
+  const exposed = [...exposedSource.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
+  const names = [...inline, ...viaHelper, ...exposed].filter((name) => name.startsWith('bos_'));
+  if (names.length !== 102) fail(`expected 102 bos_* tools, found ${names.length}`);
   if (new Set(names).size !== names.length) fail('duplicate bos_* tool names');
   return `${names.length} tools`;
 });

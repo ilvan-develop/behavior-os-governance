@@ -37,6 +37,7 @@ import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
 import { DoomLoopGuard, evaluateDenyList, QuotaBreaker } from './company-guard.js';
 import { subscribeToGovernanceEvents } from './event-monitor.js';
+import { EXPOSED_ENGINES } from './exposed-engines.js';
 import {
   buildGovernanceContext,
   buildGovernedPreamble,
@@ -3744,6 +3745,15 @@ export default Plugin.define({
           return { ok: true };
         },
       );
+
+      // Exposed engines — one thin read-only tool per isolated engine in
+      // packages/core/src/engine. See plugins/opencode-v2/src/exposed-engines.ts
+      // for the full catalog (11 engines, no public tool before this commit).
+      for (const def of EXPOSED_ENGINES) {
+        addJson(def.name, def.description, def.input, async (params) => {
+          return def.execute(params, bos);
+        });
+      }
 
       addJson(
         'bos_create_brainstorm',
