@@ -187,10 +187,17 @@ const EXPECTED_TOOLS = [
   'bos_add_knowledge_node',
   'bos_add_temporal_rule',
   'bos_analyze_workload',
+  'bos_antipattern_report',
   'bos_apply_code_fixes',
   'bos_apply_natural_language_rules',
   'bos_approve_loop',
+  'bos_assess_pragmatic_value',
   'bos_assign_task',
+  'bos_behavior_diff',
+  'bos_behavior_profile',
+  'bos_behavior_report',
+  'bos_behavior_summary',
+  'bos_behavior_timeline',
   'bos_cancel_mission',
   'bos_check_quality',
   'bos_check_temporal',
@@ -199,6 +206,9 @@ const EXPECTED_TOOLS = [
   'bos_complete_mission',
   'bos_complete_task',
   'bos_consolidate_memory',
+  'bos_conversation_report',
+  'bos_create_brainstorm',
+  'bos_create_dynamic_dna',
   'bos_create_meta_decision',
   'bos_create_mission',
   'bos_decide',
@@ -210,13 +220,16 @@ const EXPECTED_TOOLS = [
   'bos_evaluate_role_action',
   'bos_evolution',
   'bos_fail_mission',
+  'bos_fix_antipatterns',
   'bos_get_insights',
   'bos_get_knowledge_graph_stats',
   'bos_get_log',
   'bos_get_meta_cognition_stats',
+  'bos_get_metrics',
   'bos_get_state',
   'bos_get_status',
   'bos_list_audit_reports',
+  'bos_list_brainstorms',
   'bos_list_code_edits',
   'bos_list_code_fixes',
   'bos_list_conversations',
@@ -226,11 +239,13 @@ const EXPECTED_TOOLS = [
   'bos_list_pipeline_runs',
   'bos_list_roles',
   'bos_loop_status',
+  'bos_override_rule',
   'bos_parse_rule',
   'bos_parse_rules_batch',
   'bos_policy',
   'bos_predict_governance',
   'bos_preflight',
+  'bos_propose_idea',
   'bos_query_knowledge_graph',
   'bos_recall_memory',
   'bos_recall_relevant',
@@ -240,19 +255,23 @@ const EXPECTED_TOOLS = [
   'bos_record_learning',
   'bos_register_agent_capacity',
   'bos_register_role',
+  'bos_reset_metrics',
   'bos_resolve_consensus',
   'bos_resolve_conversation',
   'bos_resume_loop',
   'bos_role_policy_report',
   'bos_run_audit',
   'bos_save_memory',
+  'bos_scan_antipatterns',
   'bos_select_dna',
   'bos_set_agent',
   'bos_start_conversation',
   'bos_start_loop',
   'bos_start_mission',
   'bos_suggest_cross_dna_transfer',
+  'bos_teach_behavior',
   'bos_verify_audit_trail',
+  'bos_vote_idea',
   'bos_whoami',
 ];
 
@@ -266,7 +285,7 @@ describe('behavior-os plugin registration', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers exactly the 72 bos_* tools', async () => {
+  it('registers exactly the 91 bos_* tools', async () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
@@ -278,7 +297,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(72);
+    expect(addedTools).toHaveLength(91);
     for (const tool of addedTools) {
       expect(tool.options, `tool ${tool.name} is missing options`).toBeDefined();
       expect(tool.options?.codemode, `tool ${tool.name} must set codemode:false`).toBe(false);
@@ -289,7 +308,7 @@ describe('behavior-os plugin registration', () => {
     const { ctx, addedTools } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
-    expect(addedTools).toHaveLength(72);
+    expect(addedTools).toHaveLength(91);
     for (const tool of addedTools) {
       const meta = tool as unknown as {
         name: string;
@@ -332,7 +351,7 @@ describe('behavior-os plugin registration', () => {
       const { ctx, addedTools } = createFakeContext(repoRoot);
       await plugin.setup(ctx as never);
 
-      expect(addedTools).toHaveLength(72);
+      expect(addedTools).toHaveLength(91);
       const select = addedTools.find((t) => t.name === 'bos_select_dna');
       const enumValues = (
         select?.input as { properties?: { pattern?: { enum?: string[] } } } | undefined

@@ -11,15 +11,15 @@ plugins and MCP servers.
 
 ## Layers
 
-| Layer | Location | What it controls |
-| --- | --- | --- |
-| Permanent rules | `AGENTS.md` | How agents think, review and verify in this repository |
-| Project config | `opencode.json` | Instructions, permissions, formatter, watcher |
-| Agents | `.opencode/agents/<id>.md` | Research, planning, review and audit roles |
-| Commands | `.opencode/commands/<id>.md` | Repeatable `/govern`, `/verify`, `/audit` workflows |
-| Skills | `.opencode/skills/<id>/SKILL.md` | Procedures loaded only when the task matches |
-| Plugin | `.opencode/plugins/behavioros.ts` | Native Behavior-OS enforcement and 37 `bos_*` tools |
-| External MCP | `packages/mcp-server` (+ local `.mcp.json`) | Integration for MCP clients outside OpenCode |
+| Layer           | Location                                    | What it controls                                       |
+| --------------- | ------------------------------------------- | ------------------------------------------------------ |
+| Permanent rules | `AGENTS.md`                                 | How agents think, review and verify in this repository |
+| Project config  | `opencode.json`                             | Instructions, permissions, formatter, watcher          |
+| Agents          | `.opencode/agents/<id>.md`                  | Research, planning, review and audit roles             |
+| Commands        | `.opencode/commands/<id>.md`                | Repeatable `/govern`, `/verify`, `/audit` workflows    |
+| Skills          | `.opencode/skills/<id>/SKILL.md`            | Procedures loaded only when the task matches           |
+| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 91 `bos_*` tools    |
+| External MCP    | `packages/mcp-server` (+ local `.mcp.json`) | Integration for MCP clients outside OpenCode           |
 
 `AGENTS.md` is discovered automatically. `docs/PROTOCOL.md`,
 `docs/ARCHITECTURE.md` and this page are loaded through `instructions`.
@@ -52,12 +52,12 @@ to recognize every dangerous command.
 
 ## Agents
 
-| Agent | Mode | Use it for | Restrictions |
-| --- | --- | --- | --- |
-| `researcher` | `subagent` | Official documentation and source evidence | Cannot edit or run shell |
-| `planner` | `primary` | Task decomposition, risks, gates, acceptance criteria | Cannot edit; Git inspection only |
-| `reviewer` | `subagent` | Independent review of a diff | Cannot edit; Git inspection only |
-| `auditor` | `subagent` | Mission audit and gate evidence | Cannot edit; read-only gates only |
+| Agent        | Mode       | Use it for                                            | Restrictions                      |
+| ------------ | ---------- | ----------------------------------------------------- | --------------------------------- |
+| `researcher` | `subagent` | Official documentation and source evidence            | Cannot edit or run shell          |
+| `planner`    | `primary`  | Task decomposition, risks, gates, acceptance criteria | Cannot edit; Git inspection only  |
+| `reviewer`   | `subagent` | Independent review of a diff                          | Cannot edit; Git inspection only  |
+| `auditor`    | `subagent` | Mission audit and gate evidence                       | Cannot edit; read-only gates only |
 
 The built-in `build`, `plan`, `general` and `explore` agents remain available.
 Every custom agent uses V2's ordered `permissions` list and avoids the legacy V1
@@ -69,14 +69,14 @@ review cannot silently edit the code it is reviewing.
 
 ## Commands
 
-| Command | Agent | Purpose |
-| --- | --- | --- |
-| `/govern` | current | Run the 7-step Behavior-OS protocol before governed work |
-| `/verify` | current | Run the full verification ladder and report raw evidence |
-| `/audit` | `auditor` (child) | Run the mission audit and an independent completeness check |
-| `/mission` | current | Create and start a mission without duplicating an active one |
-| `/learn` | current | Record only verified outcomes and update claims if needed |
-| `/review` | `reviewer` (child) | Read-only review of the current diff |
+| Command    | Agent              | Purpose                                                      |
+| ---------- | ------------------ | ------------------------------------------------------------ |
+| `/govern`  | current            | Run the 7-step Behavior-OS protocol before governed work     |
+| `/verify`  | current            | Run the full verification ladder and report raw evidence     |
+| `/audit`   | `auditor` (child)  | Run the mission audit and an independent completeness check  |
+| `/mission` | current            | Create and start a mission without duplicating an active one |
+| `/learn`   | current            | Record only verified outcomes and update claims if needed    |
+| `/review`  | `reviewer` (child) | Read-only review of the current diff                         |
 
 Commands use `$ARGUMENTS`; a command without arguments appends nothing and must
 still behave safely. Markdown commands keep the prompt template in the body,
@@ -84,13 +84,13 @@ never in frontmatter.
 
 ## Skills
 
-| Skill ID | Trigger |
-| --- | --- |
-| `behavior-os` | Governance, DNA, missions, audits, production or risky actions |
-| `verification-first` | Any implementation, fix, audit or completion report |
-| `engineering-cycle` | Multi-step changes that must follow the repository workflow |
-| `docs-research` | OpenCode V2 or Behavior-OS claims that need official evidence |
-| `release` | Versioning, tagging, publishing or deployment preparation |
+| Skill ID             | Trigger                                                        |
+| -------------------- | -------------------------------------------------------------- |
+| `behavior-os`        | Governance, DNA, missions, audits, production or risky actions |
+| `verification-first` | Any implementation, fix, audit or completion report            |
+| `engineering-cycle`  | Multi-step changes that must follow the repository workflow    |
+| `docs-research`      | OpenCode V2 or Behavior-OS claims that need official evidence  |
+| `release`            | Versioning, tagging, publishing or deployment preparation      |
 
 Skills are advertised by their description and loaded only when relevant. The
 directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
@@ -100,19 +100,29 @@ directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
 
 The native integration is the plugin. `.opencode/plugins/behavioros.ts` is a
 thin auto-discovered loader that re-exports
-`plugins/opencode-v2/dist/index.js`. The plugin registers 37 `bos_*` tools and
+`plugins/opencode-v2/dist/index.js`. The plugin registers 91 `bos_*` tools and
 the hooks that make governance visible:
 
 - `permission.evaluate`: the only typed denial surface; applies DNA `deny` and
   `ask` decisions.
-- `session.prompt`: classifies intent, auto-selects a DNA when none is active,
-  and creates one mission when the session needs one.
+- `session.prompt`: classifies intent, switches the DNA to the task when no
+  mission is live, releases a stale mission after its TTL, and creates one
+  mission when the session needs one. Selection is task-scoped instead of
+  permanent: a new task can move from Lean Factory to Surgical Team without a
+  restart.
 - `session.context`: injects the current DNA, protocol step, mission and
   identity into every step.
 - `agent.transform`: adds a short governed preamble to each agent prompt.
 - `tool.execute.before`: advisory escalation logging, never enforcement.
 - `tool.execute.after`: records failures in the learning engine.
 - `tool.transform`: keeps the tool catalog consistent with the active DNA.
+
+`setup()` also detects a second Behavior-OS host. If the user-level or project
+MCP config registers `behavioros` while the plugin is loaded, the plugin
+disables that duplicate server through `ctx.mcp.transform` and logs an
+`advisory/warn` decision, because two engines in two processes disagree about
+the active DNA and the tool surface. Set
+`BEHAVIOROS_ALLOW_DUPLICATE_HOST=true` only when the duplication is deliberate.
 
 `opencode.json` deliberately does **not** register the Behavior-OS MCP server.
 V2 would expose it as a second namespace and duplicate the same capability,
@@ -131,7 +141,7 @@ pnpm verify:opencode
 
 It checks the config schema, instruction files, permission ordering, required
 agents and their least-privilege rules, command templates and agent references,
-skill discovery, the 37-tool plugin surface, the loader target, the
+skill discovery, the 91-tool plugin surface, the loader target, the
 separation between the plugin and any local `.mcp.json`, and that no
 control-plane file is git-ignored. It exits non-zero on the first failed check.
 

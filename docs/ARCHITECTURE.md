@@ -285,7 +285,7 @@ pending ──▶ active ──▶ completed   (terminal)
 mission plan through real adapters. `ControlLoop`
 (`packages/orchestrator/src/control-loop.ts`) adds durable, evidence-driven
 continuation on top of it. Both are libraries, not new tool surfaces: MCP still
-exposes 87 tools and the plugin 72.
+exposes 87 tools and the plugin 91.
 
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
@@ -385,7 +385,7 @@ auditor so the loop never reports overall `PASS` — it stops as `UNVERIFIED`.
 
 ### OpenCode v2 Plugin (single native channel)
 
-- 37 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
+- 91 `bos_*` tools registered via `ctx.tool.transform()` + `tools.add()` as **direct** tools (`options.codemode: false`)
 - Governance hook on `execute.before` (write/edit/bash interception)
 - Session context hook surfacing protocol state to the model
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`

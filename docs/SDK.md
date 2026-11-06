@@ -10,36 +10,36 @@ pnpm add -g @behavior-os/cli
 ## Quick Start
 
 ```typescript
-import { BehaviorOS } from '@behavior-os/sdk'
+import { BehaviorOS } from '@behavior-os/sdk';
 
 const bos = new BehaviorOS({
   dnaPath: './dnas/enterprise-governance.yaml',
   quality: { enabled: true, minCoverage: 80 },
   audit: { enabled: true },
   learning: { enabled: true },
-})
+});
 
 // Load DNA pattern
-await bos.loadDNA(yourDNA)
+await bos.loadDNA(yourDNA);
 
 // Evaluate governance
 const decision = bos.evaluateGovernance('deploy-production', {
   agent: 'devops-agent',
   scope: 'production',
-})
+});
 
 // Create mission (synchronous — no await)
 const mission = bos.createMission({
   title: 'Implement payment module',
   type: 'feature',
   priority: 'high',
-})
+});
 
 // Run audit
 const report = bos.runAudit({
   missionId: mission.id,
   agentId: 'devops-agent',
-})
+});
 
 // Record learning
 bos.recordLearning({
@@ -47,7 +47,7 @@ bos.recordLearning({
   source: 'post-mortem',
   content: 'Blue-green deployment reduced rollback time by 40%',
   impact: 'high',
-})
+});
 ```
 
 ## API Reference
@@ -55,134 +55,139 @@ bos.recordLearning({
 ### BehaviorOS Class
 
 #### Constructor
+
 ```typescript
 new BehaviorOS(config?: BehaviorOSConfig)
 ```
 
 #### Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `loadDNA(dna)` | `Promise<void>` | Load a DNA pattern |
-| `getDNA()` | `DNA \| null` | Get current DNA |
-| `evaluateGovernance(action, context)` | `GovernanceDecision` | Evaluate governance rules |
-| `checkQuality(metrics)` | `{passed, details}` | Check quality gates |
-| `runAudit(options)` | `AuditReport` | Run audit pipeline |
-| `createMission(options)` | `Mission` | Create new mission (`requiredChecks?` declares evidence gates) |
-| `startMission(id)` | `Mission \| null` | Legacy start wrapper |
+| Method                                | Returns                   | Description                                                                         |
+| ------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------- |
+| `loadDNA(dna)`                        | `Promise<void>`           | Load a DNA pattern                                                                  |
+| `getDNA()`                            | `DNA \| null`             | Get current DNA                                                                     |
+| `evaluateGovernance(action, context)` | `GovernanceDecision`      | Evaluate governance rules                                                           |
+| `checkQuality(metrics)`               | `{passed, details}`       | Check quality gates                                                                 |
+| `runAudit(options)`                   | `AuditReport`             | Run audit pipeline                                                                  |
+| `createMission(options)`              | `Mission`                 | Create new mission (`requiredChecks?` declares evidence gates)                      |
+| `startMission(id)`                    | `Mission \| null`         | Legacy start wrapper                                                                |
 | `transitionMission(id, to, options?)` | `MissionTransitionResult` | Validated transition with optional `evidence`, `expectedVersion`, `actor`, `reason` |
-| `completeMission(id, options?)` | `Mission \| null` | Legacy completion wrapper (evidence-gated) |
-| `failMission(id, reason?, options?)` | `Mission \| null` | Legacy failure wrapper |
-| `pauseMission(id, options?)` | `MissionTransitionResult` | Pause an active mission |
-| `resumeMission(id, options?)` | `MissionTransitionResult` | Resume a paused mission |
-| `cancelMission(id, options?)` | `MissionTransitionResult` | Cancel a non-terminal mission |
-| `recordLearning(options)` | `LearningEvent` | Record learning event |
-| `getInsights(limit)` | `LearningEvent[]` | Get high-impact insights |
-| `getStatus()` | `Status` | Get system status |
-| `getState()` | `AgentState` | Get protocol state |
-| `updateState(updates)` | `void` | Update protocol state |
+| `completeMission(id, options?)`       | `Mission \| null`         | Legacy completion wrapper (evidence-gated)                                          |
+| `failMission(id, reason?, options?)`  | `Mission \| null`         | Legacy failure wrapper                                                              |
+| `pauseMission(id, options?)`          | `MissionTransitionResult` | Pause an active mission                                                             |
+| `resumeMission(id, options?)`         | `MissionTransitionResult` | Resume a paused mission                                                             |
+| `cancelMission(id, options?)`         | `MissionTransitionResult` | Cancel a non-terminal mission                                                       |
+| `recordLearning(options)`             | `LearningEvent`           | Record learning event                                                               |
+| `getInsights(limit)`                  | `LearningEvent[]`         | Get high-impact insights                                                            |
+| `getStatus()`                         | `Status`                  | Get system status                                                                   |
+| `getState()`                          | `AgentState`              | Get protocol state                                                                  |
+| `updateState(updates)`                | `void`                    | Update protocol state                                                               |
 
 ### Types
 
 #### DNA
+
 ```typescript
 interface DNA {
-  name: string
-  version: string
-  description: string
-  personas: Persona[]
-  governance: GovernanceRule[]
-  quality: QualityGate[]
-  workflows?: Workflow[]
+  name: string;
+  version: string;
+  description: string;
+  personas: Persona[];
+  governance: GovernanceRule[];
+  quality: QualityGate[];
+  workflows?: Workflow[];
 }
 ```
 
 #### GovernanceDecision
+
 ```typescript
 interface GovernanceDecision {
-  id: string
-  action: string
-  verdict: 'allow' | 'deny' | 'escalate' | 'transform'
-  reason: string
-  rulesEvaluated: string[]
-  timestamp: string
-  agentId: string
-  missionId?: string
+  id: string;
+  action: string;
+  verdict: 'allow' | 'deny' | 'escalate' | 'transform';
+  reason: string;
+  rulesEvaluated: string[];
+  timestamp: string;
+  agentId: string;
+  missionId?: string;
 }
 ```
 
 #### Mission
+
 ```typescript
 interface Mission {
-  id: string
-  title: string
-  description?: string
-  type: 'feature' | 'bugfix' | 'deployment' | 'research' | 'refactor' | 'audit' | 'incident'
-  priority: 'critical' | 'high' | 'medium' | 'low'
-  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed' | 'cancelled'
-  dnaPattern: string
-  createdBy: string
-  assignedTo?: string[]
-  createdAt: string
-  updatedAt: string
-  progress: number
-  tags?: string[]
-  version?: number
-  requiredChecks?: string[]
-  evidence?: MissionEvidence[]
-  transitions?: MissionTransition[]
-  completionBasis?: 'evidence' | 'no-required-checks'
-  lastTransitionReason?: string
+  id: string;
+  title: string;
+  description?: string;
+  type: 'feature' | 'bugfix' | 'deployment' | 'research' | 'refactor' | 'audit' | 'incident';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  status: 'pending' | 'active' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  dnaPattern: string;
+  createdBy: string;
+  assignedTo?: string[];
+  createdAt: string;
+  updatedAt: string;
+  progress: number;
+  tags?: string[];
+  version?: number;
+  requiredChecks?: string[];
+  evidence?: MissionEvidence[];
+  transitions?: MissionTransition[];
+  completionBasis?: 'evidence' | 'no-required-checks';
+  lastTransitionReason?: string;
 }
 
 interface MissionEvidence {
-  gate: string
-  status: 'passed' | 'failed' | 'skipped'
-  source: string
-  detail?: string
-  simulated?: boolean
-  recordedAt: string
+  gate: string;
+  status: 'passed' | 'failed' | 'skipped';
+  source: string;
+  detail?: string;
+  simulated?: boolean;
+  recordedAt: string;
 }
 
 interface MissionTransition {
-  from: Mission['status']
-  to: Mission['status']
-  at: string
-  actor: string
-  reason?: string
-  version: number
+  from: Mission['status'];
+  to: Mission['status'];
+  at: string;
+  actor: string;
+  reason?: string;
+  version: number;
 }
 ```
 
 #### AgentState
+
 ```typescript
 interface AgentState {
-  currentStep: number
-  selectedDna: string | null
-  activeMission: string | null
-  stepHistory: Record<string, any>[]
-  createdAt: string
-  updatedAt: string
+  currentStep: number;
+  selectedDna: string | null;
+  activeMission: string | null;
+  stepHistory: Record<string, any>[];
+  createdAt: string;
+  updatedAt: string;
 }
 ```
 
 ### Governance Verdicts
 
-| Verdict | Description |
-|---------|-------------|
-| `allow` | Action is permitted |
-| `deny` | Action is blocked |
-| `escalate` | Action requires human review |
+| Verdict     | Description                           |
+| ----------- | ------------------------------------- |
+| `allow`     | Action is permitted                   |
+| `deny`      | Action is blocked                     |
+| `escalate`  | Action requires human review          |
 | `transform` | Action can proceed with modifications |
 
 ### DNA Actions
 
-| Action | Effect |
-|--------|--------|
-| `block` | Completely prevents the action |
+| Action     | Effect                              |
+| ---------- | ----------------------------------- |
+| `block`    | Completely prevents the action      |
 | `escalate` | Requires approval before proceeding |
-| `warn` | Allows but logs a warning |
-| `log` | Records only, no restriction |
+| `warn`     | Allows but logs a warning           |
+| `log`      | Records only, no restriction        |
 
 ## CLI Usage
 
@@ -218,6 +223,7 @@ npx @behavior-os/cli drift-check
 ## MCP Integration
 
 ### Claude Code
+
 Add to `.mcp.json`:
 ```json
 {
@@ -237,7 +243,7 @@ Add to `.mcp.json`:
 
 Inside this repository OpenCode discovers `.opencode/plugins/behavioros.ts`, which
 re-exports the built package. The MCP server is deliberately **not** registered in
-OpenCode, so a session sees one tool catalog (the plugin's 37 `bos_*` tools):
+OpenCode, so a session sees one tool catalog (the plugin's 91 `bos_*` tools):
 
 ```json
 // opencode.json

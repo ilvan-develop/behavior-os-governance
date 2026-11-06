@@ -589,7 +589,9 @@ function measuredCounts() {
   return {
     mcpTools: countIn('packages/mcp-server/src/server.ts', /server\.registerTool\(/g),
     mcpResources: countIn('packages/mcp-server/src/server.ts', /server\.registerResource\(/g),
-    pluginTools: countIn('plugins/opencode-v2/src/index.ts', /name: 'bos_/g),
+    pluginTools:
+      countIn('plugins/opencode-v2/src/index.ts', /name: 'bos_/g) +
+      countIn('plugins/opencode-v2/src/index.ts', /addJson\(\s*'bos_/g),
     dnas: readdirSync(join(repoRoot, 'dnas')).filter((file) => file.endsWith('.yaml')).length,
     tables: countIn('packages/core/src/persistence/sqlite-store.ts', /CREATE TABLE/g),
     engines: engineFiles.length - 2,
@@ -649,7 +651,7 @@ describe('documented counts match the code', () => {
     // numbers, so the derivation itself is pinned to the measured reality.
     expect(measured.mcpTools).toBe(87);
     expect(measured.mcpResources).toBe(2);
-    expect(measured.pluginTools).toBe(72);
+    expect(measured.pluginTools).toBe(91);
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
     expect(measured.engines).toBe(48);

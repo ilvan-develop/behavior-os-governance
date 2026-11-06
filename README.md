@@ -231,7 +231,7 @@ proceeds. Fairness, provenance and oversight are reported separately — a fair 
 does not excuse missing provenance or a missing reviewer.
 
 The OpenCode v2 plugin additionally exposes `bos_get_log` and
-`bos_verify_audit_trail` (72 tools in total).
+`bos_verify_audit_trail` (91 tools in total).
 
 **Governed policy lifecycle:** `bos_policy` records immutable versions
 (`policyId@N`) of a policy statement, validates a version, requires a human
@@ -424,7 +424,7 @@ Create `.vscode/mcp.json` with the same config as Cursor.
 The `@behavior-os/opencode-plugin` is the native OpenCode v2 integration. It
 ships in this repository and is **not** published to npm: it is auto-loaded from
 `.opencode/plugins/behavioros.ts`, a thin loader that re-exports the built
-package; it exposes the full 72 `bos_*` tool surface plus governance hooks
+package; it exposes the full 91 `bos_*` tool surface plus governance hooks
 (`tool:execute.before`, `tool:execute.after`) and session context — no MCP server
 registration required.
 
@@ -453,7 +453,7 @@ mcpServers:
 | `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.2.2   |
 | `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.2.2   |
 | `@behavior-os/mcp-server`      | MCP server with 87 tools + 2 resources                                                                                                   | 2.2.2   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 72 tools + hooks — loaded from this workspace, not published to npm                                              | 2.1.0   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 91 tools + hooks - loaded from this workspace, not published to npm                                              | 2.1.0   |
 | `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
 
 ## License

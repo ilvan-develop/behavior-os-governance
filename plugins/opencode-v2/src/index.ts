@@ -76,6 +76,59 @@ const NOTIFICATION_MAX_PER_WINDOW = 3;
 /** Storage key for the persisted coalescer snapshot. */
 const NOTIFICATION_STORAGE_KEY = 'behavioros:notifications:v1';
 
+/** Default window after which an untouched mission is considered stale. */
+const DEFAULT_MISSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Mission staleness window; `BEHAVIOROS_MISSION_TTL_MS` overrides it. */
+function missionTtlMs(): number {
+  const raw = Number(process.env.BEHAVIOROS_MISSION_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MISSION_TTL_MS;
+}
+
+/** True when a mission is active/paused and was touched within the TTL. */
+function missionIsLive(bos: BehaviorOS, missionId: string | null): boolean {
+  if (!missionId) return false;
+  const mission = bos.getMission(missionId);
+  if (!mission) return false;
+  if (mission.status !== 'active' && mission.status !== 'paused') return false;
+  const updatedAt = Date.parse(mission.updatedAt);
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt <= missionTtlMs();
+}
+
+/** Map a selected DNA display name back to its `dnas/*.yaml` key. */
+function dnaKeyForName(name: string | null): string | null {
+  if (!name) return null;
+  const wanted = name.toLowerCase();
+  for (const [key, dna] of loadedDnaPatterns) {
+    if (key.toLowerCase() === wanted || dna.name.toLowerCase() === wanted) return key;
+  }
+  return null;
+}
+
+/**
+ * Detect the standalone Behavior-OS MCP server in the host's MCP config.
+ *
+ * Running it inside OpenCode creates a second BehaviorOS engine with its own
+ * DNA, protocol step and in-memory missions. The plugin enforces with one
+ * engine while the model's `bos_*` tools answer from the other — the exact
+ * split-brain that makes governance look inert. The native plugin is the
+ * documented single host (`docs/OPENCODE_V2.md`), so the duplicate is disabled
+ * for this host by default. `BEHAVIOROS_ALLOW_DUPLICATE_HOST=true` opts out for
+ * setups that deliberately keep both surfaces.
+ */
+function isBehaviorOsMcpServer(name: string, config: unknown): boolean {
+  const value = (config ?? {}) as { command?: unknown; environment?: unknown };
+  const command = Array.isArray(value.command) ? value.command.map((part) => String(part)) : [];
+  const environment =
+    value.environment && typeof value.environment === 'object'
+      ? Object.entries(value.environment as Record<string, unknown>).map(
+          ([key, entry]) => `${key}=${String(entry)}`,
+        )
+      : [];
+  const haystack = [name, ...command, ...environment].join(' ').toLowerCase();
+  return haystack.includes('behavioros') || haystack.includes('behavior-os');
+}
+
 function getBehaviorOS(): BehaviorOS {
   if (!behaviorOS) {
     const persistenceConfig = process.env.BEHAVIOROS_DB_PATH
@@ -483,6 +536,48 @@ export default Plugin.define({
         action: 'setup',
         detail: 'Restored persisted state from ctx.storage',
       });
+    }
+
+    // --- Single-host guard ---------------------------------------------------
+    // The native plugin is the documented Behavior-OS host for OpenCode. When
+    // the standalone MCP server is configured too, the model gets two engines:
+    // enforcement uses this plugin's DNA/protocol/missions, while every
+    // `bos_*` tool call answers from the other process. That split is silent
+    // and makes governance look inert, so the duplicate is disabled for this
+    // host. Opt out with BEHAVIOROS_ALLOW_DUPLICATE_HOST=true.
+    if (
+      process.env.BEHAVIOROS_ALLOW_DUPLICATE_HOST !== 'true' &&
+      ctx.mcp &&
+      typeof ctx.mcp.transform === 'function'
+    ) {
+      try {
+        const disabledHosts: string[] = [];
+        await ctx.mcp.transform((editor) => {
+          for (const [name, config] of editor.list()) {
+            if (config.disabled) continue;
+            if (!isBehaviorOsMcpServer(name, config)) continue;
+            editor.update(name, (draft) => {
+              draft.disabled = true;
+            });
+            disabledHosts.push(name);
+          }
+        });
+        if (disabledHosts.length > 0) {
+          recordLog(
+            'advisory',
+            'warn',
+            'setup',
+            `Disabled duplicate Behavior-OS MCP host(s): ${disabledHosts.join(', ')}`,
+          );
+          console.warn(
+            `[Behavior-OS] Disabled duplicate Behavior-OS MCP server(s): ${disabledHosts.join(
+              ', ',
+            )}. The native plugin is the single governance host; set BEHAVIOROS_ALLOW_DUPLICATE_HOST=true to keep both.`,
+          );
+        }
+      } catch (error) {
+        console.warn(`[Behavior-OS] Could not inspect MCP hosts: ${describeError(error)}`);
+      }
     }
 
     // --- Notification coalescing -------------------------------------------
@@ -3590,6 +3685,412 @@ export default Plugin.define({
           }
         },
       });
+
+      // ── Surface parity with the standalone MCP server ─────────────────────
+      // These tools already exist in the engine and in `packages/mcp-server`.
+      // Keeping them here means the native plugin is a complete single host, so
+      // OpenCode never needs to load the MCP server as a second, divergent
+      // Behavior-OS brain (see the duplicate-host guard in setup()).
+      const findDna = (pattern: string): DNA | undefined => {
+        const wanted = pattern.toLowerCase();
+        for (const [key, dna] of loadedDnaPatterns) {
+          if (key.toLowerCase() === wanted || dna.name.toLowerCase() === wanted) return dna;
+        }
+        return undefined;
+      };
+
+      const addJson = (
+        name: string,
+        description: string,
+        input: Record<string, unknown>,
+        run: (params: Record<string, unknown>) => unknown | Promise<unknown>,
+      ): void => {
+        tools.add({
+          name,
+          description,
+          input: input as PluginToolInfo['input'],
+          execute: async (raw: unknown): Promise<{ content: string }> => {
+            try {
+              const output = await run((raw ?? {}) as Record<string, unknown>);
+              return {
+                content: typeof output === 'string' ? output : JSON.stringify(output, null, 2),
+              };
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
+            }
+          },
+        });
+      };
+
+      addJson(
+        'bos_get_metrics',
+        'Get current system-wide governance metrics and observability data',
+        { type: 'object', properties: {} },
+        () => bos.getMetrics(),
+      );
+
+      addJson(
+        'bos_reset_metrics',
+        'Reset all governance metrics',
+        { type: 'object', properties: {} },
+        () => {
+          bos.resetMetrics();
+          return { ok: true };
+        },
+      );
+
+      addJson(
+        'bos_create_brainstorm',
+        'Create a new brainstorming session for multi-agent collaboration',
+        {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            participants: { type: 'array', items: { type: 'string' } },
+            dnaPattern: { type: 'string' },
+          },
+          required: ['title', 'participants', 'dnaPattern'],
+        },
+        (p) =>
+          bos.createBrainstormSession(
+            String(p.title),
+            p.participants as string[],
+            String(p.dnaPattern),
+          ),
+      );
+
+      addJson(
+        'bos_list_brainstorms',
+        'List all brainstorming sessions',
+        { type: 'object', properties: {} },
+        () => bos.listBrainstormSessions(),
+      );
+
+      addJson(
+        'bos_propose_idea',
+        'Propose an idea in a brainstorming session',
+        {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            authorId: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+          },
+          required: ['sessionId', 'authorId', 'title', 'description'],
+        },
+        (p) =>
+          bos
+            .getBrainstorm()
+            .proposeIdea(
+              String(p.sessionId),
+              String(p.authorId),
+              String(p.title),
+              String(p.description),
+            ),
+      );
+
+      addJson(
+        'bos_vote_idea',
+        'Vote on an idea in a brainstorming session',
+        {
+          type: 'object',
+          properties: {
+            sessionId: { type: 'string' },
+            ideaId: { type: 'string' },
+            voterId: { type: 'string' },
+            vote: { type: 'string', enum: ['support', 'oppose', 'neutral'] },
+            reason: { type: 'string' },
+          },
+          required: ['sessionId', 'ideaId', 'voterId', 'vote'],
+        },
+        (p) =>
+          bos
+            .getBrainstorm()
+            .voteOnIdea(
+              String(p.sessionId),
+              String(p.ideaId),
+              String(p.voterId),
+              p.vote as 'support' | 'oppose' | 'neutral',
+              typeof p.reason === 'string' ? p.reason : undefined,
+            ),
+      );
+
+      addJson(
+        'bos_create_dynamic_dna',
+        'Create a dynamic DNA that can be modified at runtime',
+        {
+          type: 'object',
+          properties: { dnaName: { type: 'string' }, baseDnaName: { type: 'string' } },
+          required: ['dnaName', 'baseDnaName'],
+        },
+        (p) => {
+          const base = findDna(String(p.baseDnaName));
+          if (!base) throw new Error(`Base DNA "${String(p.baseDnaName)}" not found`);
+          return bos.getDynamicDNAManager().createDynamicDNA(String(p.dnaName), base);
+        },
+      );
+
+      addJson(
+        'bos_override_rule',
+        'Override a governance rule in a dynamic DNA',
+        {
+          type: 'object',
+          properties: {
+            dnaName: { type: 'string' },
+            ruleId: { type: 'string' },
+            action: { type: 'string', enum: ['block', 'escalate', 'warn', 'log', 'transform'] },
+            reason: { type: 'string' },
+            authorizedBy: { type: 'string' },
+          },
+          required: ['dnaName', 'ruleId', 'action', 'reason', 'authorizedBy'],
+        },
+        (p) =>
+          bos
+            .getDynamicDNAManager()
+            .addOverride(
+              String(p.dnaName),
+              String(p.ruleId),
+              p.action as 'block' | 'escalate' | 'warn' | 'log' | 'transform',
+              undefined,
+              String(p.reason),
+              String(p.authorizedBy),
+            ),
+      );
+
+      addJson(
+        'bos_behavior_profile',
+        'Generate a human-readable behavioral profile for an agent',
+        {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            persona: { type: 'string' },
+            dnaPattern: { type: 'string' },
+          },
+          required: ['agentId', 'persona', 'dnaPattern'],
+        },
+        (p) => {
+          const dna = findDna(String(p.dnaPattern));
+          if (!dna) throw new Error(`DNA pattern "${String(p.dnaPattern)}" not found`);
+          const ux = bos.getBehavioralUX();
+          const profile = ux.generateProfile(
+            String(p.agentId),
+            String(p.persona),
+            String(p.dnaPattern),
+            dna,
+            bos.getInsights(100),
+            bos.listMissions(50),
+          );
+          return ux.generateMarkdownReport(String(p.agentId), profile);
+        },
+      );
+
+      addJson(
+        'bos_behavior_diff',
+        'Compare two DNA patterns and show behavioral drift with interpretation',
+        {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            olderDna: { type: 'string' },
+            newerDna: { type: 'string' },
+          },
+          required: ['agentId', 'olderDna', 'newerDna'],
+        },
+        (p) => {
+          const older = findDna(String(p.olderDna));
+          const newer = findDna(String(p.newerDna));
+          if (!older || !newer) throw new Error('DNA pattern not found');
+          const drift = bos.getDriftEngine().compare(older, newer);
+          return bos.getBehavioralUX().compareBehaviors(String(p.agentId), older, newer, drift);
+        },
+      );
+
+      addJson(
+        'bos_behavior_timeline',
+        'Get evolution timeline showing how agent behavior changed over time',
+        {
+          type: 'object',
+          properties: { agentId: { type: 'string' }, limit: { type: 'number' } },
+        },
+        (p) =>
+          bos
+            .getBehavioralUX()
+            .getTimeline(typeof p.agentId === 'string' ? p.agentId : undefined)
+            .slice(0, typeof p.limit === 'number' ? p.limit : 20),
+      );
+
+      addJson(
+        'bos_behavior_summary',
+        'Get a quick one-line behavior summary for an agent',
+        { type: 'object', properties: { agentId: { type: 'string' } }, required: ['agentId'] },
+        (p) => {
+          const profile = bos.getBehavioralUX().getProfile(String(p.agentId));
+          if (!profile) return `No profile found for agent "${String(p.agentId)}"`;
+          return {
+            summary: bos.getBehavioralUX().getBehaviorSummary(profile),
+            governanceScore: profile.governanceScore,
+            confidence: profile.confidence,
+          };
+        },
+      );
+
+      addJson(
+        'bos_behavior_report',
+        'Generate a full markdown behavioral report for an agent',
+        {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            persona: { type: 'string' },
+            dnaPattern: { type: 'string' },
+            includeDiff: { type: 'boolean' },
+          },
+          required: ['agentId', 'persona', 'dnaPattern'],
+        },
+        (p) => {
+          const dna = findDna(String(p.dnaPattern));
+          if (!dna) throw new Error(`DNA "${String(p.dnaPattern)}" not found`);
+          const ux = bos.getBehavioralUX();
+          const profile = ux.generateProfile(
+            String(p.agentId),
+            String(p.persona),
+            String(p.dnaPattern),
+            dna,
+            bos.getLearningEvents(),
+            bos.listMissions(50),
+          );
+          const diff = p.includeDiff
+            ? ux.getAllDiffs().find((d) => d.newerDna === String(p.dnaPattern))
+            : undefined;
+          return ux.generateMarkdownReport(String(p.agentId), profile, diff);
+        },
+      );
+
+      addJson(
+        'bos_scan_antipatterns',
+        'Scan code/text for anti-patterns (TS errors, lint violations, security issues)',
+        {
+          type: 'object',
+          properties: { text: { type: 'string' }, source: { type: 'string' } },
+          required: ['text'],
+        },
+        (p) => {
+          const engine = bos.getAntipatternEngine();
+          if (!engine) throw new Error('Antipattern engine not initialized');
+          return engine.scan(String(p.text), typeof p.source === 'string' ? p.source : undefined);
+        },
+      );
+
+      addJson(
+        'bos_fix_antipatterns',
+        'Auto-fix critical and high severity anti-patterns',
+        { type: 'object', properties: {} },
+        () => {
+          const engine = bos.getAntipatternEngine();
+          if (!engine) throw new Error('Antipattern engine not initialized');
+          const fixed = engine.autoFixCritical();
+          return { fixed: fixed.length };
+        },
+      );
+
+      addJson(
+        'bos_antipattern_report',
+        'Generate full anti-pattern remediation report',
+        { type: 'object', properties: {} },
+        () => {
+          const engine = bos.getAntipatternEngine();
+          if (!engine) throw new Error('Antipattern engine not initialized');
+          return engine.generateReport();
+        },
+      );
+
+      addJson(
+        'bos_teach_behavior',
+        'Teach/correct agent behavior — record a behavioral education',
+        {
+          type: 'object',
+          properties: {
+            agentId: { type: 'string' },
+            pattern: { type: 'string' },
+            correction: { type: 'string' },
+            reason: { type: 'string' },
+          },
+          required: ['agentId', 'pattern', 'correction', 'reason'],
+        },
+        (p) => {
+          const education = bos
+            .getBehavioralUX()
+            .teachBehavior(
+              String(p.agentId),
+              String(p.pattern),
+              String(p.correction),
+              String(p.reason),
+              'user',
+            );
+          bos.recordLearning({
+            type: 'fix',
+            source: 'behavior-education',
+            content: `Educated ${String(p.agentId)}: ${String(p.correction)}`,
+            impact: 'high',
+            relatedMission: education.id,
+          });
+          return education;
+        },
+      );
+
+      addJson(
+        'bos_assess_pragmatic_value',
+        'Assess the pragmatic value of code changes: lines removed, complexity and coverage change',
+        {
+          type: 'object',
+          properties: {
+            changes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  addedLines: { type: 'number' },
+                  removedLines: { type: 'number' },
+                },
+                required: ['addedLines', 'removedLines'],
+              },
+            },
+            metrics: {
+              type: 'object',
+              properties: {
+                before: { type: 'object' },
+                after: { type: 'object' },
+              },
+              required: ['before', 'after'],
+            },
+          },
+          required: ['changes', 'metrics'],
+        },
+        (p) =>
+          bos.assessPragmaticValue(
+            p.changes as Array<{ addedLines: number; removedLines: number }>,
+            p.metrics as {
+              before: { complexity: number; testCoverage: number; rulesCount: number };
+              after: { complexity: number; testCoverage: number; rulesCount: number };
+            },
+          ),
+      );
+
+      addJson(
+        'bos_conversation_report',
+        'Generate full report for a pragmatic conversation',
+        { type: 'object', properties: { sessionId: { type: 'string' } }, required: ['sessionId'] },
+        (p) => {
+          const engine = bos.getPragmaticConversation();
+          if (!engine) throw new Error('Pragmatic conversation engine not initialized');
+          const report = engine.generateReport(String(p.sessionId));
+          if (!report) throw new Error(`Conversation "${String(p.sessionId)}" not found`);
+          return report;
+        },
+      );
     });
 
     // Bake a short, static Behavior-OS reminder into every agent's system prompt
@@ -3907,31 +4408,74 @@ export default Plugin.define({
 
       const behavioros: Record<string, unknown> = {};
 
-      // 1) Auto-select a DNA pattern when none is active yet.
-      if (!bos.getState().selectedDna) {
-        const match = classifyDNA(text, loadedDnaPatterns.keys());
-        const dna = match ? loadedDnaPatterns.get(match) : undefined;
-        if (match && dna) {
-          await bos.loadDNA(dna);
-          behavioros.autoSelectedDna = match;
+      // 0) Release a mission that can no longer describe the current task.
+      // A mission whose last transition/evidence is older than the TTL is
+      // stale: keeping its pointer would freeze auto-missions and pin the DNA
+      // of an unrelated task forever (the failure that made a persisted
+      // "Lean Factory" session govern every later request). Cancelling records
+      // the release in the mission history and clears `activeMission`.
+      const observed = bos.getState();
+      if (observed.activeMission && !missionIsLive(bos, observed.activeMission)) {
+        const stale = bos.getMission(observed.activeMission);
+        if (stale && (stale.status === 'active' || stale.status === 'paused')) {
+          bos.cancelMission(stale.id, {
+            reason: `stale mission released on new prompt: no transition within ${Math.round(
+              missionTtlMs() / 60_000,
+            )} min`,
+          });
+          behavioros.releasedMission = stale.id;
           recordLog(
-            'dna_selected',
+            'mission',
             'info',
             'session.prompt',
-            `Auto-selected DNA "${match}" from prompt intent`,
-          );
-          await notify(
-            event.sessionID,
-            `[Behavior-OS] 🧬 Auto-selected DNA "${match}" — governance rules are now active.`,
-            { kind: 'dna', action: 'session.prompt', reason: `Auto-selected DNA "${match}"` },
+            `Released stale mission "${stale.id}" (${stale.status}, updated ${stale.updatedAt})`,
           );
         }
       }
 
-      // 2) Auto-create + start a mission so `activeMission` is never left null.
-      // Only when a DNA is active and no mission is currently active, which
-      // prevents per-message mission spam: the mission stays active until it is
-      // completed, failed, or the persisted state is cleared.
+      // 1) Select a DNA from the prompt intent. A different pattern replaces the
+      // current one only when no *live* mission is in flight, so governance
+      // adapts per task instead of staying pinned to the first pattern ever
+      // selected while a single mission is never disturbed mid-flight.
+      const beforeDna = bos.getState();
+      const match = classifyDNA(text, loadedDnaPatterns.keys());
+      const dna = match ? loadedDnaPatterns.get(match) : undefined;
+      if (!beforeDna.selectedDna && match && dna) {
+        await bos.loadDNA(dna);
+        behavioros.autoSelectedDna = match;
+        recordLog(
+          'dna_selected',
+          'info',
+          'session.prompt',
+          `Auto-selected DNA "${match}" from prompt intent`,
+        );
+        await notify(
+          event.sessionID,
+          `[Behavior-OS] 🧬 Auto-selected DNA "${match}" — governance rules are now active.`,
+          { kind: 'dna', action: 'session.prompt', reason: `Auto-selected DNA "${match}"` },
+        );
+      } else if (match && dna && !missionIsLive(bos, beforeDna.activeMission)) {
+        const currentKey = dnaKeyForName(beforeDna.selectedDna);
+        if (currentKey && currentKey !== match) {
+          await bos.loadDNA(dna);
+          behavioros.dnaSwitched = match;
+          recordLog(
+            'dna_selected',
+            'info',
+            'session.prompt',
+            `Switched DNA "${currentKey}" -> "${match}" for a new task`,
+          );
+          await notify(
+            event.sessionID,
+            `[Behavior-OS] 🧬 Switched DNA to "${match}" for this task — previous pattern "${currentKey}" is no longer active.`,
+            { kind: 'dna', action: 'session.prompt', reason: `Switched DNA to "${match}"` },
+          );
+        }
+      }
+
+      // 2) Auto-create + start a mission so `activeMission` reflects the work in
+      // progress. Only when a DNA is active and no live mission exists, which
+      // prevents per-message mission spam within one task.
       const state = bos.getState();
       if (state.selectedDna && !state.activeMission) {
         const intent = classifyMissionIntent(text);

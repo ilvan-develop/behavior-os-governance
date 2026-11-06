@@ -2303,12 +2303,23 @@ async function loadDNAPatterns(): Promise<Record<string, DNA>> {
 
   try {
     const resolved = path.resolve(dnaPath);
-    const files = fs.statSync(resolved).isDirectory()
-      ? fs
-          .readdirSync(resolved)
-          .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
-          .map((file) => path.join(resolved, file))
-      : [resolved];
+    const stat = fs.statSync(resolved);
+    // `BEHAVIOROS_DNA_PATH` may point at a single pattern file. That file is the
+    // default-active pattern, but the *selectable* library is still every pattern
+    // shipped beside it — otherwise `bos_select_dna` advertises one pattern while
+    // the plugin host advertises all of them, and the agent is told a pattern is
+    // active that the tool surface cannot even resolve. Directories behave as
+    // before.
+    const directory = stat.isDirectory() ? resolved : path.dirname(resolved);
+    const files = fs
+      .readdirSync(directory)
+      .filter((file) => file.endsWith('.yaml') || file.endsWith('.yml'))
+      .map((file) => path.join(directory, file))
+      .filter((filePath) => filePath !== resolved);
+
+    // The explicitly configured file is loaded last so it wins over a sibling
+    // with the same basename; siblings still populate the selectable library.
+    if (!stat.isDirectory()) files.push(resolved);
 
     for (const filePath of files) {
       const content = fs.readFileSync(filePath, 'utf-8');
