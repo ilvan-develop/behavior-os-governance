@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-07T14:54:36.814Z",
+  "generatedAt": "2026-11-07T16:17:51.177Z",
   "plugin": "behavior-os",
-  "total": 24,
-  "proven": 24,
+  "total": 25,
+  "proven": 25,
   "coverage": 100,
   "claims": [
     {
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1794063274548-2br8ta4x8zo"
+      "evidence": "activeMission=mission-1794068270056-ns7dyu93s2l"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1794063275056-2pm0hk763g8 == activeMission"
+      "evidence": "autoMission=mission-1794068270329-95fbwz8ei1 == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p4896-73ofi across 14 entries"
+      "evidence": "instance=p15096-gpswg across 14 entries"
     },
     {
       "id": "C15",
@@ -172,6 +172,13 @@
       "promise": "Environment signals come only from actions that can perform an operation: mentioning a deployment is not deploying",
       "status": "PASS",
       "evidence": "grep stayed allow; bash deploy -> ask"
+    },
+    {
+      "id": "C25",
+      "category": "SCOPE",
+      "promise": "A globally installed plugin stays dormant unless the project opts in with .behavioros/config.json",
+      "status": "PASS",
+      "evidence": "dormant without marker; /bos-init copied 21 patterns"
     }
   ]
 }

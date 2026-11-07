@@ -18,9 +18,9 @@ packages/schemas/      Zod schemas for every domain type
 packages/core/         48 engines + BehaviorOS facade + persistence
 packages/sdk/          TypeScript SDK
 packages/cli/          CLI (init, validate, status, simulate, deploy, ...)
-packages/mcp-server/   MCP server: 87 tools + 2 resources (stdio)
+packages/mcp-server/   MCP server: 98 tools + 2 resources (stdio)
 packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (68 tests)
-plugins/opencode-v2/   OpenCode V2 plugin: 91 bos_* tools + hooks
+plugins/opencode-v2/   OpenCode V2 plugin: 102 bos_* tools + hooks
 examples/              Workspace example app (4 tests in `pnpm test`)
 dnas/                  21 DNA pattern YAML files
 docs/                  Documentation; docs/CLAIMS.md is the source of truth
@@ -86,7 +86,7 @@ Use the right layer for the right concern:
 | Skills          | `.opencode/skills/<id>/SKILL.md`            | Procedures loaded only when relevant                |
 | Agents          | `.opencode/agents/<id>.md`                  | Research, planning, implementation, audit roles     |
 | Commands        | `.opencode/commands/<id>.md`                | Repeatable `/govern`, `/verify`, `/audit` workflows |
-| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 91 tools         |
+| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 102 tools        |
 | MCP             | `packages/mcp-server` (+ local `.mcp.json`) | Integration for external MCP clients                |
 
 The native OpenCode integration is the plugin. Do **not** register the same

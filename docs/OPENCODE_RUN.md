@@ -156,7 +156,7 @@ pnpm verify:governance
 
 O relatório imprime uma tabela `claims → evidência` e grava
 `docs/analysis/governance-conformance.json`; sai com código ≠ 0 se alguma promessa falhar
-(pronto para CI). Cobertura atual: **24/24 claims**.
+(pronto para CI). Cobertura atual: **25/25 claims**.
 
 | Claim | Promessa                                                     | Prova                                                                                                                                                                                                                                                                                                       |
 | ----- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

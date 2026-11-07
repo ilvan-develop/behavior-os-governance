@@ -4569,29 +4569,57 @@ export default Plugin.define({
       }
     });
 
+    // Prediction heartbeat: the prediction engine reads the learning log that
+    // execute.after feeds. Every few tool completions we ask it what is likely
+    // to happen next and surface the strongest forecast as an advisory log
+    // entry. It never changes an enforcement verdict; a prediction is evidence
+    // an operator (or the agent) can act on, not a gate.
+    const PREDICTION_INTERVAL = 5;
+    let toolCompletions = 0;
+
     // Capture tool failures as learning events (without advancing the protocol).
     await ctx.tool.hook('execute.after', async (event): Promise<void> => {
-      if (event.status !== 'error') return;
       const currentState = bos.getState();
+      if (event.status === 'error') {
+        if (currentState.selectedDna) {
+          try {
+            bos.recordLearning({
+              type: 'failure',
+              source: `tool:${event.tool}`,
+              content: event.error.message,
+              impact: 'medium',
+              relatedPattern: currentState.selectedDna,
+              advanceProtocol: false,
+            });
+            await persistState(ctx);
+            recordLog(
+              'learning',
+              'error',
+              `tool:${event.tool}`,
+              `Tool failure recorded as learning: ${event.error.message}`,
+            );
+          } catch (error) {
+            console.warn(`[Behavior-OS] Learning capture error: ${describeError(error)}`);
+          }
+        }
+      }
+
+      toolCompletions += 1;
+      if (toolCompletions % PREDICTION_INTERVAL !== 0) return;
       if (!currentState.selectedDna) return;
       try {
-        bos.recordLearning({
-          type: 'failure',
-          source: `tool:${event.tool}`,
-          content: event.error.message,
-          impact: 'medium',
-          relatedPattern: currentState.selectedDna,
-          advanceProtocol: false,
-        });
-        await persistState(ctx);
+        const prediction = bos.predict(3).find((candidate) => candidate.confidence >= 0.5);
+        if (!prediction) return;
         recordLog(
-          'learning',
-          'error',
-          `tool:${event.tool}`,
-          `Tool failure recorded as learning: ${event.error.message}`,
+          'advisory',
+          'info',
+          'execute.after',
+          `prediction: ${prediction.type} "${prediction.subject}" confidence=${prediction.confidence.toFixed(2)} horizon=${prediction.horizonHours}h — ${prediction.recommendation}`,
         );
       } catch (error) {
-        console.warn(`[Behavior-OS] Learning capture error: ${describeError(error)}`);
+        // Predictions are advisory; a learning-history shape surprise must not
+        // break the tool result path.
+        console.warn(`[Behavior-OS] Prediction error: ${describeError(error)}`);
       }
     });
 

@@ -19,10 +19,18 @@
  * Usage: node scripts/governance-conformance.mjs
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BehaviorOS } from '../packages/core/dist/index.js';
-import plugin from '../plugins/opencode-v2/dist/index.js';
+import plugin, {
+  BOOTSTRAP_COMMAND,
+  formatOptInMessage,
+} from '../plugins/opencode-v2/dist/index.js';
+import {
+  enableGovernance,
+  isGovernanceEnabled,
+} from '../plugins/opencode-v2/dist/project-optin.js';
 
 // The harness boots the real plugin in-process. Unless pinned, the plugin uses
 // the operator's live SQLite store (~/.config/opencode/behavioros.db) and honours
@@ -783,6 +791,42 @@ const claims = [
         status: 'PASS',
         evidence: `grep stayed ${search.effect}; bash deploy -> ${deploy.effect}`,
       };
+    },
+  },
+  {
+    id: 'C25',
+    category: 'SCOPE',
+    promise:
+      'A globally installed plugin stays dormant unless the project opts in with .behavioros/config.json',
+    async check() {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bos-conformance-optin-'));
+      try {
+        expect(
+          !isGovernanceEnabled(directory, {}),
+          'a project with no marker was governed (global plugin would govern every project)',
+        );
+        const result = enableGovernance(directory, path.join(repoRoot, 'dnas'));
+        expect(result.copied.length > 0, 'opt-in copied no DNA patterns');
+        expect(
+          fs.existsSync(path.join(directory, '.behavioros', 'config.json')),
+          'opt-in did not write the marker',
+        );
+        expect(isGovernanceEnabled(directory, {}), 'the written marker did not enable governance');
+        expect(
+          BOOTSTRAP_COMMAND === 'bos-init',
+          `dormant bootstrap command drifted: ${BOOTSTRAP_COMMAND}`,
+        );
+        expect(
+          formatOptInMessage(result).includes('governance is now enabled'),
+          'the opt-in message does not tell the user governance is enabled',
+        );
+        return {
+          status: 'PASS',
+          evidence: `dormant without marker; /bos-init copied ${result.copied.length} patterns`,
+        };
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
     },
   },
 ];

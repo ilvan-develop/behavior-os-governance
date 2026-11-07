@@ -190,6 +190,92 @@ try {
     );
   }
   console.log('Governance context matched: enterprise-sox escalation on production-change');
+
+  // Option D: the 11 exposed engines must *answer over the wire*, not merely
+  // appear in tools/list. Each call is a thin engine invocation with the
+  // smallest valid input, so a wiring regression fails here instead of in a
+  // client. Read-only engines return ok:true; the anomaly tool also seeds its
+  // baseline, which is safe in this short-lived smoke process.
+  const engineIds = [
+    'bos_detect_anomalies',
+    'bos_recommend_circuit_breaker',
+    'bos_collective_decision',
+    'bos_map_compliance',
+    'bos_select_gates_by_confidence',
+    'bos_transfer_across_domains',
+    'bos_adjust_policy_for_risk',
+    'bos_explainable_report',
+    'bos_export_audit_to_siem',
+    'bos_governance_as_code',
+    'bos_evaluate_hybrid',
+  ];
+  for (const id of engineIds) {
+    if (!names.includes(id)) throw new Error(`exposed engine tool is not registered: ${id}`);
+  }
+  const engineCalls = [
+    ['bos_detect_anomalies', { agentId: 'smoke-mcp', profile: { traits: { precision: 0.9 } } }],
+    ['bos_recommend_circuit_breaker', {}],
+    [
+      'bos_collective_decision',
+      {
+        proposal: 'smoke',
+        votes: [{ agentId: 'smoke-a', choice: 'approve', weight: 1, confidence: 0.8 }],
+      },
+    ],
+    ['bos_map_compliance', { regulation: 'SOC2' }],
+    [
+      'bos_select_gates_by_confidence',
+      {
+        sourcePhase: {
+          id: 'smoke-phase',
+          name: 'Smoke Phase',
+          type: 'architecture',
+          requiredAgents: [],
+          requiredSkills: [],
+          gates: [],
+          order: 0,
+        },
+      },
+    ],
+    [
+      'bos_transfer_across_domains',
+      { sourceDna: 'financial-compliance', targetDna: 'healthcare-hipaa' },
+    ],
+    ['bos_adjust_policy_for_risk', { agentId: 'smoke-mcp', factors: { denialRate: 0.2 } }],
+    ['bos_explainable_report', { agentId: 'smoke-mcp' }],
+    ['bos_export_audit_to_siem', { target: 'smoke-siem', limit: 5 }],
+    [
+      'bos_governance_as_code',
+      {
+        dnaName: 'enterprise-governance',
+        changeType: 'add',
+        proposedRule: {
+          id: 'smoke-rule',
+          level: 'low',
+          action: 'log',
+          conditions: [],
+          description: 'smoke',
+        },
+        rationale: 'smoke run',
+      },
+    ],
+    ['bos_evaluate_hybrid', { action: 'smoke', agentId: 'smoke-mcp' }],
+  ];
+  for (const [name, args] of engineCalls) {
+    const response = await request('tools/call', { name, arguments: args });
+    const text = response?.content?.[0]?.text ?? '';
+    if (response?.isError) throw new Error(`${name} returned isError: ${text.slice(0, 200)}`);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`${name} did not return JSON: ${text.slice(0, 200)}`);
+    }
+    if (parsed.ok === false) {
+      throw new Error(`${name} reported ok=false: ${text.slice(0, 200)}`);
+    }
+  }
+  console.log('exposed engines answered:', engineIds.length, '/', engineIds.length);
 } catch (error) {
   exitCode = 1;
   console.error('Smoke test failed:', error.message);

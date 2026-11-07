@@ -18,7 +18,7 @@ plugins and MCP servers.
 | Agents          | `.opencode/agents/<id>.md`                  | Research, planning, review and audit roles             |
 | Commands        | `.opencode/commands/<id>.md`                | Repeatable `/govern`, `/verify`, `/audit` workflows    |
 | Skills          | `.opencode/skills/<id>/SKILL.md`            | Procedures loaded only when the task matches           |
-| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 91 `bos_*` tools    |
+| Plugin          | `.opencode/plugins/behavioros.ts`           | Native Behavior-OS enforcement and 102 `bos_*` tools   |
 | External MCP    | `packages/mcp-server` (+ local `.mcp.json`) | Integration for MCP clients outside OpenCode           |
 
 `AGENTS.md` is discovered automatically. `docs/PROTOCOL.md`,
@@ -100,7 +100,7 @@ directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
 
 The native integration is the plugin. `.opencode/plugins/behavioros.ts` is a
 thin auto-discovered loader that re-exports
-`plugins/opencode-v2/dist/index.js`. The plugin registers 91 `bos_*` tools and
+`plugins/opencode-v2/dist/index.js`. The plugin registers 102 `bos_*` tools and
 the hooks that make governance visible:
 
 - `permission.evaluate`: the only typed denial surface; applies DNA `deny` and
@@ -119,7 +119,7 @@ the hooks that make governance visible:
   applies the deny-list, per-session quota and doom-loop guard before the call.
   Both modes only run when a DNA is selected and the tool is governed.
 - `tool.execute.after`: records failures in the learning engine.
-- `tool.transform`: registers the 91 `bos_*` tools. Governance is applied per
+- `tool.transform`: registers the 102 `bos_*` tools. Governance is applied per
   call, so the catalog stays stable instead of hiding tools by DNA.
 
 `setup()` also detects a second Behavior-OS host. If the user-level or project
@@ -180,7 +180,7 @@ pnpm verify:opencode
 
 It checks the config schema, instruction files, permission ordering, required
 agents and their least-privilege rules, command templates and agent references,
-skill discovery, the 91-tool plugin surface, the loader target, the
+skill discovery, the 102-tool plugin surface, the loader target, the
 separation between the plugin and any local `.mcp.json`, and that no
 control-plane file is git-ignored. It exits non-zero on the first failed check.
 

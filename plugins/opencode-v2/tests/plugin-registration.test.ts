@@ -1982,6 +1982,43 @@ describe('behavior-os governance log', () => {
     expect(src).toContain('process.env.BEHAVIOROS_DB_PATH');
     expect(src).toContain('persistence:');
   });
+
+  // Kept last on purpose: it selects a DNA, and the plugin's BehaviorOS instance
+  // is a module singleton, so earlier tests that assert "no DNA selected" must
+  // run before it.
+  it('surfaces prediction-engine forecasts from the learning history (option D.1)', async () => {
+    // The prediction engine was only reachable through the bos_predict_governance
+    // tool. The heartbeat wires it into the real tool-completion path: after a
+    // few completions it forecasts from the learning log and records an
+    // advisory entry. We seed two failures (a repeated pattern) so the engine
+    // has something to predict.
+    const { ctx, toolHooks, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const byName = Object.fromEntries(addedTools.map((tool) => [tool.name, tool]));
+    await byName.bos_select_dna.execute?.({ pattern: 'devops-pipeline' });
+
+    const executeAfter = toolHooks['execute.after'] as (event: unknown) => Promise<void>;
+    for (let index = 0; index < 2; index += 1) {
+      await executeAfter({
+        tool: 'bash',
+        status: 'error',
+        error: { message: `flaky check ${index}` },
+      });
+    }
+    // Two failures already counted; three successes reach the fifth completion.
+    for (let index = 0; index < 3; index += 1) {
+      await executeAfter({ tool: 'read', status: 'success' });
+    }
+
+    const { getGovernanceLog } = await import('@behavior-os/core');
+    const forecasts = getGovernanceLog(200).filter((entry) =>
+      /^prediction:/.test(entry.detail ?? ''),
+    );
+    expect(forecasts.length).toBeGreaterThan(0);
+    expect(forecasts[0].detail).toMatch(/confidence=\d\.\d{2}/);
+    expect(forecasts[0].detail).toMatch(/horizon=\d+h/);
+  });
 });
 
 describe('describeProtocolProgress', () => {
