@@ -372,44 +372,72 @@ check('behavior-os skill lists the real protocol steps', () => {
 
 /* ------------------------------------------------------------ plugin + MCP */
 
-check('exactly one plugin loader points at the versioned build', () => {
-  // The loader may live in the repo (local dev) or in the global config dir,
-  // but never both: OpenCode calls setup() for each loader, so two loaders
-  // register the 102 bos_* tools twice and the second host diverges.
+check('plugin loaders are single-scope, versioned and distinct', () => {
+  // A project loader and a user-level loader may coexist only because they use
+  // different plugin ids and entry points, and the global host yields when the
+  // project ships its own loader. More than one loader per scope is always a
+  // conflict: setup() would register the 102 bos_* tools twice.
   const userPlugins = join(homedir(), '.config', 'opencode', 'plugins');
-  const candidates = [
-    join('.opencode', 'plugins', 'behavioros.ts'),
-    join('.opencode', 'plugins', 'behavioros.js'),
-    join(userPlugins, 'behavioros.ts'),
-    join(userPlugins, 'behavioros.js'),
-  ].filter((file) => existsSync(file));
-  if (candidates.length === 0) {
+  const scopes = [
+    {
+      name: 'project',
+      files: [
+        join('.opencode', 'plugins', 'behavioros.ts'),
+        join('.opencode', 'plugins', 'behavioros.js'),
+      ],
+      expected: 'dist/index.js',
+      base: repoRoot,
+    },
+    {
+      name: 'global',
+      files: [join(userPlugins, 'behavioros.ts'), join(userPlugins, 'behavioros.js')],
+      expected: 'dist/global.js',
+      base: null,
+    },
+  ];
+  const found = [];
+  for (const scope of scopes) {
+    const present = scope.files.filter((file) =>
+      existsSync(scope.base === null ? file : join(scope.base, file)),
+    );
+    if (present.length > 1) {
+      fail(`duplicate ${scope.name} Behavior-OS loaders: ${present.join(', ')}. Keep exactly one.`);
+    }
+    if (present.length === 1) found.push({ scope, file: present[0] });
+  }
+  if (found.length === 0) {
     fail('no Behavior-OS plugin loader found in the project or the user config');
   }
-  if (candidates.length > 1) {
-    fail(
-      `duplicate Behavior-OS plugin loaders would register the 102 bos_* tools twice: ${candidates.join(
-        ', ',
-      )}. Keep exactly one.`,
-    );
+  for (const { scope, file } of found) {
+    const loader = readFileSync(scope.base === null ? file : join(scope.base, file), 'utf-8');
+    const specifier = loader.match(
+      /from\s+['"]([^'"]*plugins\/opencode-v2\/dist\/(?:index|global)\.js)['"]/,
+    )?.[1];
+    if (specifier === undefined) {
+      fail(`${scope.name} loader must re-export a plugins/opencode-v2/dist entry`);
+    }
+    if (/^[A-Za-z]:[\\/]/.test(specifier)) {
+      fail(
+        `${scope.name} loader specifier "${specifier}" is a bare Windows path; the ESM loader ` +
+          'rejects it (ERR_UNSUPPORTED_ESM_URL_SCHEME). Use a relative path or a file:// URL.',
+      );
+    }
+    if (!specifier.endsWith(scope.expected)) {
+      fail(
+        `${scope.name} loader must target ${scope.expected} so both hosts keep distinct plugin ids, ` +
+          `found ${specifier}`,
+      );
+    }
   }
-  const loader = readFileSync(
-    candidates[0].startsWith('.opencode') ? join(repoRoot, candidates[0]) : candidates[0],
-    'utf-8',
-  );
-  const specifier = loader.match(
-    /from\s+['"]([^'"]*plugins\/opencode-v2\/dist\/index\.js)['"]/,
-  )?.[1];
-  if (specifier === undefined) {
-    fail('loader must re-export plugins/opencode-v2/dist/index.js');
+  const projectEntry = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
+  if (!/id:\s*'behavior-os'/.test(projectEntry)) {
+    fail("project entry must keep the plugin id 'behavior-os'");
   }
-  if (/^[A-Za-z]:[\\/]/.test(specifier)) {
-    fail(
-      `loader specifier "${specifier}" is a bare Windows path; the ESM loader rejects it ` +
-        '(ERR_UNSUPPORTED_ESM_URL_SCHEME). Use a relative path or a file:// URL.',
-    );
+  const globalEntry = readText(join('plugins', 'opencode-v2', 'src', 'global.ts'));
+  if (!/id:\s*'behavior-os-global'/.test(globalEntry)) {
+    fail("global entry must use the distinct plugin id 'behavior-os-global'");
   }
-  return `single loader: ${candidates[0]}`;
+  return found.map(({ scope, file }) => `${scope.name}: ${file}`).join(' + ');
 });
 
 check('plugin exposes 102 unique bos_* tools', () => {

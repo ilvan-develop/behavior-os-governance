@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
@@ -510,6 +511,18 @@ async function registerBootstrapCommand(ctx: Context): Promise<void> {
       },
     });
   });
+}
+
+/**
+ * True when the project ships its own OpenCode plugin loader. The global host
+ * (`dist/global.js`) yields in that case: two loaders would register the same
+ * 102 `bos_*` tools and run two engines with divergent DNA state.
+ */
+export function hasProjectLoader(directory: string): boolean {
+  return [
+    path.join(directory, '.opencode', 'plugins', 'behavioros.ts'),
+    path.join(directory, '.opencode', 'plugins', 'behavioros.js'),
+  ].some((file) => existsSync(file));
 }
 
 export default Plugin.define({

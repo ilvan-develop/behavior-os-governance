@@ -138,22 +138,31 @@ V2's `mcp.servers` shape.
 
 ## Exactly one host per project
 
-OpenCode calls `setup()` once per loader. Two loaders therefore register the
-same 102 `bos_*` tools twice and run two engines that disagree about the active
-DNA. Keep **exactly one** Behavior-OS loader per machine/project:
+OpenCode calls `setup()` once per loader. Two loaders with the same plugin id
+would register the same 102 `bos_*` tools twice and run two engines that
+disagree about the active DNA. The two loaders therefore have distinct ids and
+entry points, and the global one yields to the project one:
 
-- the project loader `.opencode/plugins/behavioros.ts`, or
-- a user-level loader at `~/.config/opencode/plugins/behavioros.js`.
+| Scope         | Loader                                     | Build entry      | Plugin id            |
+| ------------- | ------------------------------------------ | ---------------- | -------------------- |
+| Project       | `.opencode/plugins/behavioros.ts`          | `dist/index.js`  | `behavior-os`        |
+| User (global) | `~/.config/opencode/plugins/behavioros.js` | `dist/global.js` | `behavior-os-global` |
 
-Never both. A leftover user-level loader that points at this repository is a
-development artifact: disable or delete it before starting the host. The loader
-must re-export the build with a relative path or a `file://` URL. A bare
-Windows specifier such as `C:/www/behavior-os/plugins/opencode-v2/dist/index.js`
-is rejected by the ESM loader with `ERR_UNSUPPORTED_ESM_URL_SCHEME`, which
-causes the whole plugin (and the server that loads it) to fail.
+`dist/global.js` stays dormant when the project ships its own loader, so a
+machine may keep both installed without a duplicate-tool conflict. Outside this
+repository it keeps the opt-in gate: without `.behavioros/config.json` it only
+registers `/bos-init` (unless `BEHAVIOROS_FORCE_ENABLED=true`).
 
-`pnpm verify:opencode` fails when it finds more than one loader or a bare
-Windows specifier, so this cannot regress silently.
+Each scope may have at most one loader, and the loader must re-export the build
+with a relative path or a `file://` URL. A bare Windows specifier such as
+`C:/www/behavior-os/plugins/opencode-v2/dist/global.js` is rejected by the ESM
+loader with `ERR_UNSUPPORTED_ESM_URL_SCHEME`, which causes the whole plugin
+(and the server that loads it) to fail.
+
+`pnpm verify:opencode` fails when a scope has more than one loader, when the
+global loader points at `dist/index.js`, when the ids collapse to the same
+value, or when a specifier is a bare Windows path, so this cannot regress
+silently.
 
 ## Opt-in per project
 
@@ -199,10 +208,10 @@ pnpm verify:opencode
 
 It checks the config schema, instruction files, permission ordering, required
 agents and their least-privilege rules, command templates and agent references,
-skill discovery, the 102-tool plugin surface, the single loader and its ESM
-specifier, the separation between the plugin and any local `.mcp.json`, and that
-no control-plane file is git-ignored. It exits non-zero on the first failed
-check.
+skill discovery, the 102-tool plugin surface, the loader scopes, distinct entry
+points and ESM specifiers, the separation between the plugin and any local
+`.mcp.json`, and that no control-plane file is git-ignored. It exits non-zero on
+the first failed check.
 
 The full definition of done is:
 
