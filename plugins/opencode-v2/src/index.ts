@@ -46,6 +46,7 @@ import {
   GOVERNED_PREAMBLE_MARKER,
   isMutating,
 } from './governance.js';
+import { recordLearningInGraph } from './learning-graph.js';
 import { LoopManager, type LoopTaskInput } from './loop-manager.js';
 import {
   DEFAULT_DEDUPE_TTL_MS,
@@ -1587,12 +1588,34 @@ export default Plugin.define({
             impact: params.impact as 'low' | 'medium' | 'high' | 'critical',
             relatedMission: params.relatedMission,
           });
-          await persistState(ctx);
-          return {
-            content: record
-              ? `Learning recorded: ${event.id} (record ${record.id} at observation; promote it with learningId + stage)`
-              : `Learning recorded: ${event.id} (lifecycle record unavailable [STALE_HOST]: restart the session to load the rebuilt core)`,
-          };
+          // Option C: the learning is now a node in the knowledge graph (G-001),
+          // connected to its mission with EVIDENCE_FOR + PART_OF edges. This is
+          // what makes the orchestrator's "contextual memory" actually usable —
+          // a learning is no longer siloed in the learning engine.
+          try {
+            const graph = recordLearningInGraph(bos, event.id, {
+              label: params.content.slice(0, 80),
+              type: params.type,
+              impact: params.impact,
+              source: params.source,
+              relatedMission: params.relatedMission,
+            });
+            await persistState(ctx);
+            return {
+              content: record
+                ? `Learning recorded: ${event.id} (record ${record.id} at observation; promote it with learningId + stage). Graph: node ${graph.node}, ${graph.edges.length} edge(s).`
+                : `Learning recorded: ${event.id} (lifecycle record unavailable [STALE_HOST]: restart the session to load the rebuilt core). Graph: node ${graph.node}.`,
+            };
+          } catch {
+            // Graph registration is best-effort: a learning must still be
+            // recorded even if the knowledge graph is unavailable.
+            await persistState(ctx);
+            return {
+              content: record
+                ? `Learning recorded: ${event.id} (record ${record.id} at observation; promote it with learningId + stage)`
+                : `Learning recorded: ${event.id} (lifecycle record unavailable [STALE_HOST]: restart the session to load the rebuilt core)`,
+            };
+          }
         },
       });
 
