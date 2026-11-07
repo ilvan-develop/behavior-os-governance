@@ -32,8 +32,8 @@ describe('MCP server structure', () => {
     expect(serverSource).toContain("actor: 'mcp'");
   });
 
-  it('registers exactly 87 tools', () => {
-    expect(toolNames).toHaveLength(87);
+  it('registers exactly 98 tools', () => {
+    expect(toolNames).toHaveLength(98);
   });
 
   it('exposes the governed policy console', () => {
@@ -114,6 +114,24 @@ describe('MCP server structure', () => {
     // and bos_get_state never called advanceProtocolStep — unlike the plugin host.
     expect(serverSource).toContain("advanceProtocolStep('bos_list_dna')");
     expect(serverSource).toContain("advanceProtocolStep('bos_get_state')");
+  });
+
+  it('exposes the 11 isolated engines (Option D)', () => {
+    for (const name of [
+      'bos_detect_anomalies',
+      'bos_recommend_circuit_breaker',
+      'bos_collective_decision',
+      'bos_map_compliance',
+      'bos_select_gates_by_confidence',
+      'bos_transfer_across_domains',
+      'bos_adjust_policy_for_risk',
+      'bos_explainable_report',
+      'bos_export_audit_to_siem',
+      'bos_governance_as_code',
+      'bos_evaluate_hybrid',
+    ]) {
+      expect(toolNames, `missing engine tool ${name}`).toContain(name);
+    }
   });
 
   it('states the real tool count in the package manifest', () => {

@@ -2231,6 +2231,597 @@ server.registerTool(
 );
 
 // ============================================================
+// EXPOSED ENGINES TOOLS (Option D — the 11 isolated engines)
+//
+// These tools make every engine in the BehaviorOS facade reachable from an
+// external MCP client, mirroring the 11 read-only tools the OpenCode plugin
+// registers in plugins/opencode-v2/src/exposed-engines.ts. They are thin
+// wrappers: one engine method per tool, no side effects beyond what the
+// engine itself records, JSON-stringified output.
+// ============================================================
+
+server.registerTool(
+  'bos_detect_anomalies',
+  {
+    description:
+      'Score a behavior profile against the recent baseline for an agent. Returns the anomaly score (0..1), whether it crosses the threshold, and the dimensions that deviated.',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID to score'),
+      profile: z
+        .object({ traits: z.record(z.string(), z.number()), traitsCount: z.number().optional() })
+        .describe('BehaviorProfile to score against the baseline'),
+      threshold: z.number().min(0).max(1).default(0.3).optional().describe('Anomaly threshold'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Detect Anomalies' },
+  },
+  async ({
+    agentId,
+    profile,
+    threshold,
+  }: {
+    agentId: string;
+    profile: Record<string, unknown>;
+    threshold?: number;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getAnomalyDetection();
+      engine.recordBehavior(agentId, profile as never);
+      const score = engine.scoreAnomaly(agentId, profile as never);
+      const isAnomalous = engine.isAnomalous(agentId, profile as never, threshold ?? 0.3);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              { ok: true, agentId, score: score ?? null, isAnomalous, threshold: threshold ?? 0.3 },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_recommend_circuit_breaker',
+  {
+    description:
+      'Recompute circuit-breaker threshold recommendations from observed failure patterns. Returns the current failure patterns and the recommended threshold adjustments.',
+    inputSchema: z.object({}),
+    annotations: { readOnlyHint: true, title: 'Recommend Circuit Breaker' },
+  },
+  async () => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getCircuitBreakerIntelligence();
+      const patterns = engine.getFailurePatterns();
+      const adjustments = engine.recommendAdjustments();
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ ok: true, patterns, adjustments }, null, 2) },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_collective_decision',
+  {
+    description:
+      'Run a collective decision over a set of agent votes, weighted by competence and confidence. Returns the outcome, the collective confidence and which votes carried the result. Distinct from bos_resolve_consensus, which uses a flat quorum.',
+    inputSchema: z.object({
+      proposal: z.string().describe('The proposal being decided'),
+      votes: z
+        .array(
+          z.object({
+            agentId: z.string(),
+            choice: z.enum(['approve', 'reject', 'abstain']),
+            weight: z.number().default(1),
+            confidence: z.number().min(0).max(1).default(0.5),
+            rationale: z.string().optional(),
+          }),
+        )
+        .describe('Votes to aggregate'),
+      policy: z
+        .enum(['majority', 'supermajority', 'unanimous'])
+        .default('majority')
+        .optional()
+        .describe('Voting policy'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Collective Decision' },
+  },
+  async ({
+    proposal,
+    votes,
+    policy,
+  }: {
+    proposal: string;
+    votes: Array<{
+      agentId: string;
+      choice: string;
+      weight: number;
+      confidence: number;
+      rationale?: string;
+    }>;
+    policy?: string;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const result = bos
+        .getCollectiveIntelligence()
+        .vote(
+          proposal,
+          votes as never[],
+          (policy ?? 'majority') as 'majority' | 'supermajority' | 'unanimous',
+        );
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, result }, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_map_compliance',
+  {
+    description:
+      'Map the active DNA\u2019s governance rules to a regulation (SOC2, HIPAA, ISO27001, GDPR...). Returns the known maps, the target map, and the overall status.',
+    inputSchema: z.object({
+      regulation: z.string().default('SOC2').optional().describe('Regulation name'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Map Compliance' },
+  },
+  async ({ regulation }: { regulation?: string }) => {
+    try {
+      const bos = getBehaviorOS();
+      const reg = regulation ?? 'SOC2';
+      const engine = bos.getComplianceMapper();
+      const maps = engine.getAllMaps();
+      const target = engine.getComplianceMap(reg);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                ok: true,
+                regulation: reg,
+                map: target ?? null,
+                knownMaps: maps.map((m) => m.regulation),
+                overall: engine.overallStatus(),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_select_gates_by_confidence',
+  {
+    description:
+      'Rank the gates of a pipeline phase by a confidence-weighted score. Use to choose which gates to actually run \u2014 the engine drops low-confidence gates to save time.',
+    inputSchema: z.object({
+      sourcePhase: z
+        .record(z.string(), z.unknown())
+        .describe('PipelinePhaseDefinition JSON (must have id, name, and gates)'),
+      targetPhase: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Optional target PipelinePhaseDefinition'),
+      minConfidence: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.5)
+        .optional()
+        .describe('Minimum confidence threshold'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Select Gates by Confidence' },
+  },
+  async ({
+    sourcePhase,
+    targetPhase,
+    minConfidence,
+  }: {
+    sourcePhase: Record<string, unknown>;
+    targetPhase?: Record<string, unknown>;
+    minConfidence?: number;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const selection = bos
+        .getConfidenceWeightedGateSelector()
+        .selectGates(sourcePhase as never, (targetPhase ?? null) as never, minConfidence ?? 0.5);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, selection }, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_transfer_across_domains',
+  {
+    description:
+      'Suggest rule transfers between two DNA patterns from *different* domains (e.g. financial-compliance \u2192 healthcare-hipaa). Returns the candidate transfers with confidence and a plain-language rationale. Distinct from bos_suggest_cross_dna_transfer, which moves learnings within the *same* DNA lineage.',
+    inputSchema: z.object({
+      sourceDna: z.string().describe('Source DNA pattern key'),
+      targetDna: z.string().describe('Target DNA pattern key'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Transfer Across Domains' },
+  },
+  async ({ sourceDna, targetDna }: { sourceDna: string; targetDna: string }) => {
+    try {
+      const bos = getBehaviorOS();
+      const dnas = await loadDNAPatterns();
+      const source = dnas[sourceDna.toLowerCase()];
+      const target = dnas[targetDna.toLowerCase()];
+      if (!source || !target) {
+        const missing = [!source ? sourceDna : null, !target ? targetDna : null]
+          .filter(Boolean)
+          .join('", "');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `DNA pattern(s) not found: "${missing}". Available: ${Object.keys(dnas).sort().join(', ')}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const engine = bos.getCrossDomainTransfer();
+      const transfers = engine.suggestTransfers(source, target);
+      const similarity = engine.computeSimilarity(source, target);
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ ok: true, similarity, transfers }, null, 2) },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_adjust_policy_for_risk',
+  {
+    description:
+      'Assess the risk of an agent context (denial rate, anomaly deviation, tool diversity, off-hours ratio, recent failures) and create a dynamic policy that adjusts enforcement thresholds accordingly. This is the concrete implementation of "context adapted to each task".',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      factors: z
+        .object({
+          denialRate: z.number().min(0).max(1).default(0),
+          anomalyDeviation: z.number().min(0).max(1).default(0),
+          toolDiversity: z.number().min(0).max(1).default(0),
+          offHoursRatio: z.number().min(0).max(1).default(0),
+          recentFailures: z.number().min(0).max(1).default(0),
+        })
+        .optional()
+        .describe('Risk factors (each 0..1)'),
+      baseRuleIds: z
+        .array(z.string())
+        .default([])
+        .optional()
+        .describe('Rule IDs to wrap in the dynamic policy'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Adjust Policy for Risk' },
+  },
+  async ({
+    agentId,
+    factors,
+    baseRuleIds,
+  }: {
+    agentId: string;
+    factors?: Record<string, number>;
+    baseRuleIds?: string[];
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const f = factors ?? {};
+      const engine = bos.getDynamicPolicy();
+      const assessment = engine.assessRisk(agentId, {
+        denialRate: f.denialRate ?? 0,
+        anomalyDeviation: f.anomalyDeviation ?? 0,
+        toolDiversity: f.toolDiversity ?? 0,
+        offHoursRatio: f.offHoursRatio ?? 0,
+        recentFailures: f.recentFailures ?? 0,
+      });
+      const policy = engine.createDynamicPolicy(agentId, assessment, baseRuleIds ?? []);
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ ok: true, assessment, policy }, null, 2) },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_explainable_report',
+  {
+    description:
+      'Generate a plain-language report of recent governance activity for a non-technical stakeholder. Summarizes decisions, findings, recommendations and an overall severity.',
+    inputSchema: z.object({
+      agentId: z.string().describe('Agent ID'),
+      title: z.string().optional().describe('Report title (default "governance <agent>")'),
+      from: z.string().optional().describe('ISO start of the window'),
+      to: z.string().optional().describe('ISO end of the window'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Explainable Report' },
+  },
+  async ({ agentId, from, to }: { agentId?: string; from?: string; to?: string }) => {
+    try {
+      const bos = getBehaviorOS();
+      const a = agentId ?? 'unknown';
+      const f = from ?? new Date(0).toISOString();
+      const tEnd = to ?? new Date().toISOString();
+      const report = bos.getExplainableReport().generateReport(a, [] as never[], f, tEnd);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, report }, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_export_audit_to_siem',
+  {
+    description:
+      'Export the recent governance audit log in a SIEM-friendly format. Returns the exported lines and the count.',
+    inputSchema: z.object({
+      target: z
+        .string()
+        .default('generic-siem')
+        .optional()
+        .describe('SIEM name (recorded in the header)'),
+      limit: z.number().int().default(100).optional().describe('Max entries to export'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Export Audit to SIEM' },
+  },
+  async ({ target, limit }: { target?: string; limit?: number }) => {
+    try {
+      const bos = getBehaviorOS();
+      const t = target ?? 'generic-siem';
+      const lim = limit ?? 100;
+      const logLines = bos.getGovernanceLog(lim);
+      const result = bos.getExternalSystemAdapter().exportAuditLogs(logLines as never, t);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              { ok: true, target: t, count: logLines.length, exported: result },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_governance_as_code',
+  {
+    description:
+      'Create a governance policy change request (add/modify/delete a rule) and run the CI-style validation. Returns the change request, the CI status and the error list.',
+    inputSchema: z.object({
+      dnaName: z.string().describe('DNA pattern name to modify'),
+      ruleId: z.string().optional().describe('Rule ID to modify or delete'),
+      changeType: z.enum(['add', 'modify', 'delete']).default('add').describe('Type of change'),
+      proposedRule: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('For add/modify: the proposed rule JSON'),
+      rationale: z.string().optional().describe('Why this change is being made'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Governance as Code' },
+  },
+  async ({
+    dnaName,
+    ruleId,
+    changeType,
+    proposedRule,
+    rationale,
+  }: {
+    dnaName: string;
+    ruleId?: string;
+    changeType?: string;
+    proposedRule?: Record<string, unknown>;
+    rationale?: string;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const engine = bos.getGovernanceAsCode();
+      const request = engine.createChangeRequest(
+        dnaName,
+        ruleId ?? '',
+        (changeType ?? 'add') as never,
+        (proposedRule ?? {}) as never,
+        rationale ?? '',
+      );
+      const ci = engine.runCI(request.id);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, request, ci }, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.registerTool(
+  'bos_evaluate_hybrid',
+  {
+    description:
+      'Re-evaluate a governance action with the hybrid engine: it combines the deterministic symbolic (rule-based) verdict with a learned confidence signal (pattern frequency + impact). Use when you want a second opinion on a rule verdict \u2014 the hybrid result flags when the two disagree.',
+    inputSchema: z.object({
+      action: z.string().describe('The action to re-evaluate'),
+      agentId: z.string().describe('Agent ID performing the action'),
+      context: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Context bag for the symbolic evaluation'),
+      patternFrequency: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.5)
+        .optional()
+        .describe('Learned pattern frequency signal (0..1)'),
+      avgImpact: z
+        .number()
+        .min(0)
+        .max(1)
+        .default(0.5)
+        .optional()
+        .describe('Average impact of the pattern (0..1)'),
+    }),
+    annotations: { readOnlyHint: true, title: 'Evaluate Hybrid' },
+  },
+  async ({
+    action,
+    agentId,
+    context,
+    patternFrequency,
+    avgImpact,
+  }: {
+    action: string;
+    agentId?: string;
+    context?: Record<string, unknown>;
+    patternFrequency?: number;
+    avgImpact?: number;
+  }) => {
+    try {
+      const bos = getBehaviorOS();
+      const a = agentId ?? 'unknown';
+      const symbolic = bos.evaluateGovernance(action, { agent: a, context: context ?? {} });
+      const hybrid = bos
+        .getHybridEvaluation()
+        .evaluate(symbolic as never, patternFrequency ?? 0.5, avgImpact ?? 0.5);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, symbolic, hybrid }, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================
 // RESOURCES
 // ============================================================
 

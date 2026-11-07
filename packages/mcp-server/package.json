@@ -1,7 +1,7 @@
 {
   "name": "@behavior-os/mcp-server",
   "version": "2.3.0",
-  "description": "MCP server exposing 87 tools and 2 resources for Behavior-OS governance",
+  "description": "MCP server exposing 98 tools and 2 resources for Behavior-OS governance",
   "type": "module",
   "main": "./dist/server.js",
   "bin": {
