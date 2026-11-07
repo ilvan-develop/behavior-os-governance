@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -371,22 +372,44 @@ check('behavior-os skill lists the real protocol steps', () => {
 
 /* ------------------------------------------------------------ plugin + MCP */
 
-check('plugin loader points at the versioned build', () => {
-  // The loader may live in the repo (local dev) or in the global config dir.
-  const localLoader = join('.opencode', 'plugins', 'behavioros.ts');
-  const globalLoader = join(
-    process.env.HOME ?? '',
-    '.config',
-    'opencode',
-    'plugins',
-    'behavioros.ts',
+check('exactly one plugin loader points at the versioned build', () => {
+  // The loader may live in the repo (local dev) or in the global config dir,
+  // but never both: OpenCode calls setup() for each loader, so two loaders
+  // register the 102 bos_* tools twice and the second host diverges.
+  const userPlugins = join(homedir(), '.config', 'opencode', 'plugins');
+  const candidates = [
+    join('.opencode', 'plugins', 'behavioros.ts'),
+    join('.opencode', 'plugins', 'behavioros.js'),
+    join(userPlugins, 'behavioros.ts'),
+    join(userPlugins, 'behavioros.js'),
+  ].filter((file) => existsSync(file));
+  if (candidates.length === 0) {
+    fail('no Behavior-OS plugin loader found in the project or the user config');
+  }
+  if (candidates.length > 1) {
+    fail(
+      `duplicate Behavior-OS plugin loaders would register the 102 bos_* tools twice: ${candidates.join(
+        ', ',
+      )}. Keep exactly one.`,
+    );
+  }
+  const loader = readFileSync(
+    candidates[0].startsWith('.opencode') ? join(repoRoot, candidates[0]) : candidates[0],
+    'utf-8',
   );
-  const loaderPath = existsSync(localLoader) ? localLoader : globalLoader;
-  const loader = readText(loaderPath);
-  if (!loader.includes('plugins/opencode-v2/dist/index.js')) {
+  const specifier = loader.match(
+    /from\s+['"]([^'"]*plugins\/opencode-v2\/dist\/index\.js)['"]/,
+  )?.[1];
+  if (specifier === undefined) {
     fail('loader must re-export plugins/opencode-v2/dist/index.js');
   }
-  return 'auto-discovered loader';
+  if (/^[A-Za-z]:[\\/]/.test(specifier)) {
+    fail(
+      `loader specifier "${specifier}" is a bare Windows path; the ESM loader rejects it ` +
+        '(ERR_UNSUPPORTED_ESM_URL_SCHEME). Use a relative path or a file:// URL.',
+    );
+  }
+  return `single loader: ${candidates[0]}`;
 });
 
 check('plugin exposes 102 unique bos_* tools', () => {

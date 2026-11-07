@@ -136,6 +136,25 @@ integration for MCP clients outside OpenCode; when present, a local `.mcp.json`
 configures it and is validated by the control-plane gate. Its shape is not
 V2's `mcp.servers` shape.
 
+## Exactly one host per project
+
+OpenCode calls `setup()` once per loader. Two loaders therefore register the
+same 102 `bos_*` tools twice and run two engines that disagree about the active
+DNA. Keep **exactly one** Behavior-OS loader per machine/project:
+
+- the project loader `.opencode/plugins/behavioros.ts`, or
+- a user-level loader at `~/.config/opencode/plugins/behavioros.js`.
+
+Never both. A leftover user-level loader that points at this repository is a
+development artifact: disable or delete it before starting the host. The loader
+must re-export the build with a relative path or a `file://` URL. A bare
+Windows specifier such as `C:/www/behavior-os/plugins/opencode-v2/dist/index.js`
+is rejected by the ESM loader with `ERR_UNSUPPORTED_ESM_URL_SCHEME`, which
+causes the whole plugin (and the server that loads it) to fail.
+
+`pnpm verify:opencode` fails when it finds more than one loader or a bare
+Windows specifier, so this cannot regress silently.
+
 ## Opt-in per project
 
 A globally installed plugin must not govern every project on the machine. The
@@ -180,9 +199,10 @@ pnpm verify:opencode
 
 It checks the config schema, instruction files, permission ordering, required
 agents and their least-privilege rules, command templates and agent references,
-skill discovery, the 102-tool plugin surface, the loader target, the
-separation between the plugin and any local `.mcp.json`, and that no
-control-plane file is git-ignored. It exits non-zero on the first failed check.
+skill discovery, the 102-tool plugin surface, the single loader and its ESM
+specifier, the separation between the plugin and any local `.mcp.json`, and that
+no control-plane file is git-ignored. It exits non-zero on the first failed
+check.
 
 The full definition of done is:
 
