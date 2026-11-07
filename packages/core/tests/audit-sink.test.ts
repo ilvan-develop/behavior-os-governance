@@ -155,4 +155,78 @@ describe('Governance log durable sink', () => {
     expect(result.valid).toBe(false);
     expect(result.reason).toContain('hash mismatch');
   });
+
+  // Two OpenCode sessions can point at the same BEHAVIOR_OS_AUDIT_LOG and
+  // append concurrently. Their per-process sequence counters interleave, so the
+  // file is a multiplexed log: the verifier must attest each instance chain
+  // instead of demanding one global contiguous sequence.
+  async function multiplexedEntries() {
+    const { computeGovernanceHash, GENESIS_HASH } = await import('../src/governance-log.js');
+    const at = new Date().toISOString();
+    const make = (instance: string, seq: number, prevHash: string, detail: string) => {
+      const base = {
+        seq,
+        at,
+        instance,
+        kind: 'permission' as const,
+        outcome: 'allow' as const,
+        dna: 'test',
+        step: 0,
+        mission: null,
+        action: 'a',
+        detail,
+        prevHash,
+      };
+      return { ...base, hash: computeGovernanceHash(base) };
+    };
+    const a1 = make('p1-aaa', 1, GENESIS_HASH, 'a1');
+    const b1 = make('p2-bbb', 1, GENESIS_HASH, 'b1');
+    const a2 = make('p1-aaa', 2, a1.hash, 'a2');
+    const b2 = make('p2-bbb', 2, b1.hash, 'b2');
+    const a3 = make('p1-aaa', 3, a2.hash, 'a3');
+    return { a1, a2, a3, b1, b2 };
+  }
+
+  it('verifies each instance chain when several sessions interleave in one sink', async () => {
+    const { verifyGovernanceLogFile } = await import('../src/governance-log.js');
+    const { a1, b1, a2, b2 } = await multiplexedEntries();
+    writeFileSync(
+      logFile,
+      [a1, b1, a2, b2].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+    );
+
+    const result = verifyGovernanceLogFile(logFile);
+    expect(result.valid).toBe(true);
+    expect(result.checked).toBe(4);
+    // No single instance attests the whole file, so it cannot be "complete".
+    expect(result.complete).toBe(false);
+  });
+
+  it('still detects a hash mismatch inside one instance of a multiplexed sink', async () => {
+    const { verifyGovernanceLogFile } = await import('../src/governance-log.js');
+    const { a1, b1, a2, b2 } = await multiplexedEntries();
+    const tampered = { ...b2, detail: 'tampered' };
+    writeFileSync(
+      logFile,
+      [a1, b1, a2, tampered].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+    );
+
+    const result = verifyGovernanceLogFile(logFile);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('hash mismatch in instance p2-bbb');
+  });
+
+  it('detects a deleted middle line within one instance of a multiplexed sink', async () => {
+    const { verifyGovernanceLogFile } = await import('../src/governance-log.js');
+    const { a1, b1, a3, b2 } = await multiplexedEntries();
+    // a2 (seq 2) is missing: the p1-aaa chain must jump from seq 1 to seq 3.
+    writeFileSync(
+      logFile,
+      [a1, b1, a3, b2].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+    );
+
+    const result = verifyGovernanceLogFile(logFile);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('sequence gap in instance p1-aaa');
+  });
 });

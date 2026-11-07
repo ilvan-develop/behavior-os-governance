@@ -1958,13 +1958,19 @@ export default Plugin.define({
           'Verify the SHA-256 hash chain of the governance log: the in-memory window plus, when BEHAVIOR_OS_AUDIT_LOG is set, the whole append-only JSONL history',
         input: { type: 'object', properties: {} },
         execute: async (): Promise<{ content: string }> => {
-          const verification = verifyGovernanceLog();
+          const memory = verifyGovernanceLog();
           const chain = getGovernanceChainHead();
           const sink = getGovernanceLogSinkStatus();
+          // The durable file is authoritative when enabled: it holds every
+          // session's entries, whereas the in-memory window only sees this
+          // process (and interleaved writers leave sequence gaps in it).
+          const durable = sink.path ? verifyGovernanceLogFile(sink.path) : null;
+          const authoritative = durable ?? memory;
           return {
             content: JSON.stringify(
               {
-                ...verification,
+                ...authoritative,
+                memory,
                 ...chain,
                 sink: {
                   enabled: sink.path !== null,
@@ -1972,7 +1978,7 @@ export default Plugin.define({
                   writeErrors: sink.writeErrors,
                   // Whole-history verification: catches a truncated head, a
                   // deleted line or a reordered entry. `null` when disabled.
-                  durable: sink.path ? verifyGovernanceLogFile(sink.path) : null,
+                  durable,
                 },
               },
               null,

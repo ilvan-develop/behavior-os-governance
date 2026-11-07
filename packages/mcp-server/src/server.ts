@@ -2,7 +2,12 @@
 import { dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { FairnessInput, PolicyActor, PolicyEnforcement } from '@behavior-os/core';
-import { BehaviorOS, PROTOCOL_STEPS, resolveAuditRoot } from '@behavior-os/core';
+import {
+  BehaviorOS,
+  PROTOCOL_STEPS,
+  resolveAuditRoot,
+  verifyGovernanceLogFile,
+} from '@behavior-os/core';
 
 import type {
   ConsensusVote,
@@ -1962,21 +1967,25 @@ server.registerTool(
   async () => {
     try {
       const bos = getBehaviorOS();
-      const verification = bos.verifyAuditTrail();
+      const memory = bos.verifyAuditTrail();
       const chain = bos.getGovernanceChainHead();
       const sink = bos.getGovernanceLogSink();
+      const durable = sink.path ? verifyGovernanceLogFile(sink.path) : null;
+      const authoritative = durable ?? memory;
       return {
         content: [
           {
             type: 'text',
             text: JSON.stringify(
               {
-                ...verification,
+                ...authoritative,
+                memory,
                 ...chain,
                 sink: {
                   enabled: sink.path !== null,
                   path: sink.path,
                   writeErrors: sink.writeErrors,
+                  durable,
                 },
               },
               null,

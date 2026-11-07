@@ -23,9 +23,12 @@
 // - Durable sink (opt-in via GOVERNANCE_LOG_FILE_ENV): each entry is appended to
 //   a JSONL file with flag 'a' (never rewritten). The file holds the whole
 //   history, so `verifyGovernanceLogFile()` additionally detects a truncated
-//   head, a deleted middle line and any reordering — the first entry must be
-//   seq 1 with the genesis hash and seq must be contiguous. On init the sink is
-//   read back, so it is the source of truth for the chain across restarts.
+//   head, a deleted middle line and any reordering. A single-writer file must
+//   start at seq 1 with the genesis hash and stay contiguous. When several
+//   processes share the file (two OpenCode sessions), each `instance`
+//   subsequence is verified as its own chain, so interleaving cannot masquerade
+//   as tampering — and vice versa. On init the sink is read back, so it is the
+//   source of truth for the chain across restarts.
 //
 // Neither level is WORM storage: a root user with write access to the file can
 // rewrite the whole chain and its hashes. What IS guaranteed is that a partial
@@ -392,12 +395,22 @@ export function verifyGovernanceLog(
 }
 
 /**
- * Verify a durable append-only audit log (JSONL) end to end: genesis head,
- * sequence continuity and hash chain.
+ * Verify a durable append-only audit log (JSONL) end to end.
  *
- * This is stronger than {@link verifyGovernanceLog}: the file keeps the whole
- * history, so a truncated head, a deleted middle line, a reordered entry or an
- * edited field is detected — the in-memory buffer can only attest its window.
+ * Two shapes are supported:
+ *
+ * - **Single writer** (the normal case): the file is one chain, so the strict
+ *   check applies — the head must be seq 1 with the genesis hash, seq must be
+ *   contiguous, and every `prevHash`/`hash` must link. A truncated head, a
+ *   deleted middle line, a reordered entry or an edited field is detected.
+ * - **Multiplexed** (more than one `instance` in the file): two OpenCode
+ *   sessions can share `BEHAVIOR_OS_AUDIT_LOG` and append concurrently. A global
+ *   contiguous seq is then impossible (each process owns its own counter), so
+ *   the file is split by `instance` and each subsequence must be its own intact
+ *   chain. Interleaving does not hide tampering: a deleted, reordered or edited
+ *   entry still breaks the sequence or the hash link *within* its instance.
+ *   `complete` is false because no single instance attests the whole file.
+ *
  * A missing or empty file reports `valid: false` instead of silently passing.
  */
 export function verifyGovernanceLogFile(filePath: string): ChainVerification {
@@ -427,6 +440,63 @@ export function verifyGovernanceLogFile(filePath: string): ChainVerification {
     }
   }
 
+  const instances = new Set(entries.map((entry) => entry.instance ?? 'unknown'));
+  if (instances.size <= 1) return verifySingleChainFile(entries);
+
+  const groups = new Map<string, GovernanceLogEvent[]>();
+  for (const entry of entries) {
+    const key = entry.instance ?? 'unknown';
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+  }
+
+  let checked = 0;
+  for (const [instance, chain] of groups) {
+    let prev = chain[0].prevHash;
+    for (let index = 0; index < chain.length; index += 1) {
+      const entry = chain[index];
+      if (index > 0) {
+        const expectedSeq = chain[index - 1].seq + 1;
+        if (entry.seq !== expectedSeq) {
+          return {
+            valid: false,
+            checked,
+            complete: false,
+            brokenAt: entry.seq,
+            reason: `sequence gap in instance ${instance} at seq ${entry.seq} (expected ${expectedSeq})`,
+          };
+        }
+      }
+      if (entry.prevHash !== prev) {
+        return {
+          valid: false,
+          checked,
+          complete: false,
+          brokenAt: entry.seq,
+          reason: `prevHash mismatch in instance ${instance} at seq ${entry.seq}`,
+        };
+      }
+      const expected = computeGovernanceHash(entry);
+      if (entry.hash !== expected) {
+        return {
+          valid: false,
+          checked,
+          complete: false,
+          brokenAt: entry.seq,
+          reason: `hash mismatch in instance ${instance} at seq ${entry.seq}`,
+        };
+      }
+      prev = entry.hash;
+      checked += 1;
+    }
+  }
+
+  return { valid: true, checked, complete: false };
+}
+
+/** Strict verifier for a file written by a single instance (the normal case). */
+function verifySingleChainFile(entries: GovernanceLogEvent[]): ChainVerification {
   if (entries[0].seq !== 1 || entries[0].prevHash !== GENESIS_HASH) {
     return {
       valid: false,
