@@ -53,6 +53,12 @@ import {
   NotificationCoalescer,
   type NotificationIdentity,
 } from './notifications.js';
+import {
+  enableGovernance,
+  isGovernanceEnabled,
+  type OptInResult,
+  resolveDnaSourceDirectory,
+} from './project-optin.js';
 import { assessRiskContext, type RiskFactors } from './risk-context.js';
 import {
   detectOvertake,
@@ -452,10 +458,74 @@ export function describeProtocolProgress(currentStep: number): string {
     : `Protocol step ${currentStep + 1}/${total}`;
 }
 
+/** Name of the command registered while the plugin is dormant. */
+export const BOOTSTRAP_COMMAND = 'bos-init';
+
+/** Human-readable result of `/bos-init`. */
+export function formatOptInMessage(result: OptInResult): string {
+  const copied =
+    result.copied.length === 0 ? 'no new files' : `${result.copied.length} pattern(s) copied`;
+  const skipped =
+    result.skipped.length === 0 ? 'none' : `${result.skipped.length} existing pattern(s) kept`;
+  return [
+    'Behavior-OS governance is now enabled for this project.',
+    `- marker: ${result.configPath}`,
+    `- DNA patterns: ${copied}; ${skipped}`,
+    `- patterns directory: ${result.dnasDirectory}`,
+    'Restart the OpenCode session (or the server) so the plugin runs its setup and registers the bos_* tools.',
+  ].join('\n');
+}
+
+/**
+ * Register `/bos-init` in a dormant project. The command writes the opt-in
+ * marker and copies the DNA patterns. Activation itself needs a restart:
+ * `setup()` runs once per location and `ctx.command.reload()` does not rerun it.
+ */
+async function registerBootstrapCommand(ctx: Context): Promise<void> {
+  const command = ctx.command;
+  if (!command || typeof command.transform !== 'function') return;
+
+  await command.transform((editor) => {
+    editor.add({
+      name: BOOTSTRAP_COMMAND,
+      description: 'Enable Behavior-OS governance for this project (opt in)',
+      execute: async ({ sessionID, prompt, delivery }) => {
+        let text: string;
+        try {
+          text = formatOptInMessage(
+            enableGovernance(
+              ctx.location.directory,
+              resolveDnaSourceDirectory(ctx.location.directory),
+            ),
+          );
+        } catch (error) {
+          text = `Behavior-OS init failed: ${error instanceof Error ? error.message : String(error)}`;
+        }
+
+        if (typeof ctx.session?.synthetic === 'function') {
+          await ctx.session.synthetic({ sessionID, text, delivery });
+          return;
+        }
+        await ctx.session.prompt({ ...prompt, sessionID, text, delivery });
+      },
+    });
+  });
+}
+
 export default Plugin.define({
   id: 'behavior-os',
   async setup(ctx: Context): Promise<(() => Promise<void> | void) | void> {
-    // Opt-in durable, append-only audit sink (JSONL). When set, the file keeps
+    // Opt-in gate: a globally installed plugin must stay dormant in projects
+    // that never asked for governance. Without the marker we register only the
+    // `/bos-init` bootstrap command and touch no other domain.
+    if (!isGovernanceEnabled(ctx.location.directory)) {
+      console.log(
+        `[Behavior-OS] Dormant in ${ctx.location.directory}: no .behavioros/config.json. Run /bos-init to opt in.`,
+      );
+      await registerBootstrapCommand(ctx);
+      return;
+    }
+
     // Opt-in durable, append-only audit sink (JSONL). When set, the file keeps
     // the whole history and is the source of truth for the chain across
     // restarts; without it the trail is in-memory + a bounded snapshot tail.

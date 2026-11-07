@@ -136,6 +136,40 @@ integration for MCP clients outside OpenCode; when present, a local `.mcp.json`
 configures it and is validated by the control-plane gate. Its shape is not
 V2's `mcp.servers` shape.
 
+## Opt-in per project
+
+A globally installed plugin must not govern every project on the machine. The
+plugin therefore stays dormant unless the project opts in with a marker:
+
+```json title=".behavioros/config.json"
+{
+  "governance": {
+    "enabled": true
+  }
+}
+```
+
+Without the marker, `setup()` creates no engine, registers no `bos_*` tool and
+installs no permission, tool, agent or session hook. It only registers the
+`/bos-init` command. A `.behavioros/state.json` written by `behavioros init` is
+accepted as a legacy marker, so CLI-scaffolded projects keep working.
+
+`/bos-init` writes the marker, copies the DNA patterns from the plugin's
+`dist/dnas` directory (or the repository `dnas/` during local development) and
+reports the restart requirement. Existing DNA files are never overwritten.
+The plugin reads the marker in `setup()`, so a new session or a server restart
+is required before the tools and hooks appear; `ctx.command.reload()` does not
+rerun `setup()`.
+
+Two environment overrides cover exceptional cases:
+
+- `BEHAVIOROS_DISABLED=true` keeps the plugin dormant even with the marker.
+- `BEHAVIOROS_FORCE_ENABLED=true` activates governance without the marker.
+
+`instructions` is not an opt-in mechanism: it only adds context files next to
+`AGENTS.md`. Keep governance instructions project-scoped and let the marker
+decide whether the plugin runs.
+
 ## Verification
 
 The control plane has its own gate:
