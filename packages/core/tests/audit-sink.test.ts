@@ -192,7 +192,7 @@ describe('Governance log durable sink', () => {
     const { a1, b1, a2, b2 } = await multiplexedEntries();
     writeFileSync(
       logFile,
-      [a1, b1, a2, b2].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      `${[a1, b1, a2, b2].map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     );
 
     const result = verifyGovernanceLogFile(logFile);
@@ -208,7 +208,7 @@ describe('Governance log durable sink', () => {
     const tampered = { ...b2, detail: 'tampered' };
     writeFileSync(
       logFile,
-      [a1, b1, a2, tampered].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      `${[a1, b1, a2, tampered].map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     );
 
     const result = verifyGovernanceLogFile(logFile);
@@ -222,7 +222,7 @@ describe('Governance log durable sink', () => {
     // a2 (seq 2) is missing: the p1-aaa chain must jump from seq 1 to seq 3.
     writeFileSync(
       logFile,
-      [a1, b1, a3, b2].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      `${[a1, b1, a3, b2].map((entry) => JSON.stringify(entry)).join('\n')}\n`,
     );
 
     const result = verifyGovernanceLogFile(logFile);

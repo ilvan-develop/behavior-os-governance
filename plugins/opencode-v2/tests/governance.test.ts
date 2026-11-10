@@ -367,6 +367,12 @@ describe('classifyMissionIntent', () => {
     expect(classifyMissionIntent('hey there')).toBeNull();
   });
 
+  it('returns null for a continuation of existing work', () => {
+    expect(classifyMissionIntent('prossiga com a implementação dos testes')).toBeNull();
+    expect(classifyMissionIntent('continue with the remaining refactor')).toBeNull();
+    expect(classifyMissionIntent('segue com o plano de migração')).toBeNull();
+  });
+
   it('truncates long prompts to a bounded title', () => {
     const intent = classifyMissionIntent(`Implement ${'very detailed requirement '.repeat(10)}`);
     expect(intent).not.toBeNull();

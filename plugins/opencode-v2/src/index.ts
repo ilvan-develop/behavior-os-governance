@@ -36,6 +36,7 @@ import type {
 import { Plugin } from '@opencode/plugin';
 import type { Context } from '@opencode/plugin/promise/plugin';
 import type { Info as PluginToolInfo } from '@opencode/plugin/promise/tool';
+import { ChiefOrchestrator, type ChiefPlan } from 'behavioros-orchestrator';
 import { DoomLoopGuard, evaluateDenyList, QuotaBreaker } from './company-guard.js';
 import { subscribeToGovernanceEvents } from './event-monitor.js';
 import { EXPOSED_ENGINES } from './exposed-engines.js';
@@ -49,6 +50,7 @@ import {
 } from './governance.js';
 import { recordLearningInGraph } from './learning-graph.js';
 import { LoopManager, type LoopTaskInput } from './loop-manager.js';
+import { shouldReuseCollaboration } from './native-playbook.js';
 import {
   DEFAULT_DEDUPE_TTL_MS,
   NotificationCoalescer,
@@ -79,6 +81,50 @@ let loadedDnaPatterns: Map<string, DNA> = new Map();
 let storageRevision = 0;
 /** Manages autonomous control loops (bos_start_loop / bos_resume_loop / bos_loop_status). */
 let loopManager: LoopManager | null = null;
+
+/**
+ * Per-session chief plan and the collaboration sessions it opened. The plan is
+ * recomputed on every user prompt and injected into `session.context`, so the
+ * model starts each turn already knowing the architecture decision, the phases
+ * and the teammates — without the user asking for a brainstorm or a decision.
+ */
+interface NativePlanEntry {
+  plan: ChiefPlan;
+  at: number;
+  /** Stable, normalized key used to keep one collaboration artifact per intent. */
+  goalKey: string;
+  brainstormId?: string;
+  conversationId?: string;
+}
+const nativePlans = new Map<string, NativePlanEntry>();
+const nativePlanner = new ChiefOrchestrator();
+/** A plan older than this no longer describes the current turn. */
+const NATIVE_PLAN_TTL_MS = 30 * 60 * 1000;
+/** Prompts shorter than this are not work requests worth planning. */
+const NATIVE_MIN_GOAL_LENGTH = 24;
+
+/** Case/whitespace/punctuation-insensitive key for "same intent" reuse. */
+function intentKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
+/**
+ * Persisted collaboration titles/problems must not carry credentials. Mask the
+ * obvious token shapes and cap the stored length; the in-memory plan still
+ * holds the original prompt for this turn.
+ */
+function redactForStorage(text: string, max = 400): string {
+  let out = text
+    .replace(/\b(sk-[a-z0-9]{8,}|ghp_[a-z0-9]{8,}|xox[baprs]-[a-z0-9-]{8,})\b/gi, '[redacted]')
+    .replace(/\b(api[_-]?key|password|passwd|secret|token)(\s*[=:]\s*)\S+/gi, '$1$2[redacted]')
+    .replace(/\b(bearer)\s+[a-z0-9._-]{8,}/gi, '$1 [redacted]');
+  if (out.length > max) out = `${out.slice(0, max - 3).trimEnd()}...`;
+  return out;
+}
 
 /** Storage key under which the engine snapshot is persisted. */
 const STORAGE_KEY = 'behavioros:state';
@@ -942,6 +988,33 @@ export default Plugin.define({
             priority: params.priority as 'critical' | 'high' | 'medium' | 'low',
             requiredChecks: params.requiredChecks,
           });
+          // The prompt hook may have auto-opened a mission for this same
+          // request. An explicit mission supersedes it; two live missions for
+          // one request is the echo this closes.
+          const duplicateWindowMs = 5 * 60 * 1000;
+          const duplicates = bos
+            .listMissions(50)
+            .filter(
+              (candidate) =>
+                candidate.id !== mission.id &&
+                candidate.createdBy === 'behavior-os:auto' &&
+                (candidate.status === 'pending' || candidate.status === 'active') &&
+                Date.now() - Date.parse(candidate.createdAt) <= duplicateWindowMs,
+            );
+          for (const duplicate of duplicates) {
+            const cancelled = bos.cancelMission(duplicate.id, {
+              actor: 'persona:architect',
+              reason: `Superseded by explicit mission ${mission.id}`,
+            });
+            if (cancelled.ok && cancelled.changed) {
+              recordLog(
+                'mission',
+                'info',
+                'bos_create_mission',
+                `Cancelled duplicate auto mission ${duplicate.id} (superseded by ${mission.id})`,
+              );
+            }
+          }
           const persisted = await persistLifecycleChange(ctx, before);
           if (!persisted.ok) {
             return {
@@ -4765,17 +4838,153 @@ export default Plugin.define({
         }
       }
 
+      // 3) Chief orchestration: reason about the request before the model acts.
+      // The plan is deterministic and pure; the collaboration sessions it opens
+      // are the ones the task actually needs, so the user never has to ask for
+      // a brainstorm or a structured conversation explicitly.
+      const sessionKey = event.sessionID ?? 'default';
+      // A greeting is not a work request: do not invent a plan for it, and
+      // clear any stale plan so the next turn does not inherit it.
+      if (text.trim().length < NATIVE_MIN_GOAL_LENGTH) {
+        nativePlans.delete(sessionKey);
+      } else {
+        const activeKey = dnaKeyForName(bos.getState().selectedDna);
+        const activeDna = activeKey ? loadedDnaPatterns.get(activeKey) : undefined;
+        const plan = nativePlanner.plan({ goal: text, dna: activeDna ?? null });
+        const goalKey = intentKey(text);
+        const previousPlan = nativePlans.get(sessionKey);
+        // Reuse the collaboration the previous turn opened when it is the same
+        // intent, or when it was opened moments ago. A genuinely new design
+        // topic gets its own brainstorm instead of inheriting an unrelated one
+        // for the whole plan window.
+        const reusable = shouldReuseCollaboration(
+          previousPlan,
+          goalKey,
+          Date.now(),
+          NATIVE_PLAN_TTL_MS,
+        );
+        let brainstormId = reusable ? previousPlan?.brainstormId : undefined;
+        let conversationId = reusable ? previousPlan?.conversationId : undefined;
+
+        if (plan.assessment.needsDebate && !brainstormId) {
+          try {
+            const session = bos.createBrainstormSession(
+              redactForStorage(plan.debate?.topic ?? `Plan: ${text}`, 120),
+              plan.debate?.participants ?? ['persona:architect', 'persona:reviewer'],
+              bos.getState().selectedDna ?? activeDna?.name ?? 'none',
+            );
+            brainstormId = session.id;
+            recordLog(
+              'advisory',
+              'info',
+              'session.prompt',
+              `Native brainstorm "${session.id}" opened (${plan.assessment.capabilities.join(', ')})`,
+            );
+            await notify(
+              event.sessionID,
+              `[Behavior-OS] 🧠 Opened brainstorm "${session.id}" — the team will compare options before building.`,
+              {
+                kind: 'dna',
+                action: 'session.prompt',
+                reason: `Opened brainstorm "${session.id}"`,
+              },
+            );
+          } catch (error) {
+            recordLog(
+              'advisory',
+              'error',
+              'session.prompt',
+              `Native brainstorm failed: ${describeError(error)}`,
+            );
+          }
+        }
+
+        if (plan.assessment.needsConversation && !conversationId) {
+          try {
+            const result = bos.getPragmaticConversation().startSession({
+              title: redactForStorage(plan.conversation?.topic ?? `Resolve: ${text}`, 120),
+              problem: redactForStorage(text, 600),
+              participants: plan.conversation?.participants ?? [
+                'persona:architect',
+                'persona:reviewer',
+              ],
+            });
+            if (result.success && result.session) {
+              conversationId = result.session.id;
+              recordLog(
+                'advisory',
+                'info',
+                'session.prompt',
+                `Native conversation "${conversationId}" opened`,
+              );
+            }
+          } catch (error) {
+            recordLog(
+              'advisory',
+              'error',
+              'session.prompt',
+              `Native conversation failed: ${describeError(error)}`,
+            );
+          }
+        }
+
+        nativePlans.set(sessionKey, {
+          plan,
+          at: Date.now(),
+          goalKey,
+          brainstormId,
+          conversationId,
+        });
+        behavioros.chiefPlan = {
+          complexity: plan.assessment.complexity,
+          risk: plan.assessment.risk,
+          capabilities: plan.assessment.capabilities,
+          ...(brainstormId ? { brainstormId } : {}),
+          ...(conversationId ? { conversationId } : {}),
+        };
+      }
+
       if (Object.keys(behavioros).length > 0) {
         event.metadata = { ...(event.metadata ?? {}), behavioros };
         await persistState(ctx);
       }
     });
 
+    /**
+     * Live chief plan for this session, rendered for the model context. Empty
+     * when the last prompt was too short to plan or the plan is stale.
+     */
+    const nativeContext = (sessionID?: string): string => {
+      let entry = nativePlans.get(sessionID ?? 'default');
+      // Some hosts omit `sessionID` from the context event. Fall back only when
+      // the plan is unambiguous: with several sessions, the most recent plan
+      // may belong to a different session and would leak its goal text.
+      if (!entry && sessionID === undefined) {
+        const entries = [...nativePlans.values()];
+        if (entries.length === 1) entry = entries[0];
+      }
+      if (!entry || Date.now() - entry.at > NATIVE_PLAN_TTL_MS) return '';
+      const lines = [entry.plan.context];
+      if (entry.brainstormId) {
+        lines.push(
+          `Active brainstorm: ${entry.brainstormId} — propose at least two options with bos_propose_idea, vote with bos_vote_idea, then converge with bos_resolve_consensus.`,
+        );
+      }
+      if (entry.conversationId) {
+        lines.push(
+          `Active conversation: ${entry.conversationId} — add turns with bos_add_conversation_turn and resolve with bos_resolve_conversation.`,
+        );
+      }
+      return lines.join('\n');
+    };
+
     // Session context hook - surface BehaviorOS state to the model. Always
     // injects guidance so cold-start agents are governed too.
     await ctx.session.hook('context', async (event): Promise<void> => {
       const currentState = bos.getState();
       const patterns = Array.from(loadedDnaPatterns.keys()).join(', ');
+      const sessionID = (event as { sessionID?: string }).sessionID;
+      const nativeLine = nativeContext(sessionID);
 
       if (currentState.selectedDna) {
         const nextStep: ProtocolStep | undefined = PROTOCOL_STEPS[currentState.currentStep];
@@ -4801,6 +5010,7 @@ export default Plugin.define({
             stepLine,
             missionLine,
             `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
+            ...(nativeLine ? [nativeLine] : []),
           ].join('\n'),
         });
         return;
@@ -4813,6 +5023,7 @@ export default Plugin.define({
           'Before mutating files or running risky commands, call bos_select_dna with the pattern that best matches the task.',
           `Available DNA patterns (${loadedDnaPatterns.size}): ${patterns}`,
           'Then follow the 7-step protocol: select DNA -> list DNA -> get state -> create mission -> start mission -> run audit -> record learning.',
+          ...(nativeLine ? [nativeLine] : []),
         ].join('\n'),
       });
     });

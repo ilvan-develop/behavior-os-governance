@@ -1,4 +1,5 @@
 ---
+
 name: Behavior-OS
 description: Govern agent actions with Behavior-OS. Use when a task involves governance, DNA patterns, missions, audits, compliance, production changes, or any risky/mutating action. Selects the right DNA pattern, follows the 7-step protocol, and explains governance blocks.
 ---
@@ -15,6 +16,27 @@ selected, no action is governed.
 - When the user mentions governance, compliance, missions, DNA, audits, or a domain
   (HIPAA, trading, Web3, embedded, …).
 - When an action is blocked with a `[Behavior-OS:…]` message.
+
+## Native autopilot (use without being asked)
+
+When Behavior-OS is active, these are the **default** reactions to a request —
+the user should never have to say "use brainstorming" or "evaluate fairness":
+
+| Request signal                                    | Reach for                                                                              |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| architecture, design, trade-off, "which approach" | state alternatives → `bos_resolve_consensus`/`bos_decide` → `bos_create_meta_decision` |
+| ideation, several viable options                  | `bos_create_brainstorm` → `bos_propose_idea` (≥2) → `bos_vote_idea`                    |
+| more than one perspective, disagreement           | `bos_start_conversation` → `bos_add_conversation_turn` → `bos_resolve_conversation`    |
+| dataset, schema, ETL, data quality                | assess provenance first, then `bos_check_quality`                                      |
+| model, ranking, automated decision                | `bos_evaluate_fairness` (+ `bos_map_compliance`) before shipping                       |
+| library/framework/SDK/API/version                 | official docs first (`docs-research`); never invent an API                             |
+| install/scaffold/new stack                        | `stack-install` skill: framework CLI, no hand-written generated code                   |
+| production, destructive, security change          | `bos_preflight` → obey the DNA verdict                                                 |
+| before saying "done"                              | `bos_run_audit` with real evidence → `bos_record_learning`                             |
+
+A **chief plan** for the current request (complexity, risk, decision, phases,
+teammates, active brainstorm/conversation) is injected into the session context.
+Follow it unless the evidence contradicts it.
 
 ## 7-step protocol
 
@@ -34,18 +56,18 @@ Run the steps in order; the `currentStep` is monotonic (1→7) and surfaced by t
 If unsure, let the `session.prompt` hook auto-select from the user's intent, or pick from
 these common matches:
 
-| Intent signals | Pattern |
-|---|---|
-| deploy, release, CI/CD, rollback | `devops-pipeline` |
-| kubernetes, helm, cluster | `cloud-native` |
-| patient, PHI, HIPAA, clinical | `healthcare-hipaa` |
-| production change, zero-defect, sterile | `surgical-team` |
-| trading, order book, latency, risk | `fintech-trading` |
-| transaction, payment, KYC/AML | `financial-compliance` |
-| SOX, financial reporting, controls | `enterprise-sox` |
-| model training, drift, dataset | `ai-ml-pipeline` |
-| smart contract, wallet, on-chain | `blockchain-web3` |
-| sprint, agile, MVP | `startup-agile` |
+| Intent signals                          | Pattern                |
+| --------------------------------------- | ---------------------- |
+| deploy, release, CI/CD, rollback        | `devops-pipeline`      |
+| kubernetes, helm, cluster               | `cloud-native`         |
+| patient, PHI, HIPAA, clinical           | `healthcare-hipaa`     |
+| production change, zero-defect, sterile | `surgical-team`        |
+| trading, order book, latency, risk      | `fintech-trading`      |
+| transaction, payment, KYC/AML           | `financial-compliance` |
+| SOX, financial reporting, controls      | `enterprise-sox`       |
+| model training, drift, dataset          | `ai-ml-pipeline`       |
+| smart contract, wallet, on-chain        | `blockchain-web3`      |
+| sprint, agile, MVP                      | `startup-agile`        |
 
 To stop blocking in a restrictive session, select a warn-only pattern such as
 `lean-factory`.

@@ -94,7 +94,9 @@ never in frontmatter.
 
 Skills are advertised by their description and loaded only when relevant. The
 directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
-`name` and `description` accurate.
+`name` and `description` accurate. `stack-install` is the guardrail for new
+stacks: official docs first, framework CLI generates the files, never hand-write
+generated code, verify with real commands.
 
 ## Plugin and MCP
 
@@ -109,11 +111,16 @@ the hooks that make governance visible:
   mission is live, releases a stale mission after its TTL, and creates one
   mission when the session needs one. Selection is task-scoped instead of
   permanent: a new task can move from Lean Factory to Surgical Team without a
-  restart.
+  restart. For every substantive prompt it also runs `ChiefOrchestrator`, opens
+  the brainstorm/conversation the goal needs, and stores the plan for the next
+  turn.
 - `session.context`: when a DNA is selected, injects the current DNA, protocol
-  step, active mission (or `none`) and identity; otherwise injects cold-start
-  guidance.
-- `agent.transform`: adds a short governed preamble to each agent prompt.
+  step, active mission (or `none`), identity and the live **chief plan**
+  (complexity, risk, architecture decision, phases, owners, active collaboration
+  session ids); otherwise injects cold-start guidance.
+- `agent.transform`: adds the governed preamble **and the native operating
+  contract** to each agent prompt, so the model reaches for brainstorming,
+  conversations, fairness and audit without being told.
 - `tool.execute.before`: advisory escalation logging in human-in-the-loop mode;
   in autonomous mode (`BEHAVIOROS_AUTONOMOUS=true`) it is a hard veto that
   applies the deny-list, per-session quota and doom-loop guard before the call.

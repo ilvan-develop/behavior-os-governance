@@ -142,14 +142,14 @@ describe('BehaviorOS DNA evolution', () => {
     const bos = await bosWithFailures({ evolution: { enabled: true } });
     bos.applyEvolution({ apply: true });
 
-    const decision = bos.evaluateGovernance('deploy', {
+    const decision = bos.evaluateGovernance('run-task', {
       agent: 'a',
       context: { tool: 'write' },
     });
     expect(decision.verdict).toBe('allow');
     expect(decision.warnings).toEqual(['Warning from rule: evo-warn-failure-write']);
 
-    const unrelated = bos.evaluateGovernance('deploy', {
+    const unrelated = bos.evaluateGovernance('run-task', {
       agent: 'a',
       context: { tool: 'shell' },
     });

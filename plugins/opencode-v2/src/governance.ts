@@ -7,6 +7,7 @@
 
 import { isMutatingAction } from '@behavior-os/core';
 import type { MissionPriority, MissionType } from '@behavior-os/schemas';
+import { buildOperatingContract } from './native-playbook.js';
 
 /** Alias of the core action classifier: one mutation vocabulary for all hosts. */
 export const isMutating = isMutatingAction;
@@ -409,7 +410,15 @@ const MISSION_PRIORITY_KEYWORDS: ReadonlyArray<readonly [MissionPriority, readon
 
 /** Short social replies that should never spawn a mission. */
 const SOCIAL_REPLY =
-  /^(hi|hello|hey|yo|thanks|thank you|ok|okay|yes|no|sure|please|go on|continue)[\s!.?]*$/i;
+  /^(hi|hello|hey|yo|thanks|thank you|ok|okay|yes|no|sure|please|go on|continue|continua|continuar|prossiga|prosseguir|segue|segue em frente|avanca|avança|next|go ahead)[\s!.?]*$/i;
+
+/**
+ * A continuation ("prossiga com a implementação") resumes existing work; it is
+ * not a new work item. Creating a mission for it is what produced the echo
+ * missions in the ledger, so it is filtered before keyword classification.
+ */
+const CONTINUATION_PREFIX =
+  /^(continua|continuar|continue|prossiga|prosseguir|segue|go on|next)\b/i;
 
 /** A lightweight, auto-derived mission. */
 export interface MissionIntent {
@@ -435,6 +444,7 @@ export function classifyMissionIntent(text: string): MissionIntent | null {
   const trimmed = text.trim();
   if (trimmed.length < 12) return null;
   if (SOCIAL_REPLY.test(trimmed)) return null;
+  if (CONTINUATION_PREFIX.test(trimmed)) return null;
 
   const haystack = ` ${trimmed.toLowerCase()} `;
   const hasWord = (word: string): boolean => new RegExp(`\\b${word}\\b`).test(haystack);
@@ -485,5 +495,6 @@ export function buildGovernedPreamble(): string {
     '[Behavior-OS] This project is governed. Before mutating files or running risky commands, select a DNA pattern with bos_select_dna and follow the 7-step protocol: bos_list_dna -> bos_get_state -> bos_create_mission -> bos_start_mission -> bos_run_audit -> bos_record_learning.',
     'The active DNA, current step and mission are provided in the session context. Load the behavior-os skill for the intent-to-DNA map and the meaning of a governance block or escalation.',
     'For multi-step or delegated work, prefer the orchestration tools (bos_start_loop, bos_resolve_consensus, bos_create_brainstorm) over ad-hoc execution; validate with bos_run_audit before bos_complete_mission.',
+    buildOperatingContract(),
   ].join('\n');
 }

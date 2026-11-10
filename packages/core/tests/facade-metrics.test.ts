@@ -35,15 +35,15 @@ describe('BehaviorOS metrics instrumentation', () => {
       ]),
     );
 
-    const deny = bos.evaluateGovernance('deploy', { agent: 'a', context: { tool: 'write' } });
+    const deny = bos.evaluateGovernance('run-task', { agent: 'a', context: { tool: 'write' } });
     expect(deny.verdict).toBe('deny');
     expect(deny.firedRules).toEqual(['exact-write']);
 
-    const warn = bos.evaluateGovernance('deploy', { agent: 'a', context: { tool: 'note' } });
+    const warn = bos.evaluateGovernance('run-task', { agent: 'a', context: { tool: 'note' } });
     expect(warn.verdict).toBe('allow');
     expect(warn.warnings).toEqual(['Warning from rule: note']);
 
-    const allow = bos.evaluateGovernance('deploy', { agent: 'a', context: { tool: 'shell' } });
+    const allow = bos.evaluateGovernance('run-task', { agent: 'a', context: { tool: 'shell' } });
     expect(allow.verdict).toBe('allow');
 
     const metrics = bos.getMetrics();

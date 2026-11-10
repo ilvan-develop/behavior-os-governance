@@ -1,4 +1,5 @@
 export * from './adapters.js';
+export * from './chief.js';
 export * from './circuit-breaker.js';
 export * from './control-loop.js';
 export * from './delegation.js';

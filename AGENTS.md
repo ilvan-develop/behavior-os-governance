@@ -19,7 +19,7 @@ packages/core/         48 engines + BehaviorOS facade + persistence
 packages/sdk/          TypeScript SDK
 packages/cli/          CLI (init, validate, status, simulate, deploy, ...)
 packages/mcp-server/   MCP server: 98 tools + 2 resources (stdio)
-packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (68 tests)
+packages/orchestrator/ Real task orchestration: shell adapter, retries, circuit breaker, persistent control loop (180 tests: 177 passed + 3 skipped)
 plugins/opencode-v2/   OpenCode V2 plugin: 102 bos_* tools + hooks
 examples/              Workspace example app (4 tests in `pnpm test`)
 dnas/                  21 DNA pattern YAML files
@@ -108,6 +108,28 @@ The plugin surfaces the current step in every session. The 7 steps are:
 A `deny` from a DNA rule is final. Do not retry the same action or try to
 bypass the rule; report the rule and either reshape the action or ask the
 operator to select a different DNA pattern.
+
+## Native operating contract
+
+Governance is the default behavior, not a tool you call when asked. When a DNA
+is active the plugin appends this contract to every agent and injects a **chief
+plan** (complexity, risk, architecture decision, phases, owners, active
+brainstorm/conversation) into the session context on each substantive prompt.
+
+- **Decide reversible, in-scope choices yourself.** Escalate only when a DNA rule
+  or an irreversible/high-risk action requires a human. The chief plan's
+  decision is data; the DNA remains the authority.
+- **Use the collaboration engines unprompted.** Architecture/design → compare
+  alternatives and record the decision. Ideation → `bos_create_brainstorm` with
+  at least two ideas. Disagreement/multiple perspectives →
+  `bos_start_conversation`. Contested/irreversible → weighted consensus.
+- **Assess data and fairness before shipping.** Datasets need provenance and
+  quality; models/rankings need `bos_evaluate_fairness`.
+- **Stacks are installed, not imagined.** Use the `stack-install` skill: read
+  the official docs for the exact version, scaffold with the framework CLI,
+  never hand-write generated files, verify with real commands.
+- **Evidence before claims.** `bos_run_audit` with executed checks, then
+  `bos_record_learning`. A simulated audit never counts as a pass.
 
 ## Change workflow
 

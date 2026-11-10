@@ -34,6 +34,7 @@ coverage/
 !.opencode/skills/engineering-cycle/
 !.opencode/skills/release/
 !.opencode/skills/verification-first/
+!.opencode/skills/stack-install/
 .claude/
 .cursor/
 .vscode/

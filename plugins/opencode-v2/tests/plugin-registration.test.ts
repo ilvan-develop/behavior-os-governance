@@ -488,6 +488,11 @@ describe('behavior-os plugin registration', () => {
     expect(build?.system).toContain('<!-- behavior-os:governed -->');
     expect(build?.system).toContain('bos_select_dna');
     expect(build?.system).toContain('bos_start_loop');
+    // The native operating contract is part of every agent, not only the
+    // per-request context: the model behaves governed even before a prompt.
+    expect(build?.system).toContain('governed teammate');
+    expect(build?.system).toContain('bos_create_brainstorm');
+    expect(build?.system).toContain('bos_evaluate_fairness');
     // Agents without a system prompt still receive it.
     expect(review?.system).toContain('<!-- behavior-os:governed -->');
 
@@ -542,7 +547,14 @@ describe('behavior-os plugin registration', () => {
       metadata: {} as Record<string, unknown>,
     };
     await (sessionHooks.prompt as (e: unknown) => Promise<void>)(second);
-    expect(second.metadata.behavioros).toBeUndefined();
+    // A second prompt still gets a chief plan even when no mission is opened;
+    // it must not spawn a second mission.
+    const secondBehavioros = second.metadata.behavioros as {
+      autoMission?: string;
+      chiefPlan?: { risk?: string };
+    };
+    expect(secondBehavioros.autoMission).toBeUndefined();
+    expect(secondBehavioros.chiefPlan?.risk).toBe('high');
 
     // Cancelling the live mission clears activeMission; the context hook must
     // then tell the model to create and start a new one instead of implying an
@@ -556,6 +568,158 @@ describe('behavior-os plugin registration', () => {
     expect(afterCancel.system.map((entry) => entry.text).join('\n')).toContain(
       'Active mission: none',
     );
+  });
+
+  it('opens the collaboration a design prompt needs and injects the chief plan', async () => {
+    const { ctx, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const event = {
+      sessionID: 'ses-chief',
+      prompt: {
+        text: 'Design the architecture for a multi-tenant billing service and compare approaches',
+      },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+
+    const chief = event.metadata.behavioros as {
+      chiefPlan?: { capabilities?: string[]; brainstormId?: string };
+    };
+    expect(chief?.chiefPlan?.capabilities).toContain('architecture-decision');
+    expect(chief?.chiefPlan?.brainstormId).toMatch(/^brainstorm-/);
+
+    const contextEvent = {
+      sessionID: 'ses-chief',
+      system: [] as Array<{ type: string; text: string }>,
+    };
+    await (sessionHooks.context as (e: unknown) => Promise<void>)(contextEvent);
+    const contextText = contextEvent.system.map((entry) => entry.text).join('\n');
+
+    expect(contextText).toContain('[Behavior-OS:chief]');
+    expect(contextText).toContain('Decision (data, not authority)');
+    expect(contextText).toContain(`Active brainstorm: ${chief.chiefPlan?.brainstormId}`);
+    expect(contextText).toContain('bos_propose_idea');
+  });
+
+  it('does not open a collaboration for a read-only review prompt', async () => {
+    const { ctx, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const event = {
+      sessionID: 'ses-read-only',
+      prompt: {
+        text:
+          'Review this repository for correctness, security and regressions, report the ' +
+          'highest risk findings with file and line references, and do not change any files',
+      },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+
+    const chief = event.metadata.behavioros as {
+      chiefPlan?: { brainstormId?: string; conversationId?: string };
+    };
+    expect(chief?.chiefPlan?.brainstormId).toBeUndefined();
+    expect(chief?.chiefPlan?.conversationId).toBeUndefined();
+
+    const contextEvent = {
+      sessionID: 'ses-read-only',
+      system: [] as Array<{ type: string; text: string }>,
+    };
+    await (sessionHooks.context as (e: unknown) => Promise<void>)(contextEvent);
+    expect(contextEvent.system.map((entry) => entry.text).join('\n')).not.toContain(
+      'Active brainstorm',
+    );
+  });
+
+  it('reuses the collaboration session when the wording changes inside the window', async () => {
+    const { ctx, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const first = {
+      sessionID: 'ses-reuse',
+      prompt: { text: 'Design the architecture for a multi-tenant billing service' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(first);
+    const firstPlan = first.metadata.behavioros as { chiefPlan?: { brainstormId?: string } };
+    const brainstormId = firstPlan.chiefPlan?.brainstormId;
+    expect(brainstormId).toMatch(/^brainstorm-/);
+
+    const second = {
+      sessionID: 'ses-reuse',
+      prompt: { text: 'Design the architecture for a multi-tenant billing service now' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(second);
+    const secondPlan = second.metadata.behavioros as { chiefPlan?: { brainstormId?: string } };
+    expect(secondPlan.chiefPlan?.brainstormId).toBe(brainstormId);
+  });
+
+  it('does not open a mission for a continuation prompt', async () => {
+    const { ctx, addedTools, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'open-source' });
+
+    const event = {
+      sessionID: 'ses-continuation',
+      prompt: { text: 'prossiga com a implementação dos testes de integração do módulo' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+
+    expect((event.metadata.behavioros as { autoMission?: string }).autoMission).toBeUndefined();
+  });
+
+  it('cancels the auto mission when an explicit mission supersedes it', async () => {
+    const { ctx, addedTools, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    // The store may be shared with earlier cases in this file; a live mission
+    // would suppress the auto-mission path this test is about.
+    const existing = JSON.parse(
+      (await runTool(addedTools, 'bos_list_missions', {})).content,
+    ) as Array<{ id: string; status: string }>;
+    for (const mission of existing) {
+      if (mission.status === 'active' || mission.status === 'pending') {
+        await runTool(addedTools, 'bos_cancel_mission', {
+          missionId: mission.id,
+          reason: 'test setup: isolate the auto-mission path',
+        });
+      }
+    }
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'open-source' });
+
+    const event = {
+      sessionID: 'ses-dedupe',
+      prompt: {
+        text: 'Implement a mission dedupe guard so the operator sees exactly one live mission per request',
+      },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+    const autoMission = (event.metadata.behavioros as { autoMission?: string }).autoMission;
+    expect(autoMission).toMatch(/^mission-/);
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'Implement the mission dedupe guard',
+      type: 'feature',
+      priority: 'high',
+      requiredChecks: ['test'],
+    });
+    const explicitMission = /Mission created: (mission-[\w-]+)/.exec(created.content)?.[1];
+    expect(explicitMission).toMatch(/^mission-/);
+    expect(explicitMission).not.toBe(autoMission);
+
+    const listed = await runTool(addedTools, 'bos_list_missions', {});
+    const missions = JSON.parse(listed.content) as Array<{ id: string; status: string }>;
+    const live = missions
+      .filter((mission) => mission.status === 'active' || mission.status === 'pending')
+      .map((mission) => mission.id);
+    expect(live).not.toContain(autoMission);
+    expect(live).toContain(explicitMission);
+    expect(missions.find((mission) => mission.id === autoMission)?.status).toBe('cancelled');
   });
 
   it('denies a production change through the permission hook once a DNA is selected', async () => {

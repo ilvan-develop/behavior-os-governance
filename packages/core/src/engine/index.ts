@@ -24,7 +24,11 @@ import { ExplainableReportEngine } from './explainable-report-engine.js';
 import { ExternalSystemAdapter } from './external-adapter-engine.js';
 import { FairnessEngine } from './fairness-engine.js';
 import { GovernanceAsCodeEngine } from './governance-as-code-engine.js';
-import { GovernanceEngine } from './governance-engine.js';
+import {
+  classifyIrreversibleAction,
+  classifyIrreversibleCommand,
+  GovernanceEngine,
+} from './governance-engine.js';
 import { HybridEvaluationEngine } from './hybrid-evaluation-engine.js';
 import { KnowledgeGraphEngine } from './knowledge-graph-engine.js';
 import { LearningEngine } from './learning-engine.js';
@@ -49,6 +53,7 @@ import { ZeroTrustIdentityEngine } from './zero-trust-identity-engine.js';
 export { resolveAuditRoot } from './audit-engine.js';
 export * from './code-edit-engine.js';
 export type { FairnessInput, ProvenanceCheck } from './fairness-engine.js';
+export type { SafetyFloorKind } from './governance-engine.js';
 export type {
   AdvanceLearningRecordOptions,
   CreateLearningRecordOptions,
@@ -84,6 +89,8 @@ export {
   CrossDnaLearningEngine,
   CrossDnaPipelineTransferEngine,
   CrossDomainTransferEngine,
+  classifyIrreversibleAction,
+  classifyIrreversibleCommand,
   DecisionEngine,
   DNALoader,
   DriftEngine,

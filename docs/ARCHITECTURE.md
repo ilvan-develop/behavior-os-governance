@@ -287,6 +287,16 @@ mission plan through real adapters. `ControlLoop`
 continuation on top of it. Both are libraries, not new tool surfaces: MCP still
 exposes 98 tools and the plugin 102.
 
+`ChiefOrchestrator` (`packages/orchestrator/src/chief.ts`) is the planning layer
+above dispatch: a pure, deterministic planner that assesses a goal (complexity,
+risk, debate/research/stack/fairness needs), records an architecture decision
+with alternatives, assigns owners from the active DNA personas, and emits a
+phased task plan with gates. The OpenCode plugin runs it on every substantive
+`session.prompt`, opens the collaboration session the goal actually needs
+(brainstorm or pragmatic conversation), and injects the plan into
+`session.context`. The plan is data: the DNA verdict still governs execution,
+and the chief never bypasses preflight or audit.
+
 - `ShellAdapter` spawns a real child process, captures `stdout`/`stderr` and the
   exit code, truncates output, and honours cancellation (SIGTERM, then SIGKILL).
 - Adapter output is validated against `AdapterResultSchema` before it can affect

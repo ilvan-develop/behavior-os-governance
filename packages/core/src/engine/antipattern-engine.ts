@@ -10,6 +10,17 @@ export interface AntipatternDetectionResult {
     info: number;
     total: number;
   };
+  /**
+   * What the scan actually inspected. A `total: 0` result is only meaningful
+   * next to this: the engine is a bounded regex heuristic, not a proof of
+   * absence.
+   */
+  coverage: {
+    lines: number;
+    chars: number;
+    rules: number;
+    note: string;
+  };
 }
 
 export interface FixedPattern {
@@ -115,12 +126,8 @@ export class AntipatternEngine {
     ];
 
     // Apply all patterns
-    for (const { pattern: regex, type, severity } of [
-      ...tsErrors,
-      ...lintPatterns,
-      ...securityPatterns,
-      ...perfPatterns,
-    ]) {
+    const rules = [...tsErrors, ...lintPatterns, ...securityPatterns, ...perfPatterns];
+    for (const { pattern: regex, type, severity } of rules) {
       const matches = text.match(regex);
       if (matches) {
         const id = `ap-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -150,6 +157,12 @@ export class AntipatternEngine {
         low: detected.filter((p) => p.severity === 'low').length,
         info: detected.filter((p) => p.severity === 'info').length,
         total: detected.length,
+      },
+      coverage: {
+        lines: text.length === 0 ? 0 : text.split(/\r?\n/).length,
+        chars: text.length,
+        rules: rules.length,
+        note: 'Bounded regex heuristic. Zero findings is not proof of absence; pair it with lint/typecheck/tests.',
       },
     };
   }

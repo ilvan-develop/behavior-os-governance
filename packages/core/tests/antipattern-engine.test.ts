@@ -25,6 +25,16 @@ describe('AntipatternEngine', () => {
     expect(result.summary.total).toBe(0);
   });
 
+  it('reports what it scanned so zero findings is not mistaken for proof', () => {
+    const engine = new AntipatternEngine();
+    const result = engine.scan('line one\nline two');
+
+    expect(result.coverage.lines).toBe(2);
+    expect(result.coverage.chars).toBe('line one\nline two'.length);
+    expect(result.coverage.rules).toBeGreaterThan(0);
+    expect(result.coverage.note).toMatch(/not proof of absence/i);
+  });
+
   it('fixes a pattern', () => {
     const engine = new AntipatternEngine();
     const scanResult = engine.scan('Error: eval(userInput) is dangerous');
