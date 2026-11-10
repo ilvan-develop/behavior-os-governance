@@ -213,6 +213,12 @@ export class GovernanceEngine {
     let reason = 'No rules violated';
     let transformed = false;
     const warnings: string[] = [];
+    // A `warn`-action DNA rule is an operator's opt-out from the escalation:
+    // when the active DNA explicitly warns on an irreversible action (e.g. the
+    // Open Source `git-release-warn` rule), the safety floor degrades to a
+    // warning instead of escalating. An absent or `block`/`escalate` rule
+    // leaves the floor authoritative.
+    let dnaWarnsOnIrreversible = false;
 
     // Sort rules by level for priority processing
     const sortedRules = [...this.rules].sort((a, b) => {
@@ -239,6 +245,7 @@ export class GovernanceEngine {
             break;
           case 'warn':
             warnings.push(`Warning from rule: ${rule.id}`);
+            dnaWarnsOnIrreversible = true;
             if (verdict === 'allow') {
               reason = warnings.join('; ');
             }
@@ -255,14 +262,24 @@ export class GovernanceEngine {
 
     // Safety floor: irreversible actions can never be an unconditional allow,
     // regardless of which DNA pattern is active. A DNA `deny`/`escalate` stays
-    // authoritative; the floor only raises an `allow` to `escalate`.
+    // authoritative; the floor only raises an `allow` to `escalate` unless the
+    // DNA explicitly opted out of the escalation with a `warn` rule (e.g. the
+    // Open Source `git-release-warn`), in which case the floor degrades to a
+    // warning instead of escalating.
     const safetyFloor = classifyIrreversibleAction(context.action, context.context);
     if (safetyFloor && verdict === 'allow') {
-      verdict = 'escalate';
-      reason = `Escalated by safety floor: irreversible ${safetyFloor} requires human approval`;
       evaluatedRules.push(SAFETY_FLOOR_RULE_ID);
       firedRules.push(SAFETY_FLOOR_RULE_ID);
-      warnings.push(`Safety floor: ${safetyFloor} is irreversible and DNA-independent`);
+      if (dnaWarnsOnIrreversible) {
+        warnings.push(
+          `Safety floor: ${safetyFloor} is irreversible but the active DNA opts out of escalation`,
+        );
+        if (verdict === 'allow') reason = warnings.join('; ');
+      } else {
+        verdict = 'escalate';
+        reason = `Escalated by safety floor: irreversible ${safetyFloor} requires human approval`;
+        warnings.push(`Safety floor: ${safetyFloor} is irreversible and DNA-independent`);
+      }
     }
 
     const result: GovernanceDecision = {

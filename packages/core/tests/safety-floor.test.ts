@@ -130,6 +130,32 @@ describe('GovernanceEngine safety floor', () => {
     expect(decision.reason).toContain('deployment');
   });
 
+  it('degrades to a warning when the active DNA opts out with a `warn` rule', () => {
+    const engine = new GovernanceEngine(
+      createDNA([
+        {
+          id: 'git-release-warn',
+          level: 'high',
+          action: 'warn',
+          conditions: [{ type: 'tool', value: 'shell' }],
+        },
+      ]),
+    );
+
+    const decision = engine.evaluate({
+      action: 'git push origin main',
+      agentId: 'agent-1',
+      context: { tool: 'shell' },
+    });
+
+    // The floor still registers as a fired rule and adds its warning, but the
+    // DNA's `warn` opt-out keeps the verdict at `allow` instead of `escalate`.
+    expect(decision.verdict).toBe('allow');
+    expect(decision.firedRules).toContain('safety-floor');
+    expect(decision.firedRules).toContain('git-release-warn');
+    expect(decision.warnings?.join(' ')).toContain('opts out of escalation');
+  });
+
   it('keeps the floor on cached decisions', () => {
     const engine = new GovernanceEngine(createDNA());
     const request = {

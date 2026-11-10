@@ -39,6 +39,13 @@ governance:
       - type: "no-changelog"
         value: true
     description: "Block releases without changelog"
+  - id: "git-release-warn"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "tool"
+        value: "shell"
+    description: "Warn on git commit/push so the operator sees a soft notice instead of a hard escalation; destructive and production-change actions remain gated"
 quality:
   - id: "conformance"
     type: "lint"
