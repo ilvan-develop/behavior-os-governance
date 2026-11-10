@@ -179,4 +179,22 @@ describe('classifyIrreversibleCommand', () => {
     expect(decision.verdict).toBe('escalate');
     expect(decision.rulesEvaluated).toContain('safety-floor');
   });
+
+  it('classifies nested interpreter payloads', () => {
+    expect(classifyIrreversibleCommand('bash -c "git push origin main"')).toBe('deployment');
+    expect(classifyIrreversibleCommand("sh -c 'kubectl delete pod api'")).toBe('destructive');
+    expect(classifyIrreversibleCommand('cmd /c "del C:\\\\data"')).toBe('destructive');
+    expect(classifyIrreversibleCommand('pwsh -Command "Remove-Item ./dist -Recurse"')).toBe(
+      'destructive',
+    );
+    expect(classifyIrreversibleCommand('eval "terraform apply -auto-approve"')).toBe('deployment');
+  });
+
+  it('keeps a nested read-only payload read-only and bounds recursion', () => {
+    expect(classifyIrreversibleCommand('bash -c "grep -r deploy docs"')).toBeNull();
+
+    let nested = 'git push';
+    for (let i = 0; i < 5; i += 1) nested = `bash -c "${nested}"`;
+    expect(classifyIrreversibleCommand(nested)).toBeNull();
+  });
 });

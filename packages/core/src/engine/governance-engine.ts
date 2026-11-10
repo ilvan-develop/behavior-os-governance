@@ -40,6 +40,7 @@ const DEPLOY_VERBS = new Set([
 ]);
 const DESTRUCTIVE_VERBS = new Set([
   'delete',
+  'del',
   'destroy',
   'drop',
   'truncate',
@@ -47,6 +48,11 @@ const DESTRUCTIVE_VERBS = new Set([
   'wipe',
   'erase',
   'uninstall',
+  'rm',
+  'rmdir',
+  'rd',
+  'format',
+  'remove-item',
 ]);
 const SECRET_VERBS = new Set(['secrets', 'secret', 'credentials', 'credential', 'keychain']);
 
@@ -91,12 +97,27 @@ function executionCommand(action: string, context: Record<string, unknown>): str
  * Only the command position of each segment counts, so `grep deploy README.md`
  * stays read-only while `git push` or `sudo kubectl delete` does not.
  */
-export function classifyIrreversibleCommand(command: string): SafetyFloorKind | null {
+export function classifyIrreversibleCommand(command: string, depth = 0): SafetyFloorKind | null {
   for (const rawSegment of command.split(/&&|\|\||[;|\n]/)) {
     let segment = rawSegment.trim().toLowerCase();
     if (segment.length === 0) continue;
     // Strip wrappers that keep the real command in the next position.
     segment = segment.replace(/^(?:sudo|env|nohup|time|command|exec|builtin)\s+/, '');
+
+    // Nested interpreter payloads: `bash -c "git push"`, `cmd /c "del ..."`,
+    // `eval "terraform apply"`. Bounded recursion so a crafted chain cannot
+    // spin the classifier.
+    const nested = /^(?:bash|sh|zsh|pwsh|powershell|cmd)\s+(?:-c|\/c|-command)\s+(.+)$/.exec(
+      segment,
+    );
+    const evaluated = /^eval\s+(.+)$/.exec(segment);
+    const payload = nested?.[1] ?? evaluated?.[1];
+    if (payload !== undefined && depth < 3) {
+      const inner = payload.trim().replace(/^(['"])([\s\S]*)\1$/, '$2');
+      const innerKind = classifyIrreversibleCommand(inner, depth + 1);
+      if (innerKind) return innerKind;
+    }
+
     const head = segment.split(/\s+/)[0] ?? '';
 
     if (DEPLOY_VERBS.has(head)) return 'deployment';
@@ -115,6 +136,7 @@ export function classifyIrreversibleCommand(command: string): SafetyFloorKind | 
     if (/^docker\s+push\b/.test(segment)) return 'deployment';
     if (/^helm\s+(?:upgrade|install)\b/.test(segment)) return 'deployment';
     if (/^helm\s+(?:uninstall|delete)\b/.test(segment)) return 'destructive';
+    if (/^reg\s+delete\b/.test(segment)) return 'destructive';
   }
   return null;
 }

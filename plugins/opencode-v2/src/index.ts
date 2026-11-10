@@ -4824,16 +4824,15 @@ export default Plugin.define({
           });
           bos.startMission(mission.id, { advanceProtocol: false });
           behavioros.autoMission = mission.id;
+          // The mission is surfaced in `session.context` as "Active mission: …"
+          // and in `metadata.behavioros.autoMission`. A synthetic notice would
+          // outlive a supersede and replay a stale "Opened mission" message, so
+          // the durable context line is the single source the model reads.
           recordLog(
             'mission',
             'info',
             'session.prompt',
             `Auto-created mission "${mission.id}" (${intent.type}/${intent.priority})`,
-          );
-          await notify(
-            event.sessionID,
-            `[Behavior-OS] 🎯 Opened mission "${mission.id}" for this request.`,
-            { kind: 'mission', action: 'session.prompt', reason: `Opened mission "${mission.id}"` },
           );
         }
       }

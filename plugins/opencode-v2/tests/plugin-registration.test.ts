@@ -673,7 +673,7 @@ describe('behavior-os plugin registration', () => {
   });
 
   it('cancels the auto mission when an explicit mission supersedes it', async () => {
-    const { ctx, addedTools, sessionHooks } = createFakeContext(repoRoot);
+    const { ctx, addedTools, sessionHooks, syntheticCalls } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);
 
     // The store may be shared with earlier cases in this file; a live mission
@@ -701,6 +701,9 @@ describe('behavior-os plugin registration', () => {
     await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
     const autoMission = (event.metadata.behavioros as { autoMission?: string }).autoMission;
     expect(autoMission).toMatch(/^mission-/);
+    // The live mission reaches the model through session.context; a queued
+    // "Opened mission" notice would survive a supersede and replay stale state.
+    expect(syntheticCalls.map((call) => call.text).join('\n')).not.toContain('Opened mission');
 
     const created = await runTool(addedTools, 'bos_create_mission', {
       title: 'Implement the mission dedupe guard',
