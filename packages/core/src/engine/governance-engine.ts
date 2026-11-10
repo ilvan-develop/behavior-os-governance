@@ -147,13 +147,46 @@ export function classifyIrreversibleCommand(command: string, depth = 0): SafetyF
  * tools are deliberately not scanned: a search that mentions "deploy" is not a
  * deployment (C24).
  */
+/**
+ * Actions that count as a *write* to the environment (code or config). These
+ * are the operations that a host may tag with `production-change` when the
+ * touched content lives in production; everything else (read-only tools) is
+ * never a production change.
+ */
+const WRITE_TOOLS = new Set([
+  'edit',
+  'write',
+  'patch',
+  'apply',
+  'move',
+  'create',
+  'delete',
+  'bash',
+  'shell',
+  'exec',
+  'execute',
+  'run',
+  'spawn',
+  'command',
+  'process',
+  'migrate',
+  'install',
+]);
+
 export function classifyIrreversibleAction(
   action: string,
   context: Record<string, unknown>,
 ): SafetyFloorKind | null {
   const flags = context ?? {};
   if (flags.deployment === true) return 'deployment';
-  if (flags['production-change'] === true || flags.production === true) {
+
+  // A `production-change` flag is only meaningful on a write operation:
+  // writing `infra/prod/main.tf` counts, but a read-only tool that merely
+  // mentions "production" in its arguments does not. (C24.)
+  const headOfAction = action.trim().toLowerCase().split(/\s+/)[0] ?? '';
+  const toolName = typeof flags.tool === 'string' ? flags.tool.toLowerCase() : '';
+  const isWrite = WRITE_TOOLS.has(headOfAction) || WRITE_TOOLS.has(toolName);
+  if ((flags['production-change'] === true || flags.production === true) && isWrite) {
     return 'production-change';
   }
   if (flags.destructive === true) return 'destructive';

@@ -45,7 +45,14 @@ governance:
     conditions:
       - type: "tool"
         value: "shell"
-    description: "Warn on git commit/push so the operator sees a soft notice instead of a hard escalation; destructive and production-change actions remain gated"
+    description: "Warn on shell git commit/push so the operator sees a soft notice instead of a hard escalation"
+  - id: "code-edit-warn"
+    level: "high"
+    action: "warn"
+    conditions:
+      - type: "tool"
+        value: "edit"
+    description: "Warn on edit/write so the operator sees a soft notice for local code changes; destructive and production-change in real prod paths still escalate"
 quality:
   - id: "conformance"
     type: "lint"

@@ -36,6 +36,20 @@ describe('classifyIrreversibleAction', () => {
     );
   });
 
+  it('a production-change flag alone never escalates a read-only tool (C24)', () => {
+    // The host derives `production-change: true` from any non-read-only action
+    // whose *text* mentions "production". A read-only tool that merely
+    // mentions "production" in its arguments must not become a production
+    // change.
+    expect(classifyIrreversibleAction('grep', { 'production-change': true })).toBeNull();
+    expect(classifyIrreversibleAction('read-file', { production: true })).toBeNull();
+    expect(classifyIrreversibleAction('inspect', { 'production-change': true })).toBeNull();
+    // A write action with the flag is still a production change.
+    expect(classifyIrreversibleAction('edit', { 'production-change': true })).toBe(
+      'production-change',
+    );
+  });
+
   it('does not read an irreversible intent out of a read-only action (C24)', () => {
     expect(classifyIrreversibleAction('grep', {})).toBeNull();
     expect(classifyIrreversibleAction('read-file', {})).toBeNull();
