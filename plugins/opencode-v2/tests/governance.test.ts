@@ -167,6 +167,36 @@ describe('buildGovernanceContext', () => {
     expect(context.production).toBe(false);
   });
 
+  it('does not flag a production change from a text-only mention in a local edit', () => {
+    // The prompt/diff merely says "production"; no resource path or deploy
+    // verb points at a production artifact, so a local code edit must not
+    // become a production change (C24 class of false positive).
+    const localEdit = buildGovernanceContext({
+      tool: 'edit',
+      action: 'edit packages/core/src/engine/governance-engine.ts',
+      text: 'update the production config example in the docs',
+      resources: ['packages/core/src/engine/governance-engine.ts'],
+    });
+    expect(localEdit['production-change']).toBeUndefined();
+    expect(localEdit.production).toBeUndefined();
+
+    // A real production artifact in the resources is still a production change.
+    const prodEdit = buildGovernanceContext({
+      tool: 'edit',
+      action: 'edit infra/prod/main.tf',
+      resources: ['infra/prod/main.tf'],
+    });
+    expect(prodEdit['production-change']).toBe(true);
+    expect(prodEdit.production).toBe(true);
+
+    // A deploy verb + production wording still counts.
+    const deploy = buildGovernanceContext({
+      tool: 'bash',
+      text: 'deploy model v2 to production',
+    });
+    expect(deploy['production-change']).toBe(true);
+  });
+
   it('never throws on odd input', () => {
     expect(() => buildGovernanceContext({})).not.toThrow();
     expect(() =>
@@ -194,17 +224,32 @@ describe('buildGovernanceContext', () => {
   });
 
   it('separates a deployment mention from a production change (C24)', () => {
-    const edit = buildGovernanceContext({
+    // An edit whose *diff* says "roll out to production" is still a production
+    // change, because the edit is the mechanism by which the production content
+    // changes. But the flag is only raised when the resource path points at a
+    // production artifact, or the action is an executing deploy verb; a local
+    // code file that merely *mentions* production in its diff stays a normal
+    // `change`, not a `production-change` (the C24 class of false positive
+    // that made ordinary `edit` calls escalate on the safety floor).
+    const prodFileEdit = buildGovernanceContext({
       tool: 'edit',
       action: 'edit',
       text: 'publish the release notes and roll out to production',
+      resources: ['infra/prod/release-notes.md'],
     });
-    // An edit is a change, and one that touches production is a production change
-    // (surgical-team's `sterile-field` rule blocks on it)...
-    expect(edit.change).toBe(true);
-    expect(edit.production).toBe(true);
-    // ...but it is not a deployment: only an action that can deploy performs one.
-    expect(edit.deployment).toBeUndefined();
+    expect(prodFileEdit.change).toBe(true);
+    expect(prodFileEdit.production).toBe(true);
+    expect(prodFileEdit['production-change']).toBe(true);
+
+    const localFileEdit = buildGovernanceContext({
+      tool: 'edit',
+      action: 'edit',
+      text: 'publish the release notes and roll out to production',
+      resources: ['packages/core/src/engine/governance-engine.ts'],
+    });
+    expect(localFileEdit.change).toBe(true);
+    expect(localFileEdit.production).toBeUndefined();
+    expect(localFileEdit['production-change']).toBeUndefined();
   });
 
   it('still flags a real deployment performed by an executing action (C24)', () => {

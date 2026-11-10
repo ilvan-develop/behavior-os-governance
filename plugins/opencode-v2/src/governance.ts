@@ -139,9 +139,36 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
   // A production *change*, however, is touched by anything that is not read-only:
   // writing `infra/prod/main.tf` counts, and surgical-team's `sterile-field` rule
   // blocks on it. `prod` uses a word boundary so "product"/"produce" do not match.
+  //
+  // A text mention alone is *not* enough: any prompt or diff that merely says
+  // "production" would turn every local code edit into a production change and
+  // fire the safety floor on ordinary `edit` calls (C24 class of false positive).
+  // The flag is raised only when a *resource* (file path, URL) points at a
+  // production artifact — `prod/`, `production/`, `/prod`, `.prod`, `--prod`
+  // flag, or a resource whose path contains a production segment — or when the
+  // action is explicitly a deploy/promote verb *and* the text says production.
+  // The action string itself (often a path or command) also points at a
+  // resource, so it joins the resource text for production-path detection.
+  const resourcesText = (signals.resources ?? []).join(' ');
+  const productionSegments = [
+    'prod/',
+    'production/',
+    '/prod/',
+    '.prod',
+    '-prod',
+    '--prod',
+    ' to prod',
+    ' to production',
+  ];
+  const hasProductionPath = productionSegments.some((segment) => resourcesText.includes(segment));
+  const hasProductionFlag = hasPhrase('--prod', '-prod');
+  const deployVerb =
+    canOperate && (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship'));
   if (
     (canOperate || changesState) &&
-    (hasWord('production', 'prod', 'live') || hasPhrase('--prod', '-prod'))
+    (hasProductionPath ||
+      (deployVerb && hasWord('production', 'prod', 'live')) ||
+      (deployVerb && hasProductionFlag))
   ) {
     context.production = true;
     context['production-change'] = true;
