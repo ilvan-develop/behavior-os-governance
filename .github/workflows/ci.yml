@@ -21,7 +21,9 @@ jobs:
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm verify:governance
-      - run: pnpm verify:plugin
+      - run: pnpm verify:capabilities
+- run: pnpm verify:tool-parity
+- run: pnpm verify:plugin
       - run: pnpm smoke:mcp
       - run: pnpm verify:opencode
 

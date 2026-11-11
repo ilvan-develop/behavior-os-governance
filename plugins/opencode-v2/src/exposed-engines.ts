@@ -256,6 +256,11 @@ export const EXPOSED_ENGINES: readonly ExposedToolDefinition[] = [
           description:
             'Risk factors: { denialRate, anomalyDeviation, toolDiversity, offHoursRatio, recentFailures } — each 0..1',
         },
+        baseRuleIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Rule IDs to wrap in the dynamic policy',
+        },
       },
       required: ['agentId'],
     },
@@ -341,7 +346,7 @@ export const EXPOSED_ENGINES: readonly ExposedToolDefinition[] = [
         },
         rationale: { type: 'string' },
       },
-      required: ['dnaName', 'changeType'],
+      required: ['dnaName'],
     },
     execute: async (input, bos) => {
       const dnaName = pickString(input, 'dnaName') ?? '';

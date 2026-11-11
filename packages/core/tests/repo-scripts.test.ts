@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -232,6 +233,42 @@ describe('dependency security gate', () => {
       rootManifest.pnpm?.auditConfig?.ignoreGhsas ?? [],
       'audit ignores must be empty: fix, upgrade or document the risk explicitly instead',
     ).toEqual([]);
+  });
+});
+
+describe('MCP × plugin tool parity gate', () => {
+  const script = 'scripts/verify-tool-parity.mjs';
+
+  it('defines one parity gate and runs it in the ladder (p)', () => {
+    expect(
+      rootManifest.scripts?.['verify:tool-parity'],
+      'verify:tool-parity is the single definition of the surface-parity gate',
+    ).toBe('node scripts/verify-tool-parity.mjs');
+
+    expect(
+      rootManifest.scripts?.['verify:all'] ?? '',
+      'the ladder must compare both tool surfaces, otherwise a divergent schema passes every other gate',
+    ).toContain('pnpm verify:tool-parity');
+
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf-8');
+    expect(ci, 'CI must run the same parity gate as the local ladder').toContain(
+      'pnpm verify:tool-parity',
+    );
+
+    const agents = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf-8');
+    expect(agents, 'AGENTS.md documents the verification ladder').toContain(
+      'pnpm verify:tool-parity',
+    );
+  });
+
+  it('proves the comparator actually detects drift (q)', () => {
+    // A gate whose comparator cannot fail is decoration. The script ships a
+    // build-free self-test over synthetic surfaces; run it here.
+    const output = execFileSync(process.execPath, [join(repoRoot, script), '--self-test'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    });
+    expect(output).toContain('self-test PASS');
   });
 });
 

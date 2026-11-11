@@ -847,6 +847,7 @@ export default Plugin.define({
           properties: {
             action: { type: 'string' },
             agent: { type: 'string' },
+            scope: { type: 'string', description: 'Scope of the action' },
             tool: { type: 'string' },
             resources: { type: 'array', items: { type: 'string' } },
             text: { type: 'string' },
@@ -858,6 +859,7 @@ export default Plugin.define({
           const params = input as {
             action: string;
             agent: string;
+            scope?: string;
             tool?: string;
             resources?: string[];
             text?: string;
@@ -876,6 +878,7 @@ export default Plugin.define({
           });
           const result = bos.evaluateGovernance(params.action, {
             agent: params.agent,
+            scope: params.scope,
             context,
           });
           return {
@@ -2100,19 +2103,22 @@ export default Plugin.define({
           type: 'object',
           properties: {
             action: { type: 'string' },
-            agent: { type: 'string' },
+            agent: { type: 'string', description: 'Agent ID (plugin canonical name)' },
+            agentId: { type: 'string', description: 'Alias of `agent`, used by the MCP host' },
             context: { type: 'object' },
           },
-          required: ['action', 'agent'],
+          required: ['action'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
             action: string;
-            agent: string;
+            agent?: string;
+            agentId?: string;
             context?: Record<string, unknown>;
           };
+          const agent = params.agent ?? params.agentId ?? bos.resolveAgentIdentity().agentId;
           const result = bos.preflightAction(params.action, {
-            agent: params.agent,
+            agent,
             context: params.context,
           });
           return { content: JSON.stringify(result, null, 2) };
@@ -2431,6 +2437,20 @@ export default Plugin.define({
               },
             },
             policy: { type: 'string', enum: ['majority', 'supermajority', 'unanimous'] },
+            applyVotes: {
+              type: 'array',
+              description: 'Deprecated alias of `votes`; prefer `votes`',
+              items: {
+                type: 'object',
+                properties: {
+                  voterId: { type: 'string' },
+                  choice: { type: 'string', enum: ['approve', 'reject', 'abstain'] },
+                  weight: { type: 'number' },
+                  reason: { type: 'string' },
+                },
+                required: ['voterId', 'choice'],
+              },
+            },
           },
           required: ['file', 'find', 'replace'],
         },
@@ -2443,8 +2463,23 @@ export default Plugin.define({
             expectedBeforeHash?: string;
             missionId?: string;
             votes?: Array<{ voterId: string; choice: string; weight?: number; reason?: string }>;
+            applyVotes?: Array<{
+              voterId: string;
+              choice: string;
+              weight?: number;
+              reason?: string;
+            }>;
             policy?: string;
           };
+          if (params.votes && params.applyVotes) {
+            return {
+              content: JSON.stringify({
+                error:
+                  'bos_code_edit received both `votes` and the deprecated `applyVotes`; send only one.',
+              }),
+            };
+          }
+          const votes = params.votes ?? params.applyVotes;
           const result = bos.applyCodeEdit({
             file: params.file,
             find: params.find,
@@ -2452,7 +2487,7 @@ export default Plugin.define({
             apply: params.apply,
             expectedBeforeHash: params.expectedBeforeHash,
             missionId: params.missionId,
-            votes: params.votes?.map((v) => ({
+            votes: votes?.map((v) => ({
               voterId: v.voterId,
               choice: v.choice as 'approve' | 'reject' | 'abstain',
               weight: v.weight,
@@ -2970,25 +3005,28 @@ export default Plugin.define({
         input: {
           type: 'object',
           properties: {
-            pattern: { type: 'string', description: 'DNA pattern name (e.g. "lean-factory")' },
+            pattern: { type: 'string', description: 'DNA pattern name (plugin canonical name)' },
+            dnaName: { type: 'string', description: 'Alias of `pattern`, used by the MCP host' },
             action: { type: 'string' },
             agentId: { type: 'string' },
             context: { type: 'object' },
           },
-          required: ['pattern', 'action', 'agentId'],
+          required: ['action', 'agentId'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {
-            pattern: string;
+            pattern?: string;
+            dnaName?: string;
             action: string;
             agentId: string;
             context?: Record<string, unknown>;
           };
           try {
-            const dna = loadedDnaPatterns.get(params.pattern.toLowerCase());
+            const name = params.pattern ?? params.dnaName ?? '';
+            const dna = loadedDnaPatterns.get(name.toLowerCase());
             if (!dna) {
               return {
-                content: `DNA pattern "${params.pattern}" not found. Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
+                content: `DNA pattern "${name}" not found. Available: ${Array.from(loadedDnaPatterns.keys()).join(', ')}`,
               };
             }
             const result = bos.evaluateDNAWithTemporal(dna, {
@@ -3014,16 +3052,31 @@ export default Plugin.define({
             agentId: { type: 'string' },
             maxCapacity: { type: 'number', description: 'Maximum cognitive load (0-1)' },
             skills: { type: 'array', items: { type: 'string' } },
+            completionRate: {
+              type: 'number',
+              description: 'Historical task completion rate (0-1)',
+            },
+            fatigue: { type: 'number', description: 'Current fatigue factor (0-1)' },
           },
           required: ['agentId', 'maxCapacity'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
-          const params = input as { agentId: string; maxCapacity: number; skills?: string[] };
+          const params = input as {
+            agentId: string;
+            maxCapacity: number;
+            skills?: string[];
+            completionRate?: number;
+            fatigue?: number;
+          };
           try {
             const engine = bos.getCognitiveLoadBalancer();
             engine.registerAgent(params.agentId, {
               maxCapacity: params.maxCapacity,
               ...(params.skills ? { skills: params.skills } : {}),
+              ...(params.completionRate !== undefined
+                ? { completionRate: params.completionRate }
+                : {}),
+              ...(params.fatigue !== undefined ? { fatigue: params.fatigue } : {}),
             });
             return { content: JSON.stringify({ ok: true, agentId: params.agentId }, null, 2) };
           } catch (err) {
@@ -3708,6 +3761,7 @@ export default Plugin.define({
             agentId: { type: 'string' },
             dnaPattern: { type: 'string' },
           },
+          required: ['decision'],
         },
         execute: async (input: unknown): Promise<{ content: string }> => {
           const params = input as {

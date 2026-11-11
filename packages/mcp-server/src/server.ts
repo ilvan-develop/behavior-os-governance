@@ -117,6 +117,9 @@ server.registerTool(
       action: z.string().describe('The action to evaluate'),
       agent: z.string().describe('Agent ID performing the action'),
       scope: z.string().optional().describe('Scope of the action'),
+      tool: z.string().optional().describe('Tool performing the action (defaults to action)'),
+      resources: z.array(z.string()).optional().describe('Resources touched by the action'),
+      text: z.string().optional().describe('Free text to scan for environment signals'),
       context: z.record(z.string(), z.any()).optional().describe('Additional context'),
     }),
     annotations: {
@@ -125,16 +128,24 @@ server.registerTool(
       title: 'Evaluate Governance',
     },
   },
-  async ({ action, agent, scope, context }) => {
+  async ({ action, agent, scope, tool, resources, text, context }) => {
     try {
       const bos = getBehaviorOS();
       // `context` is the condition bag the engine matches rule conditions
       // against, so it must be nested under `context.context` (and always carry
       // the action). Spreading it at the top level silently matched no rules.
+      // The heuristic keys mirror the plugin's buildGovernanceContext so a
+      // self-check returns the same verdict the permission hook would apply.
       const decision = bos.evaluateGovernance(action, {
         agent,
         scope,
-        context: { action, ...(context ?? {}) },
+        context: {
+          action,
+          tool: tool ?? action,
+          ...(resources ? { resources } : {}),
+          ...(text ? { text } : {}),
+          ...(context ?? {}),
+        },
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(decision, null, 2) }],
@@ -1061,7 +1072,8 @@ server.registerTool(
       'Synchronously pre-flight an action against the gate pipeline; blocks before execution',
     inputSchema: z.object({
       action: z.string().describe('Action to pre-flight, e.g. "deploy"'),
-      agentId: z.string().describe('Agent ID'),
+      agentId: z.string().optional().describe('Agent ID (canonical MCP name)'),
+      agent: z.string().optional().describe('Alias of `agentId`, accepted by the plugin'),
       context: z
         .record(z.string(), z.unknown())
         .optional()
@@ -1075,15 +1087,18 @@ server.registerTool(
   async ({
     action,
     agentId,
+    agent,
     context,
   }: {
     action: string;
-    agentId: string;
+    agentId?: string;
+    agent?: string;
     context?: Record<string, unknown>;
   }) => {
     try {
       const bos = getBehaviorOS();
-      const result = bos.preflightAction(action, { agent: agentId, context });
+      const resolvedAgent = agentId ?? agent ?? bos.resolveAgentIdentity().agentId;
+      const result = bos.preflightAction(action, { agent: resolvedAgent, context });
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
@@ -1483,10 +1498,14 @@ server.registerTool(
     inputSchema: z.object({
       type: z
         .enum(['insight', 'pattern', 'fix', 'failure', 'optimization'])
-        .describe('Learning type'),
-      source: z.string().describe('Source of the learning'),
-      content: z.string().describe('Learning content'),
-      impact: z.enum(['low', 'medium', 'high', 'critical']).describe('Impact level'),
+        .optional()
+        .describe('Learning type (required when recording a new event)'),
+      source: z.string().optional().describe('Source of the learning (required for a new event)'),
+      content: z.string().optional().describe('Learning content (required for a new event)'),
+      impact: z
+        .enum(['low', 'medium', 'high', 'critical'])
+        .optional()
+        .describe('Impact level (required for a new event)'),
       relatedMission: z.string().optional().describe('Related mission ID'),
       learningId: z
         .string()
@@ -1517,10 +1536,10 @@ server.registerTool(
     evidence,
     reason,
   }: {
-    type: string;
-    source: string;
-    content: string;
-    impact: string;
+    type?: string;
+    source?: string;
+    content?: string;
+    impact?: string;
     relatedMission?: string;
     learningId?: string;
     stage?: 'observation' | 'lesson' | 'candidate' | 'validated' | 'policy' | 'monitored';
@@ -1553,10 +1572,24 @@ server.registerTool(
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       }
+      const missing = (['type', 'source', 'content', 'impact'] as const).filter(
+        (field) => !{ type, source, content, impact }[field],
+      );
+      if (missing.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Learning not recorded [INVALID_INPUT]: missing ${missing.join(', ')} (required when no learningId is given).`,
+            },
+          ],
+          isError: true,
+        };
+      }
       const event = bos.recordLearning({
         type: type as LearningType,
-        source,
-        content,
+        source: source as string,
+        content: content as string,
         impact: impact as LearningImpact,
         relatedMission,
       });
@@ -2639,7 +2672,7 @@ server.registerTool(
     description:
       'Generate a plain-language report of recent governance activity for a non-technical stakeholder. Summarizes decisions, findings, recommendations and an overall severity.',
     inputSchema: z.object({
-      agentId: z.string().describe('Agent ID'),
+      agentId: z.string().optional().describe('Agent ID (default "unknown")'),
       title: z.string().optional().describe('Report title (default "governance <agent>")'),
       from: z.string().optional().describe('ISO start of the window'),
       to: z.string().optional().describe('ISO end of the window'),
@@ -2781,7 +2814,7 @@ server.registerTool(
       'Re-evaluate a governance action with the hybrid engine: it combines the deterministic symbolic (rule-based) verdict with a learned confidence signal (pattern frequency + impact). Use when you want a second opinion on a rule verdict \u2014 the hybrid result flags when the two disagree.',
     inputSchema: z.object({
       action: z.string().describe('The action to re-evaluate'),
-      agentId: z.string().describe('Agent ID performing the action'),
+      agentId: z.string().optional().describe('Agent ID performing the action'),
       context: z
         .record(z.string(), z.unknown())
         .optional()
@@ -3371,13 +3404,10 @@ server.registerTool(
   'bos_behavior_timeline',
   {
     description: 'Get evolution timeline showing how agent behavior changed over time',
-    inputSchema: z
-      .object({
-        agentId: z.string().optional().describe('Filter by agent ID'),
-        limit: z.number().optional().describe('Max entries (default 20)'),
-      })
-      .passthrough()
-      .optional(),
+    inputSchema: z.object({
+      agentId: z.string().optional().describe('Filter by agent ID'),
+      limit: z.number().optional().describe('Max entries (default 20)'),
+    }),
     annotations: { readOnlyHint: true, title: 'Behavior Timeline' },
   },
   async (params: { agentId?: string; limit?: number } | undefined) => {
@@ -4077,12 +4107,7 @@ server.registerTool(
     description: 'Register an agent with cognitive capacity and skills for load balancing',
     inputSchema: z.object({
       agentId: z.string().describe('Agent ID'),
-      maxCapacity: z
-        .number()
-        .min(0)
-        .max(1)
-        .default(0.8)
-        .describe('Maximum capacity before overload (0-1)'),
+      maxCapacity: z.number().min(0).max(1).describe('Maximum capacity before overload (0-1)'),
       skills: z.array(z.string()).default([]).describe('Agent skills'),
       completionRate: z
         .number()
@@ -4186,15 +4211,12 @@ server.registerTool(
   'bos_analyze_workload',
   {
     description: 'Analyze workload distribution and get balancing recommendations',
-    inputSchema: z
-      .object({
-        maxLoadThreshold: z.number().optional().describe('Max load threshold (default 0.75)'),
-        minLoadThreshold: z.number().optional().describe('Min load threshold (default 0.25)'),
-        considerSkills: z.boolean().optional().describe('Consider skills in analysis'),
-        considerFatigue: z.boolean().optional().describe('Consider fatigue in analysis'),
-      })
-      .passthrough()
-      .optional(),
+    inputSchema: z.object({
+      maxLoadThreshold: z.number().optional().describe('Max load threshold (default 0.75)'),
+      minLoadThreshold: z.number().optional().describe('Min load threshold (default 0.25)'),
+      considerSkills: z.boolean().optional().describe('Consider skills in analysis'),
+      considerFatigue: z.boolean().optional().describe('Consider fatigue in analysis'),
+    }),
     annotations: { readOnlyHint: true, title: 'Analyze Workload' },
   },
   async (params?: {
@@ -4232,16 +4254,30 @@ server.registerTool(
     description: 'Recommend the best agent for a task based on load and skills',
     inputSchema: z.object({
       taskId: z.string().describe('Task ID'),
-      requiredSkills: z.array(z.string()).describe('Required skills for the task'),
+      requiredSkills: z
+        .array(z.string())
+        .optional()
+        .describe('Required skills for the task (default none)'),
+      context: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe('Extra context accepted by the SDK-shaped callers'),
     }),
     annotations: { readOnlyHint: true, title: 'Recommend Task Assignment' },
   },
-  async ({ taskId, requiredSkills }) => {
+  async ({
+    taskId,
+    requiredSkills,
+  }: {
+    taskId: string;
+    requiredSkills?: string[];
+    context?: Record<string, unknown>;
+  }) => {
     try {
       const bos = getBehaviorOS();
       const recommendation = bos
         .getCognitiveLoadBalancer()
-        .recommendAssignment(taskId, requiredSkills);
+        .recommendAssignment(taskId, requiredSkills ?? []);
       return { content: [{ type: 'text', text: JSON.stringify(recommendation, null, 2) }] };
     } catch (error) {
       return {
@@ -4268,15 +4304,28 @@ server.registerTool(
     inputSchema: z.object({
       rule: z
         .string()
+        .optional()
         .describe('Natural language rule, e.g. "Block production deploys when tests are failing"'),
+      text: z.string().optional().describe('Alias of `rule`, accepted by the plugin'),
       ruleId: z.string().optional().describe('Optional custom rule ID'),
     }),
     annotations: { readOnlyHint: true, title: 'Parse Natural Language Rule' },
   },
-  async ({ rule, ruleId }) => {
+  async ({ rule, text, ruleId }: { rule?: string; text?: string; ruleId?: string }) => {
     try {
       const bos = getBehaviorOS();
-      const result = bos.getNaturalLanguageEngine().parseRule(rule, ruleId ? { ruleId } : {});
+      const ruleText = rule ?? text;
+      if (!ruleText) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ success: false, error: 'rule text is required' }),
+            },
+          ],
+        };
+      }
+      const result = bos.getNaturalLanguageEngine().parseRule(ruleText, ruleId ? { ruleId } : {});
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       return {
@@ -4297,14 +4346,18 @@ server.registerTool(
   {
     description: 'Parse multiple natural language rules in a single call',
     inputSchema: z.object({
-      rules: z.array(z.string()).describe('Array of natural language rules to parse'),
+      rules: z
+        .array(z.string())
+        .optional()
+        .describe('Array of natural language rules to parse (canonical MCP name)'),
+      texts: z.array(z.string()).optional().describe('Alias of `rules`, accepted by the plugin'),
     }),
     annotations: { readOnlyHint: true, title: 'Parse Rules Batch' },
   },
-  async ({ rules }) => {
+  async ({ rules, texts }: { rules?: string[]; texts?: string[] }) => {
     try {
       const bos = getBehaviorOS();
-      const results = bos.getNaturalLanguageEngine().parseRulesBatch(rules);
+      const results = bos.getNaturalLanguageEngine().parseRulesBatch(texts ?? rules ?? []);
       return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
     } catch (error) {
       return {
@@ -4475,21 +4528,35 @@ server.registerTool(
     description:
       'Evaluate a DNA pattern with temporal overrides applied, returning the effective ruleset.',
     inputSchema: z.object({
-      dnaName: z.string().describe('DNA pattern name (e.g. "lean-factory")'),
+      dnaName: z.string().optional().describe('DNA pattern name (canonical MCP name)'),
+      pattern: z.string().optional().describe('Alias of `dnaName`, accepted by the plugin'),
       action: z.string().describe('The action being evaluated'),
       agentId: z.string().describe('Agent ID'),
       context: z.record(z.string(), z.unknown()).optional().describe('Context bag'),
     }),
     annotations: { readOnlyHint: true, title: 'Evaluate DNA with Temporal Rules' },
   },
-  async ({ dnaName, action, agentId, context }) => {
+  async ({
+    dnaName,
+    pattern,
+    action,
+    agentId,
+    context,
+  }: {
+    dnaName?: string;
+    pattern?: string;
+    action: string;
+    agentId: string;
+    context?: Record<string, unknown>;
+  }) => {
     try {
       const bos = getBehaviorOS();
       const dnas = await loadDNAPatterns();
-      const dna = dnas[dnaName.toLowerCase()];
+      const name = dnaName ?? pattern ?? '';
+      const dna = dnas[name.toLowerCase()];
       if (!dna) {
         return {
-          content: [{ type: 'text', text: `DNA pattern "${dnaName}" not found` }],
+          content: [{ type: 'text', text: `DNA pattern "${name}" not found` }],
           isError: true,
         };
       }

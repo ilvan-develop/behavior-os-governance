@@ -66,6 +66,7 @@ pnpm build
 pnpm verify:publish
 pnpm verify:governance
 pnpm verify:capabilities
+pnpm verify:tool-parity
 pnpm verify:plugin
 pnpm smoke:mcp
 pnpm verify:opencode

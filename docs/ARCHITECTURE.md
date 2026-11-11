@@ -428,6 +428,15 @@ auditor so the loop never reports overall `PASS` — it stops as `UNVERIFIED`.
 - Automatic 7-step protocol progression (`advanceProtocolStep`) tracked in core `AgentState`
 - DNA patterns loaded from `dnas/` and merged with built-ins
 
+### Tool-surface parity
+
+The MCP server and the plugin are two hand-written surfaces over one catalogue.
+`pnpm verify:tool-parity` boots both (MCP over an in-memory transport, plugin
+through its real `setup()`) and fails when a shared tool is missing on one side
+or its input properties/required list differ. The four loop tools are the only
+declared plugin-only difference. The gate also ships a build-free self-test that
+proves the comparator detects each drift class.
+
 #### Notification coalescing (producer side)
 
 The plugin posts synthetic session messages for DNA selection, mission creation,
@@ -533,12 +542,16 @@ The system ships with **seven** real, measurable algorithms (not synthetic
 
 1. Add a `server.registerTool(...)` call in `packages/mcp-server/src/server.ts`
 2. Add a Zod input schema in the same call
+3. Mirror the name, input properties and `required` list in the plugin, then run
+   `pnpm build && pnpm verify:tool-parity`
 
 ### Adding OpenCode Plugin Tools
 
 1. Use `ctx.tool.transform()` in plugin setup (`plugins/opencode-v2/src/index.ts`)
 2. Register with JSON Schema
 3. Implement the execute handler
+4. For a shared tool, keep the input contract identical to the MCP schema; a
+   deliberate plugin-only tool must be declared in `scripts/tool-parity.mjs`.
 
 ## Performance Characteristics
 
