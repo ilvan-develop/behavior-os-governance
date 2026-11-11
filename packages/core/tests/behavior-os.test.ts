@@ -207,6 +207,35 @@ describe('BehaviorOS Core', () => {
       const restored = new BehaviorOS();
       expect(restored.importState(snapshot)).toBe(true);
     });
+
+    it('resolves a registered agent through its type when no role entry exists', () => {
+      const identity = bos.setActiveAgent({
+        id: 'probe-operator',
+        name: 'Probe Operator',
+        type: 'operator',
+      });
+      expect(identity?.agentId).toBe('probe-operator');
+
+      const decision = bos.evaluateRoleAction({ agentId: 'probe-operator' }, 'edit src/a.ts');
+      expect(decision.action).toBe('allow');
+      expect(decision.role?.id).toBe('operator');
+    });
+
+    it('keeps the fail-safe for a genuinely unknown agent id', () => {
+      const decision = bos.evaluateRoleAction({ agentId: 'ghost-agent' }, 'edit src/a.ts');
+      expect(decision.action).toBe('require');
+      expect(decision.reason).toContain('Unknown role');
+    });
+
+    it('does not fall back when an explicit unknown role was named', () => {
+      bos.setActiveAgent({ id: 'probe-operator', name: 'Probe Operator', type: 'operator' });
+      const decision = bos.evaluateRoleAction(
+        { agentId: 'probe-operator', role: 'typo-role' },
+        'edit src/a.ts',
+      );
+      expect(decision.action).toBe('require');
+      expect(decision.reason).toContain("Unknown role 'typo-role'");
+    });
   });
 
   describe('Collaboration convergence gate', () => {

@@ -2582,7 +2582,40 @@ export class BehaviorOS {
     actor: import('./role-policy-engine.js').RoleActorContext,
     action: string,
   ): import('./role-policy-engine.js').RoleDecision {
-    const decision = this.getRolePolicyEngine().evaluate(actor, action);
+    const engine = this.getRolePolicyEngine();
+    let decision = engine.evaluate(actor, action);
+    // A registered agent resolves by id, but the explicit role entry may be
+    // missing (a fresh process, or an agent persisted before roles were part of
+    // the snapshot). The identity is known, so fall back to the agent's declared
+    // type (`operator`, `reviewer`, ...) instead of treating it as unknown. An
+    // explicit unknown role/persona still hits the fail-safe: the fallback only
+    // applies when the id is the sole selector.
+    if (
+      !decision.role &&
+      !decision.matchedPolicy &&
+      actor.agentId &&
+      !actor.role &&
+      !actor.persona
+    ) {
+      const type = this.agents.get(actor.agentId)?.type;
+      if (type) {
+        // Mirror `ensurePersonaRole`: identity and attribution only, no
+        // privileges. An explicit registration always wins over this stub.
+        if (!engine.getRole(type)) {
+          engine.registerRole({
+            id: type,
+            name: type,
+            displayName: `${type} (agent type)`,
+            responsibilities: [],
+            policies: [],
+            canAudit: false,
+            canEnforce: false,
+            canTeach: false,
+          });
+        }
+        decision = engine.evaluate({ ...actor, role: type }, action);
+      }
+    }
     // Hot path: the permission hook evaluates every mutating tool call.
     // A benign decision (no policy matched, actor already known) does not
     // change the durable registry — persisting it would pay a store write

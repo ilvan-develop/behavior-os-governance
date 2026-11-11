@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-11T10:56:12.654Z",
+  "generatedAt": "2026-11-11T11:07:13.674Z",
   "plugin": "behavior-os",
   "total": 25,
   "proven": 25,
@@ -66,7 +66,7 @@
       "category": "CONSISTENCY",
       "promise": "Starting a mission sets activeMission to that mission id (no divergence)",
       "status": "PASS",
-      "evidence": "activeMission=mission-1794394572309-qs0e4ws6yu"
+      "evidence": "activeMission=mission-1794395233364-jwas8zhcozp"
     },
     {
       "id": "C10",
@@ -94,14 +94,14 @@
       "category": "CONSISTENCY",
       "promise": "Auto-mission from a prompt leaves activeMission == the opened mission",
       "status": "PASS",
-      "evidence": "autoMission=mission-1794394572396-jfhswv4dql == activeMission"
+      "evidence": "autoMission=mission-1794395233432-b2hg63y0f18 == activeMission"
     },
     {
       "id": "C14",
       "category": "OBSERVABILITY",
       "promise": "Log entries carry a stable instance id (cross-instance divergence visible)",
       "status": "PASS",
-      "evidence": "instance=p10756-5zxxt across 14 entries"
+      "evidence": "instance=p16824-anctr across 14 entries"
     },
     {
       "id": "C15",
