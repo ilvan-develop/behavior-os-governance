@@ -171,6 +171,44 @@ describe('BehaviorOS Core', () => {
     });
   });
 
+  describe('Role policy persistence', () => {
+    it('restores a registered role from the snapshot', () => {
+      bos.registerRole({
+        id: 'security-officer',
+        name: 'Security Officer',
+        displayName: 'Security Officer',
+        responsibilities: ['security review'],
+        policies: ['allow-dev-edits'],
+        canAudit: true,
+        canEnforce: false,
+        canTeach: false,
+      });
+      expect(bos.evaluateRoleAction({ agentId: 'security-officer' }, 'edit src/a.ts').action).toBe(
+        'allow',
+      );
+
+      const snapshot = bos.exportState();
+      const restored = new BehaviorOS();
+      expect(restored.importState(snapshot)).toBe(true);
+
+      const role = restored
+        .getRolePolicyEngine()
+        .listRoles()
+        .find((candidate) => candidate.id === 'security-officer');
+      expect(role).toBeDefined();
+      expect(
+        restored.evaluateRoleAction({ agentId: 'security-officer' }, 'edit src/a.ts').action,
+      ).toBe('allow');
+    });
+
+    it('still imports a legacy snapshot without a role policy registry', () => {
+      const snapshot = bos.exportState();
+      delete (snapshot as { rolePolicy?: unknown }).rolePolicy;
+      const restored = new BehaviorOS();
+      expect(restored.importState(snapshot)).toBe(true);
+    });
+  });
+
   describe('Collaboration convergence gate', () => {
     function liveMission() {
       const mission = bos.createMission({

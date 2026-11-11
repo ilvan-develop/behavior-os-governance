@@ -86,6 +86,7 @@ import {
   type PipelineGate,
   type PreflightResult,
 } from './pipeline-engine.js';
+import type { RolePolicyState } from './role-policy-engine.js';
 
 export interface BehaviorOSConfig {
   dnaPath?: string;
@@ -266,6 +267,12 @@ export interface BehaviorOSSnapshot {
   learningRecords?: LearningRecord[];
   /** Governed policy version ledger (Sprint 2). Optional for older snapshots. */
   policyLedger?: PolicyLedgerState;
+  /**
+   * Role/policy registry (roles, rules and recent decisions). Optional for
+   * older snapshots; without it a registered role would vanish on restart and
+   * every edit by that agent would fall back to the unknown-role fail-safe.
+   */
+  rolePolicy?: RolePolicyState;
 }
 
 /** Deep-clone via JSON so a snapshot only ever contains persistable values. */
@@ -2700,6 +2707,8 @@ export class BehaviorOS {
    * it later with {@link importState} so state survives a process restart.
    */
   exportState(): BehaviorOSSnapshot {
+    const roleEngine =
+      this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
     return cloneJson({
       version: BEHAVIOROS_SNAPSHOT_VERSION,
       exportedAt: new Date().toISOString(),
@@ -2709,6 +2718,9 @@ export class BehaviorOS {
       learnings: this.getLearningEngine().snapshot(),
       learningRecords: this.getLearningEngine().snapshotRecords(),
       policyLedger: this.getLearningEngine().snapshotPolicyLedger(),
+      // Only include the registry when it exists: exporting must not
+      // instantiate an engine just to persist an empty registry.
+      ...(roleEngine ? { rolePolicy: roleEngine.snapshot() } : {}),
     });
   }
 
@@ -2743,6 +2755,11 @@ export class BehaviorOS {
 
       this.getMissionEngine().restore(snapshot.missions ?? []);
       this.getLearningEngine().restore(snapshot.learnings ?? []);
+      // A registered role must survive a restart, otherwise the permission hook
+      // falls back to the unknown-role fail-safe and escalates every edit.
+      if (snapshot.rolePolicy) {
+        this.getRolePolicyEngine().restore(snapshot.rolePolicy);
+      }
       this.getLearningEngine().restoreRecords(snapshot.learningRecords ?? []);
       if (snapshot.policyLedger) {
         this.getLearningEngine().restorePolicyLedger(snapshot.policyLedger);
