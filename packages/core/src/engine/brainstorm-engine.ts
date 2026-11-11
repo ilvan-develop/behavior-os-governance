@@ -187,7 +187,30 @@ export class BrainstormEngine {
 
     idea.votes.push({ voterId, vote, reason, timestamp: new Date().toISOString() });
     session.updatedAt = new Date().toISOString();
+    // Convergence rule: once every participant has voted on at least one idea,
+    // the session has a decision and closes itself. This keeps the mission
+    // convergence gate satisfiable through the existing vote tool (no separate
+    // "resolve brainstorm" step is required).
+    this.maybeConverge(session);
     return { success: true };
+  }
+
+  /**
+   * Close the session once every participant has voted on some idea. A session
+   * with no participants never auto-converges (there is no team to poll).
+   */
+  private maybeConverge(session: {
+    participants: string[];
+    ideas: Array<{ votes: Array<{ voterId: string }> }>;
+    phase: string;
+    updatedAt: string;
+  }): void {
+    if (session.phase === 'decided' || session.phase === 'cancelled') return;
+    if (session.participants.length === 0) return;
+    const voters = new Set(session.ideas.flatMap((idea) => idea.votes.map((vote) => vote.voterId)));
+    if (!session.participants.every((participant) => voters.has(participant))) return;
+    session.phase = 'decided';
+    session.updatedAt = new Date().toISOString();
   }
 
   /** Advance session phase. */

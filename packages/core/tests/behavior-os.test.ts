@@ -171,6 +171,117 @@ describe('BehaviorOS Core', () => {
     });
   });
 
+  describe('Collaboration convergence gate', () => {
+    function liveMission() {
+      const mission = bos.createMission({
+        title: 'Converge before completing',
+        type: 'feature',
+        priority: 'high',
+      });
+      bos.startMission(mission.id);
+      return mission;
+    }
+
+    it('refuses completion while an opened brainstorm is unresolved', () => {
+      const mission = liveMission();
+      const session = bos.createBrainstormSession(
+        'Pick a design',
+        ['persona:architect', 'persona:reviewer'],
+        'open-source',
+      );
+      expect(bos.registerMissionCollaboration('brainstorm', session.id)).not.toBeNull();
+
+      const refused = bos.transitionMission(mission.id, 'completed');
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.code).toBe('EVIDENCE_MISSING');
+      expect(refused.message).toContain(session.id);
+    });
+
+    it('completes once the brainstorm reaches a decision and drops the tag', () => {
+      const mission = liveMission();
+      const session = bos.createBrainstormSession(
+        'Pick a design',
+        ['persona:architect'],
+        'open-source',
+      );
+      bos.registerMissionCollaboration('brainstorm', session.id);
+
+      const idea = bos
+        .getBrainstorm()
+        .proposeIdea(session.id, 'persona:architect', 'Option A', 'Do the simple thing');
+      expect(idea.success).toBe(true);
+      if (!idea.idea) return;
+      // The sole participant voting closes the session (convergence rule).
+      expect(
+        bos.getBrainstorm().voteOnIdea(session.id, idea.idea.id, 'persona:architect', 'support')
+          .success,
+      ).toBe(true);
+      expect(bos.getBrainstormSession(session.id)?.phase).toBe('decided');
+
+      const completed = bos.transitionMission(mission.id, 'completed');
+      expect(completed.ok).toBe(true);
+      if (!completed.ok) return;
+      expect(completed.mission.status).toBe('completed');
+      expect(completed.mission.tags ?? []).not.toContain(session.id);
+    });
+
+    it('refuses completion while an opened conversation is unresolved', () => {
+      const mission = liveMission();
+      const started = bos.getPragmaticConversation().startSession({
+        title: 'Resolve the failure',
+        problem: 'The deploy failed',
+        participants: ['persona:architect'],
+      });
+      expect(started.success).toBe(true);
+      if (!started.session) return;
+      bos.registerMissionCollaboration('conversation', started.session.id);
+
+      const refused = bos.transitionMission(mission.id, 'completed');
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      expect(refused.code).toBe('EVIDENCE_MISSING');
+      expect(refused.message).toContain(started.session.id);
+    });
+
+    it('completes once the conversation is resolved', () => {
+      const mission = liveMission();
+      const started = bos.getPragmaticConversation().startSession({
+        title: 'Resolve the failure',
+        problem: 'The deploy failed',
+        participants: ['persona:architect'],
+      });
+      if (!started.session) return;
+      bos.registerMissionCollaboration('conversation', started.session.id);
+      bos
+        .getPragmaticConversation()
+        .resolveConversation(
+          started.session.id,
+          'Retry the deploy',
+          ['Retry once'],
+          'persona:architect',
+        );
+
+      const completed = bos.transitionMission(mission.id, 'completed');
+      expect(completed.ok).toBe(true);
+      if (!completed.ok) return;
+      expect(completed.mission.tags ?? []).not.toContain(started.session.id);
+    });
+
+    it('does not deadlock on a collaboration session that no longer exists', () => {
+      const mission = liveMission();
+      bos.registerMissionCollaboration('brainstorm', 'brainstorm-vanished');
+      const completed = bos.transitionMission(mission.id, 'completed');
+      expect(completed.ok).toBe(true);
+    });
+
+    it('ignores collaboration registration when no mission is live', () => {
+      expect(
+        bos.registerMissionCollaboration('brainstorm', 'brainstorm-without-mission'),
+      ).toBeNull();
+    });
+  });
+
   describe('Learning', () => {
     it('should record learning events', () => {
       const event = bos.recordLearning({

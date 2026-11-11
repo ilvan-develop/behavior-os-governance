@@ -79,7 +79,7 @@ import type {
   MissionTransitionOptions,
   MissionTransitionResult,
 } from './mission-engine.js';
-import { MissionEngine } from './mission-engine.js';
+import { isCollaborationTag, MissionEngine } from './mission-engine.js';
 import {
   type GateContext,
   PipelineEngine,
@@ -893,6 +893,49 @@ export class BehaviorOS {
     return engine;
   }
 
+  /**
+   * Register a native collaboration session against the mission in flight so
+   * completion waits for it to converge. No-op when no mission is live:
+   * collaboration outside a mission has nothing to gate.
+   */
+  registerMissionCollaboration(
+    kind: 'brainstorm' | 'conversation',
+    sessionId: string,
+    missionId?: string,
+  ): Mission | null {
+    const target = missionId ?? this.agentState.activeMission;
+    if (!target || !isCollaborationTag(sessionId)) return null;
+    const expected = kind === 'brainstorm' ? 'brainstorm-' : 'conv';
+    if (!sessionId.startsWith(expected)) return null;
+    return this.getMissionEngine().registerCollaboration(target, sessionId);
+  }
+
+  /**
+   * Return the collaboration tags still awaiting convergence, dropping the ones
+   * whose session is closed or no longer known (for example after a restart:
+   * sessions are in-memory, so a vanished session must not deadlock the
+   * mission forever).
+   */
+  private openCollaborations(mission: Mission): string[] {
+    const tags = (mission.tags ?? []).filter(isCollaborationTag);
+    if (tags.length === 0) return [];
+    const engine = this.getMissionEngine();
+    const open: string[] = [];
+    for (const tag of tags) {
+      let closed: boolean;
+      if (tag.startsWith('brainstorm-')) {
+        const session = this.getBrainstorm().getSession(tag);
+        closed = !session || session.phase === 'decided' || session.phase === 'cancelled';
+      } else {
+        const session = this.getPragmaticConversation().getSession(tag);
+        closed = !session || session.status === 'resolved' || session.status === 'cancelled';
+      }
+      if (closed) engine.removeCollaboration(mission.id, tag);
+      else open.push(tag);
+    }
+    return open;
+  }
+
   createMission(options: {
     title: string;
     description?: string;
@@ -951,6 +994,27 @@ export class BehaviorOS {
     const engine = this.getMissionEngine();
     const before = engine.get(missionId);
     const rollback = before ? structuredClone(before) : null;
+
+    // Convergence gate: a mission that opened native collaboration must let the
+    // session converge before it can complete. Closed sessions are dropped from
+    // the tag list here, so a retry after resolution succeeds without manual
+    // bookkeeping; an open one refuses with the sessions that still need a
+    // decision.
+    if (to === 'completed' && before) {
+      const open = this.openCollaborations(before);
+      if (open.length > 0) {
+        return {
+          ok: false,
+          code: 'EVIDENCE_MISSING',
+          message:
+            `Open collaboration must converge before completion: ${open.join(', ')}. ` +
+            'Resolve each brainstorm (decided/cancelled) or conversation (resolved/cancelled) and retry.',
+          mission: before,
+          from: before.status,
+          to,
+        };
+      }
+    }
 
     const result = engine.transition(missionId, to, options);
     if (!result.ok || !result.changed) return result;

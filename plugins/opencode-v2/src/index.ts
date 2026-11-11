@@ -155,6 +155,17 @@ function missionIsLive(bos: BehaviorOS, missionId: string | null): boolean {
   return Number.isFinite(updatedAt) && Date.now() - updatedAt <= missionTtlMs();
 }
 
+/** True when *any* mission in the active set is live (active or paused within TTL). */
+function anyMissionIsLive(bos: BehaviorOS): boolean {
+  return bos
+    .listMissions(50)
+    .filter((m) => m.status === 'active' || m.status === 'paused')
+    .some((m) => {
+      const updatedAt = Date.parse(m.updatedAt);
+      return Number.isFinite(updatedAt) && Date.now() - updatedAt <= missionTtlMs();
+    });
+}
+
 /** Map a selected DNA display name back to its `dnas/*.yaml` key. */
 function dnaKeyForName(name: string | null): string | null {
   if (!name) return null;
@@ -4784,9 +4795,13 @@ export default Plugin.define({
           `[Behavior-OS] 🧬 Auto-selected DNA "${match}" — governance rules are now active.`,
           { kind: 'dna', action: 'session.prompt', reason: `Auto-selected DNA "${match}"` },
         );
-      } else if (match && dna && !missionIsLive(bos, beforeDna.activeMission)) {
+      } else if (match && dna && !anyMissionIsLive(bos)) {
         const currentKey = dnaKeyForName(beforeDna.selectedDna);
         if (currentKey && currentKey !== match) {
+          // Additive-only DNA switching: a new prompt may *add* work under a
+          // different pattern, but it must never re-select the DNA while any
+          // mission is live — that is how a prompt could silently weaken the
+          // active gate (e.g. switch to a looser pattern mid-release).
           await bos.loadDNA(dna);
           behavioros.dnaSwitched = match;
           recordLog(
@@ -4873,6 +4888,9 @@ export default Plugin.define({
               bos.getState().selectedDna ?? activeDna?.name ?? 'none',
             );
             brainstormId = session.id;
+            // Convergence gate: the mission must resolve this session before it
+            // may complete. No-op when no mission is live.
+            bos.registerMissionCollaboration('brainstorm', session.id);
             recordLog(
               'advisory',
               'info',
@@ -4910,6 +4928,9 @@ export default Plugin.define({
             });
             if (result.success && result.session) {
               conversationId = result.session.id;
+              // Same convergence gate as the brainstorm: a mission may not
+              // complete while a conversation it opened is unresolved.
+              bos.registerMissionCollaboration('conversation', result.session.id);
               recordLog(
                 'advisory',
                 'info',

@@ -507,3 +507,46 @@ describe('MissionEngine deterministic transitions (S1)', () => {
     expect(engine.transition(mission.id, 'active').ok).toBe(false);
   });
 });
+
+describe('MissionEngine collaboration tags', () => {
+  it('records a collaboration tag once and bumps the version only on change', () => {
+    const engine = new MissionEngine();
+    const mission = engine.create({
+      title: 'Tagged mission',
+      type: 'feature',
+      priority: 'high',
+      dnaPattern: 'test',
+      createdBy: 'agent-1',
+    });
+    engine.start(mission.id);
+    const before = engine.get(mission.id)?.version ?? 0;
+
+    engine.registerCollaboration(mission.id, 'brainstorm-123');
+    const registered = engine.get(mission.id);
+    expect(registered?.tags).toContain('brainstorm-123');
+    expect(registered?.version).toBe(before + 1);
+
+    engine.registerCollaboration(mission.id, 'brainstorm-123');
+    expect(engine.get(mission.id)?.version).toBe(before + 1);
+
+    engine.removeCollaboration(mission.id, 'brainstorm-123');
+    expect(engine.get(mission.id)?.tags).not.toContain('brainstorm-123');
+    expect(engine.get(mission.id)?.version).toBe(before + 2);
+  });
+
+  it('refuses to tag or untag a terminal mission', () => {
+    const engine = new MissionEngine();
+    const mission = engine.create({
+      title: 'Terminal mission',
+      type: 'feature',
+      priority: 'high',
+      dnaPattern: 'test',
+      createdBy: 'agent-1',
+    });
+    engine.start(mission.id);
+    engine.complete(mission.id);
+
+    expect(engine.registerCollaboration(mission.id, 'conv-123')).toBeNull();
+    expect(engine.removeCollaboration(mission.id, 'conv-123')).toBeNull();
+  });
+});

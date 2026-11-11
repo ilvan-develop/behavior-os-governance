@@ -602,6 +602,78 @@ describe('behavior-os plugin registration', () => {
     expect(contextText).toContain('bos_propose_idea');
   });
 
+  it('refuses completion until the brainstorm it opened converges', async () => {
+    const { ctx, addedTools, sessionHooks } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+
+    const created = await runTool(addedTools, 'bos_create_mission', {
+      title: 'Converge before completing',
+      type: 'feature',
+      priority: 'high',
+    });
+    const missionId = /Mission created: (\S+)/.exec(created.content)?.[1];
+    expect(missionId).toMatch(/^mission-/);
+    await runTool(addedTools, 'bos_start_mission', { missionId });
+
+    const event = {
+      sessionID: 'ses-converge',
+      prompt: { text: 'Design the architecture for a multi-tenant billing service' },
+      metadata: {} as Record<string, unknown>,
+    };
+    await (sessionHooks.prompt as (e: unknown) => Promise<void>)(event);
+    const chief = event.metadata.behavioros as { chiefPlan?: { brainstormId?: string } };
+    const brainstormId = chief.chiefPlan?.brainstormId;
+    expect(brainstormId).toMatch(/^brainstorm-/);
+
+    const refused = JSON.parse(
+      (await runTool(addedTools, 'bos_complete_mission', { missionId })).content,
+    ) as { ok: boolean; code?: string; message?: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.code).toBe('EVIDENCE_MISSING');
+    expect(refused.message).toContain(brainstormId);
+
+    // The session converges through the existing vote tool: once every
+    // participant has voted, the engine decides it and the gate opens.
+    const sessions = JSON.parse(
+      (await runTool(addedTools, 'bos_list_brainstorms')).content,
+    ) as Array<{ id: string; participants: string[] }>;
+    const participants =
+      sessions.find((session) => session.id === brainstormId)?.participants ?? [];
+    expect(participants.length).toBeGreaterThan(0);
+
+    const proposed = JSON.parse(
+      (
+        await runTool(addedTools, 'bos_propose_idea', {
+          sessionId: brainstormId,
+          authorId: participants[0],
+          title: 'Option A',
+          description: 'Keep it simple',
+        })
+      ).content,
+    ) as { idea?: { id: string } };
+    const ideaId = proposed.idea?.id;
+    expect(ideaId).toBeDefined();
+    for (const voterId of participants) {
+      const vote = JSON.parse(
+        (
+          await runTool(addedTools, 'bos_vote_idea', {
+            sessionId: brainstormId,
+            ideaId,
+            voterId,
+            vote: 'support',
+          })
+        ).content,
+      ) as { success: boolean };
+      expect(vote.success).toBe(true);
+    }
+
+    const completed = JSON.parse(
+      (await runTool(addedTools, 'bos_complete_mission', { missionId })).content,
+    ) as { ok: boolean; status?: string };
+    expect(completed.ok).toBe(true);
+    expect(completed.status).toBe('completed');
+  });
+
   it('does not open a collaboration for a read-only review prompt', async () => {
     const { ctx, sessionHooks } = createFakeContext(repoRoot);
     await plugin.setup(ctx as never);

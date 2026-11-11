@@ -102,6 +102,19 @@ function normalizeRequiredChecks(checks: string[] | undefined): string[] {
   ];
 }
 
+/**
+ * Tags that record a native collaboration session opened for a mission
+ * (`brainstorm-<id>`, `conversation-<id>` or the legacy `conv-<id>` form).
+ *
+ * The tags are removed automatically once the session converges; while one
+ * remains, `BehaviorOS.transitionMission` refuses `completed`.
+ */
+export function isCollaborationTag(tag: string): boolean {
+  return (
+    tag.startsWith('brainstorm-') || tag.startsWith('conversation-') || tag.startsWith('conv-')
+  );
+}
+
 type NormalizedEvidence =
   | { ok: true; evidence: MissionEvidence[] }
   | { ok: false; message: string };
@@ -338,9 +351,6 @@ export class MissionEngine {
       reason: typeof options.reason === 'string' ? options.reason : undefined,
       version,
     };
-
-    // Mutate in place so callers that hold the object returned by `create`
-    // observe later transitions, matching the engine's historical contract.
     // Validation above is complete, so a refusal never leaves partial state.
     mission.status = to;
     mission.updatedAt = now;
@@ -475,6 +485,34 @@ export class MissionEngine {
 
   get(missionId: string): Mission | null {
     return this.missions.get(missionId) || null;
+  }
+
+  /**
+   * Record a native collaboration session on a mission so completion can be
+   * gated on convergence. Idempotent: re-registering the same session keeps one
+   * tag and does not bump the version twice.
+   */
+  registerCollaboration(missionId: string, sessionId: string): Mission | null {
+    const mission = this.missions.get(missionId);
+    if (!mission || MissionEngine.isTerminal(mission.status)) return null;
+    const tags = mission.tags ?? [];
+    if (tags.includes(sessionId)) return mission;
+    mission.tags = [...tags, sessionId];
+    mission.updatedAt = new Date().toISOString();
+    mission.version = (mission.version ?? 0) + 1;
+    return mission;
+  }
+
+  /** Drop a collaboration tag once its session has converged (or vanished). */
+  removeCollaboration(missionId: string, sessionId: string): Mission | null {
+    const mission = this.missions.get(missionId);
+    if (!mission || MissionEngine.isTerminal(mission.status)) return null;
+    const tags = mission.tags ?? [];
+    if (!tags.includes(sessionId)) return mission;
+    mission.tags = tags.filter((tag) => tag !== sessionId);
+    mission.updatedAt = new Date().toISOString();
+    mission.version = (mission.version ?? 0) + 1;
+    return mission;
   }
 
   list(filter?: { status?: string; type?: string; priority?: string }): Mission[] {

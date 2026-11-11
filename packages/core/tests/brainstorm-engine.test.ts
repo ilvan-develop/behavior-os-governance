@@ -63,4 +63,37 @@ describe('BrainstormEngine', () => {
     expect(result.success).toBe(true);
     expect(session.phase).toBe('cancelled');
   });
+
+  it('decides the session once every participant has voted', () => {
+    const engine = new BrainstormEngine();
+    const session = engine.createSession('Test', ['agent-1', 'agent-2'], 'open-source');
+    const ideaResult = engine.proposeIdea(session.id, 'agent-1', 'Idea', 'Desc');
+    if (!ideaResult.idea) throw new Error('Expected an idea to be proposed');
+    const idea = ideaResult.idea;
+
+    engine.voteOnIdea(session.id, idea.id, 'agent-1', 'support');
+    expect(engine.getSession(session.id)?.phase).toBe('open');
+
+    engine.voteOnIdea(session.id, idea.id, 'agent-2', 'oppose');
+    expect(engine.getSession(session.id)?.phase).toBe('decided');
+  });
+
+  it('keeps the session open while a participant has not voted', () => {
+    const engine = new BrainstormEngine();
+    const session = engine.createSession('Test', ['agent-1', 'agent-2'], 'open-source');
+    const ideaResult = engine.proposeIdea(session.id, 'agent-1', 'Idea', 'Desc');
+    if (!ideaResult.idea) throw new Error('Expected an idea to be proposed');
+    const idea = ideaResult.idea;
+
+    engine.voteOnIdea(session.id, idea.id, 'agent-1', 'support');
+    expect(engine.getSession(session.id)?.phase).not.toBe('decided');
+  });
+
+  it('never auto-converges a session with no participants', () => {
+    const engine = new BrainstormEngine();
+    const session = engine.createSession('Test', [], 'open-source');
+    const ideaResult = engine.proposeIdea(session.id, 'agent-1', 'Idea', 'Desc');
+    expect(ideaResult.success).toBe(false);
+    expect(engine.getSession(session.id)?.phase).toBe('open');
+  });
 });
