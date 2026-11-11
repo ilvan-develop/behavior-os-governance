@@ -1429,6 +1429,11 @@ export default Plugin.define({
               description:
                 'true (default) runs a simulated audit and never reports a pass; false executes the real checks',
             },
+            performanceBudgetMs: {
+              type: 'number',
+              description:
+                'Wall-clock budget for the performance stage (a real build). Exceeding it reports a warning, never a failure.',
+            },
           },
           required: ['missionId'],
         },
@@ -1438,12 +1443,14 @@ export default Plugin.define({
             agentId?: string;
             stages?: string[];
             simulate?: boolean;
+            performanceBudgetMs?: number;
           };
           const report = await bos.runAudit({
             missionId: params.missionId,
             agentId: params.agentId,
             stages: params.stages,
             simulate: params.simulate,
+            performanceBudgetMs: params.performanceBudgetMs,
             // The host process cwd is not guaranteed to be the project; the
             // plugin knows the workspace, so the real audit stages must run
             // there (otherwise typecheck/security fail with "no script").

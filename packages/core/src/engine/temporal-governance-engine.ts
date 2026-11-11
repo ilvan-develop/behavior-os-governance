@@ -220,6 +220,11 @@ export class TemporalGovernanceEngine {
     this.temporalRules = [];
   }
 
+  /** Replace the whole rule set (used to hydrate a persisted snapshot). */
+  restore(rules: TemporalRule[]): void {
+    this.temporalRules = Array.isArray(rules) ? rules.map((rule) => ({ ...rule })) : [];
+  }
+
   /**
    * Check whether a temporal rule is active at the given time (defaults to now).
    */

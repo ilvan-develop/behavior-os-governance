@@ -178,6 +178,41 @@ describe('storage-sync', () => {
       expect(merged.learnings.map((l) => l.id).sort()).toEqual(['l1', 'l2']);
     });
 
+    it('unions knowledge-graph nodes/edges instead of letting the foreign side win wholesale', () => {
+      const merged = mergeSnapshots(
+        {
+          knowledgeGraph: {
+            nodes: [{ id: 'n1', label: 'local' }],
+            edges: [{ id: 'e1', from: 'n1', to: 'n2' }],
+          },
+        },
+        {
+          knowledgeGraph: {
+            nodes: [{ id: 'n2', label: 'foreign' }],
+            edges: [{ id: 'e2', from: 'n2', to: 'n1' }],
+          },
+        },
+      );
+
+      const graph = merged.knowledgeGraph as {
+        nodes: Array<{ id: string }>;
+        edges: Array<{ id: string }>;
+      };
+      expect(graph.nodes.map((n) => n.id).sort()).toEqual(['n1', 'n2']);
+      expect(graph.edges.map((e) => e.id).sort()).toEqual(['e1', 'e2']);
+    });
+
+    it('unions temporal rules by id', () => {
+      const merged = mergeSnapshots(
+        { temporalRules: [{ id: 't1', baseRuleId: 'local' }] },
+        { temporalRules: [{ id: 't2', baseRuleId: 'foreign' }] },
+      );
+      expect((merged.temporalRules as Array<{ id: string }>).map((r) => r.id).sort()).toEqual([
+        't1',
+        't2',
+      ]);
+    });
+
     it('prefers the foreign DNA but keeps a local one when foreign has none', () => {
       const foreign = mergeSnapshots(
         { dna: undefined, agentState: { selectedDna: 'A' } },

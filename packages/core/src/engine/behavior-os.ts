@@ -248,7 +248,10 @@ const PROTOCOL_TOOL_STEPS: Readonly<Record<string, number>> = Object.fromEntries
 );
 
 /** Current schema version of the persisted {@link BehaviorOSSnapshot}. */
-export const BEHAVIOROS_SNAPSHOT_VERSION = 1;
+export const BEHAVIOROS_SNAPSHOT_VERSION = 2;
+
+/** Versions {@link BehaviorOS.importState} can read (v1 predates graph state). */
+export type BehaviorOSSnapshotVersion = 1 | typeof BEHAVIOROS_SNAPSHOT_VERSION;
 
 /**
  * Complete, JSON-serializable snapshot of the engine state. Hosts (e.g. the
@@ -257,7 +260,7 @@ export const BEHAVIOROS_SNAPSHOT_VERSION = 1;
  * process restart.
  */
 export interface BehaviorOSSnapshot {
-  version: typeof BEHAVIOROS_SNAPSHOT_VERSION;
+  version: BehaviorOSSnapshotVersion;
   exportedAt: string;
   agentState: AgentState;
   dna: DNA | null;
@@ -279,6 +282,21 @@ export interface BehaviorOSSnapshot {
    * capabilities), so the type-based role fallback cannot run.
    */
   agents?: Agent[];
+  /**
+   * Knowledge graph (G-001). Optional for v1 snapshots. Without it every node
+   * and edge written by `bos_add_knowledge_node` / `bos_record_learning`
+   * disappeared on restart even though the graph is a first-class resource.
+   */
+  knowledgeGraph?: {
+    nodes: import('@behavior-os/schemas').KnowledgeGraphNode[];
+    edges: import('@behavior-os/schemas').KnowledgeGraphEdge[];
+  };
+  /**
+   * Time-based governance rules. Optional for v1 snapshots. The SQLite store
+   * already keeps them in `meta:temporal-governance-state`; the snapshot is the
+   * durable channel for hosts that persist through `exportState()`.
+   */
+  temporalRules?: import('./temporal-governance-engine.js').TemporalRule[];
 }
 
 /** Deep-clone via JSON so a snapshot only ever contains persistable values. */
@@ -759,16 +777,51 @@ export class BehaviorOS {
         phase: 'pre',
         blocking: true,
         evaluate: (ctx: GateContext) => {
+          const action = ctx.action ?? '';
+          const agentId = ctx.agentId ?? 'system';
           if (!this.currentDNA) {
             return { status: 'skipped', details: { reason: 'No DNA pattern selected' } };
           }
-          const decision = this.evaluateGovernance(ctx.action ?? '', {
-            agent: ctx.agentId ?? 'system',
+
+          // Same order as the native permission hook: role policies run before
+          // the DNA for mutating, non-control-plane actions, so a role can deny
+          // an action the DNA would allow. The carve-out matches the hook: a
+          // role never gates read-only inspection or the control plane, or a
+          // restrictive policy would deadlock the agent.
+          if (!isControlPlaneAction(action) && isMutatingAction(action)) {
+            const roleDecision = this.evaluateRoleAction({ agentId }, action);
+            if (roleDecision.action === 'block') {
+              return {
+                status: 'failed',
+                details: {
+                  source: 'role-policy',
+                  verdict: 'deny',
+                  reason: roleDecision.reason,
+                },
+              };
+            }
+          }
+
+          const decision = this.evaluateGovernance(action, {
+            agent: agentId,
             // Surface the action as a condition flag so DNA rules can match on it,
             // alongside any caller-supplied flags (which take precedence).
             context: { action: ctx.action, ...(ctx.context ?? {}) },
           });
           if (decision.verdict === 'deny') {
+            // The DNA deny must never lock the control plane or a read-only
+            // action (C21). This is the same facade policy the plugin hook
+            // applies, so preflight and the native host agree.
+            if (this.bootstrapDenyOverride(action, decision)) {
+              return {
+                status: 'passed',
+                details: {
+                  verdict: decision.verdict,
+                  reason: decision.reason,
+                  overridden: 'control-plane-or-read-only',
+                },
+              };
+            }
             return {
               status: 'failed',
               details: { verdict: decision.verdict, reason: decision.reason },
@@ -854,6 +907,12 @@ export class BehaviorOS {
     agentId?: string;
     stages?: string[];
     simulate?: boolean;
+    /**
+     * Wall-clock budget for the `performance` audit stage (see
+     * `AuditOptions.performanceBudgetMs`). Exposed here so hosts can tune it
+     * instead of being stuck with the 300 s default.
+     */
+    performanceBudgetMs?: number;
     /** Workspace root for the real stages; see AuditOptions.root. */
     root?: string;
   }): Promise<AuditReport> {
@@ -2748,6 +2807,14 @@ export class BehaviorOS {
   exportState(): BehaviorOSSnapshot {
     const roleEngine =
       this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
+    const graphEngine =
+      this.registry.get<import('./knowledge-graph-engine.js').KnowledgeGraphEngine>(
+        'knowledge-graph',
+      );
+    const temporalEngine =
+      this.registry.get<import('./temporal-governance-engine.js').TemporalGovernanceEngine>(
+        'temporal-governance',
+      );
     return cloneJson({
       version: BEHAVIOROS_SNAPSHOT_VERSION,
       exportedAt: new Date().toISOString(),
@@ -2758,9 +2825,11 @@ export class BehaviorOS {
       learningRecords: this.getLearningEngine().snapshotRecords(),
       policyLedger: this.getLearningEngine().snapshotPolicyLedger(),
       agents: Array.from(this.agents.values()),
-      // Only include the registry when it exists: exporting must not
-      // instantiate an engine just to persist an empty registry.
+      // Only include engines that already exist: exporting must not instantiate
+      // one just to persist empty state.
       ...(roleEngine ? { rolePolicy: roleEngine.snapshot() } : {}),
+      ...(graphEngine ? { knowledgeGraph: graphEngine.snapshot() } : {}),
+      ...(temporalEngine ? { temporalRules: temporalEngine.getTemporalRules() } : {}),
     });
   }
 
@@ -2770,7 +2839,10 @@ export class BehaviorOS {
    * snapshot, leaving the current state untouched in that case.
    */
   importState(snapshot: BehaviorOSSnapshot | null | undefined): boolean {
-    if (!snapshot || snapshot.version !== BEHAVIOROS_SNAPSHOT_VERSION) return false;
+    // v1 snapshots predate graph state; they remain readable. Anything newer
+    // than this build is refused rather than partially imported.
+    if (!snapshot || (snapshot.version !== 1 && snapshot.version !== BEHAVIOROS_SNAPSHOT_VERSION))
+      return false;
     try {
       if (snapshot.agentState && typeof snapshot.agentState === 'object') {
         const restored = cloneJson(snapshot.agentState) as AgentState;
@@ -2812,6 +2884,15 @@ export class BehaviorOS {
         // become active baseline versions, visibly marked as legacy imports.
         this.getLearningEngine().importLegacyPolicies();
       }
+      // Graph and temporal state are first-class resources: restoring them is
+      // what makes `bos_add_knowledge_node` and `bos_add_temporal_rule` durable
+      // across a host restart instead of session-scoped.
+      if (snapshot.knowledgeGraph) {
+        this.getKnowledgeGraph().restore(snapshot.knowledgeGraph);
+      }
+      if (snapshot.temporalRules) {
+        this.getTemporalGovernanceEngine().restore(snapshot.temporalRules);
+      }
       return true;
     } catch {
       return false;
@@ -2836,6 +2917,17 @@ export class BehaviorOS {
       } catch {
         // A corrupt snapshot must not block startup; the engine simply
         // starts empty and the next facade mutation re-persists clean state.
+      }
+    }
+    // Temporal rules are persisted on every mutation; hydrate them so a rule
+    // added in one session still evaluates after a restart.
+    const temporalStateRaw = this.store.getMeta('temporal-governance-state');
+    if (temporalStateRaw) {
+      try {
+        this.getTemporalGovernanceEngine().restore(JSON.parse(temporalStateRaw));
+      } catch {
+        // Corrupt temporal state: start with no rules; the next mutation
+        // re-persists clean state.
       }
     }
     // Learning lifecycle record (G-014) hydrates from its meta snapshot.

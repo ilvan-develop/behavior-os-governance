@@ -789,6 +789,13 @@ server.registerTool(
         .describe(
           'true (default) runs a simulated audit and never reports a pass; false executes the real checks',
         ),
+      performanceBudgetMs: z
+        .number()
+        .positive()
+        .optional()
+        .describe(
+          'Wall-clock budget for the performance stage (a real build). Exceeding it reports a warning, never a failure.',
+        ),
     }),
     annotations: {
       title: 'Run Audit',
@@ -799,11 +806,13 @@ server.registerTool(
     agentId,
     stages,
     simulate,
+    performanceBudgetMs,
   }: {
     missionId: string;
     agentId?: string;
     stages?: string[];
     simulate?: boolean;
+    performanceBudgetMs?: number;
   }) => {
     try {
       const bos = getBehaviorOS();
@@ -812,6 +821,7 @@ server.registerTool(
         agentId,
         stages,
         simulate,
+        performanceBudgetMs,
         // A stdio MCP client can launch this server from any cwd; resolve the
         // workspace from the environment the way the plugin does, so real
         // stages never run outside the project (false red audits).

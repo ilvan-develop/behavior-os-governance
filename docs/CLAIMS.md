@@ -34,7 +34,7 @@ grep -c "z.enum(" packages/schemas/src/index.ts
 # Tabelas SQLite (esperado: 9)
 grep -c "CREATE TABLE" packages/core/src/persistence/sqlite-store.ts
 
-# Testes (esperado: 131 ficheiros / 1469 casos = 1463 passed + 6 skipped live-gated) — `pnpm test` para o resultado vivo
+# Testes (esperado: 131 ficheiros / 1480 casos = 1474 passed + 6 skipped live-gated) — `pnpm test` para o resultado vivo
 ls packages/*/tests/*.test.ts plugins/opencode-v2/tests/*.test.ts examples/tests/*.test.ts
 
 # Control plane OpenCode V2 (esperado: 39 checks)
@@ -163,7 +163,7 @@ medido com `wc -l`.
 | `PROTOCOL_STEP_COUNT` documentado como "0-based index into this list"                                                                                                                  | A lista não existia: o valor era o literal `7`. Agora é `PROTOCOL_STEPS.length` e a lista existe (validada contra `ProtocolStepSchema` em `protocol-steps-catalog.test.ts`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `scripts/count-tests.mjs`                                                                                                                                                              | Removido: nada o corria (nem `package.json`, nem CI), contava testes por regex (o que contradiz o número medido pelo vitest), tinha ramos só do Jest (`xit`/`xtest`), deixava `fileDetails` com Promises por resolver e uma função morta. Uma segunda contagem divergente é uma fonte de afirmações falsas.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `pnpm docs:build` (`typedoc` sem config)                                                                                                                                               | **Apagava tudo em `docs/`.** Um `typedoc` sem config usa `out: ./docs` com `cleanOutputDir: true`. Existe `typedoc.json` a fixar `out: docs/api` (git-ignored) e duas guardas falham se o `out` voltar a apontar para a raiz ou para `docs/`. Medido: exit 0, **154** md gerados, **0 de 14** docs escritos à mão apagados ou alterados (comparação SHA-256).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `pnpm test:coverage` na raiz                                                                                                                                                           | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que estava fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` delegam em cada pacote (incluindo `examples/`, agora membro do workspace) e dão hoje **131 ficheiros / 1469 casos** (6 skipped live-gated), exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `pnpm test:coverage` na raiz                                                                                                                                                           | **Falhava.** O `vitest` na raiz ignorava os `vitest.config.ts` de cada pacote (perdia o timeout de 20 s do plugin do OpenCode) e apanhava `examples/`, que estava fora do workspace. A raiz ganhou `vitest.config.ts` com `test.projects`: `test:coverage` e `test:watch` delegam em cada pacote (incluindo `examples/`, agora membro do workspace) e dão hoje **131 ficheiros / 1480 casos** (6 skipped live-gated), exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `pnpm clean` / `pnpm clean:all`                                                                                                                                                        | O `clean:all` usava `rm -rf node_modules`, que não corre no PowerShell, e **nenhum** pacote tinha script `clean`. Agora `scripts/clean.mjs` (`node:fs`, sem shell) serve os 8 pacotes e a raiz: `pnpm clean` = 8/8 tarefas, 0 `dist/` restantes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Tasks `lint` e `dev` no `turbo.json`, e o script raiz `dev`                                                                                                                            | **Configuração morta:** nenhum pacote implementa `lint` nem `dev`, pelo que `turbo lint`/`turbo dev` não tinham nada para correr — e o `dev` da raiz apontava para essa task inexistente. Removidos; entrou uma task `clean` real (`cache: false`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Hooks Husky                                                                                                                                                                            | Os hooks ainda carregavam o bootstrap `husky.sh` (deprecado, removido no v10) e o `commit-msg` passava `$1` sem quoting. O bootstrap saiu; o `pre-commit` passou a correr `lint-staged` + `typecheck` em vez do `pnpm lint:check` sobre o repositório inteiro.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -430,13 +430,13 @@ introduzir uma lista de advisories ignoradas.
 
 ## Estado dos testes
 
-Medido com `pnpm test --force` (não aspiracional): **131 ficheiros / 1469 casos** (6 skipped live-gated), exit 0,
+Medido com `pnpm test --force` (não aspiracional): **131 ficheiros / 1480 casos** (6 skipped live-gated), exit 0,
 `pnpm typecheck` 11/11 tarefas sem erros, `pnpm lint:check` (Biome) limpo,
 `pnpm build` 8/8 tarefas e `pnpm run security:audit` com **0 vulnerabilidades** (exit 0).
 `pnpm test:coverage` na raiz corre a mesma suite
-(**131 ficheiros / 1469 casos**, 6 skipped live-gated). O harness de governação
+(**131 ficheiros / 1480 casos**, 6 skipped live-gated). O harness de governação
 (`pnpm verify:governance`) prova **25/25** claims (100%), com 0 falhas, e o
-control plane OpenCode V2 (`pnpm verify:opencode`) prova **39/39** invariantes.
+control plane OpenCode V2 (`pnpm verify:opencode`) prova **40/40** invariantes.
 Os números vivem nos próprios testes, que falham se a contagem derivar:
 `packages/mcp-server/tests/mcp.test.ts` ("98 tools" + descrição do manifesto),
 `plugins/opencode-v2/tests/plugin-registration.test.ts` (total 102 tools: 91 inline + 11 expostas),
@@ -498,3 +498,37 @@ verificado como qualquer outro documento.
   afirmada e a esperada; revertido, passa. Para acrescentar testes sem mover os
   totais, os números desta secção e do README têm de ser remedidos — é a convenção
   do repositório, não uma omissão.
+
+## Snapshot v2 e enforcement alinhado (2026-11-11)
+
+- **Snapshot v2 durável.** `BehaviorOSSnapshot` versão 2 transporta o knowledge
+  graph (`knowledgeGraph.nodes` / `.edges`) e as regras temporais
+  (`temporalRules`) além de protocolo, DNA, missões, aprendizagens, lifecycle,
+  policy ledger, roles e agentes. `importState` continua a ler snapshots v1
+  (sem esses campos) e o merge entre instâncias faz união por `id`, para que
+  um escritor externo não apague nós/arestas/regras locais. A hidratação do
+  SQLite restaura `temporal-governance-state` no arranque. Prova:
+  `packages/core/tests/persistence.test.ts` (round-trip v2 + import v1) e
+  `plugins/opencode-v2/tests/storage-sync.test.ts` (união de grafo/regras).
+- **Preflight alinhado ao hook nativo.** O gate `governance` do pipeline avalia
+  políticas de role antes do DNA para ações mutantes fora do control plane e
+  aplica o mesmo carve-out `bootstrapDenyOverride` do permission hook.
+  `deploy`, `publish` e `release` passam a ser classificados como mutantes (não
+  como inspeção read-only). Prova:
+  `packages/core/tests/pipeline-engine.test.ts` (role bloqueia edição;
+  control plane nunca é bloqueado) e `facade-host-logic.test.ts`.
+- **Estágios de auditoria completos.** `performance` mede a duração do `build`
+  do projeto contra `performanceBudgetMs` (default 300 s; exceder é `warning`,
+  nunca `fail` só por tempo) e `governance` executa o script
+  `verify:governance`/`governance`. Sem script, o estágio reporta `skipped` com
+  motivo explícito, e não o antigo `Unknown stage`. Prova:
+  `packages/core/tests/audit-engine-real.test.ts` (4 casos: skip e pass de cada
+  estágio).
+- **Manifesto de capacidades com gate.** `docs/analysis/capabilities.json` é
+  gerado por `scripts/capabilities.mjs` a partir do servidor MCP, do plugin, de
+  `dnas/`, de `packages/core/src/engine/` e do schema SQLite. `pnpm
+  verify:capabilities` falha com diff nominal quando o ficheiro está stale;
+  provado removendo `bos_whoami` e alterando a contagem de motores (exit 1 com
+  `+ bos_whoami` e `47 -> 48`) e regenerando (PASS). O manifesto é excluído do
+  formatter por ser artefacto gerado, e `docs-consistency.test.ts` compara as
+  suas contagens com a fonte. O gap plugin↔MCP é exatamente as 4 tools de loop.

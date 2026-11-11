@@ -260,6 +260,22 @@ export function mergeSnapshots(
   // auto-missions and make bos_start_mission refuse a mission that is done.
   const activeMission = isTerminalMission(preferredMission) ? null : preferredActive;
 
+  // Graph and temporal state are item collections too: a plain object spread
+  // would let the foreign (newer) side erase every local node/edge/rule. Union
+  // by id so a merge never silently loses durable governance state.
+  const aGraph = (a.knowledgeGraph ?? {}) as {
+    nodes?: Array<{ id?: string; [key: string]: unknown }>;
+    edges?: Array<{ id?: string; [key: string]: unknown }>;
+  };
+  const bGraph = (b.knowledgeGraph ?? {}) as typeof aGraph;
+  const hasGraph = a.knowledgeGraph !== undefined || b.knowledgeGraph !== undefined;
+  const aTemporal = Array.isArray(a.temporalRules)
+    ? (a.temporalRules as Array<{ id?: string; [key: string]: unknown }>)
+    : undefined;
+  const bTemporal = Array.isArray(b.temporalRules)
+    ? (b.temporalRules as Array<{ id?: string; [key: string]: unknown }>)
+    : undefined;
+
   return {
     ...a,
     ...b,
@@ -275,5 +291,14 @@ export function mergeSnapshots(
     },
     missions,
     learnings: unionById(a.learnings, b.learnings),
+    ...(hasGraph
+      ? {
+          knowledgeGraph: {
+            nodes: unionById(aGraph.nodes, bGraph.nodes),
+            edges: unionById(aGraph.edges, bGraph.edges),
+          },
+        }
+      : {}),
+    ...(aTemporal || bTemporal ? { temporalRules: unionById(aTemporal, bTemporal) } : {}),
   };
 }

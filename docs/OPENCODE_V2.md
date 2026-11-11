@@ -56,6 +56,7 @@ to recognize every dangerous command.
 | ------------ | ---------- | ----------------------------------------------------- | --------------------------------- |
 | `researcher` | `subagent` | Official documentation and source evidence            | Cannot edit or run shell          |
 | `planner`    | `primary`  | Task decomposition, risks, gates, acceptance criteria | Cannot edit; Git inspection only  |
+| `builder`    | `subagent` | Plans, builds and verifies construction work          | Edit + package-manager commands   |
 | `reviewer`   | `subagent` | Independent review of a diff                          | Cannot edit; Git inspection only  |
 | `auditor`    | `subagent` | Mission audit and gate evidence                       | Cannot edit; read-only gates only |
 

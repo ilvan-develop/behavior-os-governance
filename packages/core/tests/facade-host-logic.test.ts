@@ -132,6 +132,7 @@ describe('action classification and the bootstrap deny-override policy', () => {
     expect(isControlPlaneAction('bos_select_dna')).toBe(true);
     expect(isControlPlaneAction('bash')).toBe(false);
     expect(isMutatingAction('write')).toBe(true);
+    expect(isMutatingAction('deploy')).toBe(true);
     expect(isMutatingAction('grep')).toBe(false);
     expect(isMutatingAction(undefined)).toBe(false);
   });

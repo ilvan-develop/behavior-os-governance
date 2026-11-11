@@ -28,17 +28,30 @@ const LINTER_MARKERS = [
   { name: 'oxlint', configs: ['.oxlintrc.json'] },
 ] as const;
 
-/** True when `dir` declares a lint script in its `package.json`. */
-function hasLintScript(dir: string): boolean {
+/** Scripts declared by `dir/package.json`, or `{}` when it cannot be read. */
+function readScripts(dir: string): Record<string, string> {
   try {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
-    const scripts = pkg.scripts ?? {};
-    return Boolean(scripts['lint:check'] ?? scripts.lint);
+    return pkg.scripts ?? {};
   } catch {
-    return false;
+    return {};
   }
+}
+
+/** First declared script among `names`, in preference order. */
+function findScript(dir: string, names: string[]): string | null {
+  const scripts = readScripts(dir);
+  for (const name of names) {
+    if (typeof scripts[name] === 'string' && scripts[name].trim() !== '') return name;
+  }
+  return null;
+}
+
+/** True when `dir` declares a lint script in its `package.json`. */
+function hasLintScript(dir: string): boolean {
+  return findScript(dir, ['lint:check', 'lint']) !== null;
 }
 
 /**
@@ -173,6 +186,12 @@ export interface AuditOptions {
   stages?: AuditStage[];
   metadata?: Record<string, unknown>;
   simulate?: boolean;
+  /**
+   * Wall-clock budget for the `performance` stage (a real build). The stage
+   * passes when the build finishes inside the budget and reports a `warning`
+   * when it does not; it never fails on time alone.
+   */
+  performanceBudgetMs?: number;
   /**
    * Project root the real stages shell out from. Callers that know the
    * workspace (the OpenCode plugin gets it as `ctx.location.directory`) must
@@ -376,6 +395,80 @@ export class AuditEngine {
             ...options.metadata,
           },
         };
+      }
+      case 'governance': {
+        // A governance stage must run the project's own governance proof, not a
+        // generic check. Two conventional script names are accepted; when
+        // neither exists the stage is skipped with an explicit reason instead of
+        // the old "Unknown stage" (which made a requested stage silently do
+        // nothing while the audit still reported `pass`).
+        const script = findScript(projectRoot, ['verify:governance', 'governance']);
+        if (!script) {
+          return {
+            ...base,
+            status: 'skipped',
+            details: {
+              checked: false,
+              reason: 'No governance script found (verify:governance|governance)',
+            },
+          };
+        }
+        try {
+          await execSilently('pnpm', ['run', script], { cwd: projectRoot, timeout: 300_000 });
+          return {
+            ...base,
+            status: 'passed',
+            details: { checked: true, script, ...options.metadata },
+          };
+        } catch (error) {
+          return {
+            ...base,
+            status: 'failed',
+            details: { checked: true, script, error: describeCommandFailure(error) },
+          };
+        }
+      }
+      case 'performance': {
+        // The only portable performance signal this engine can measure without
+        // inventing numbers is how long the project's own build takes. It is a
+        // budget check, never a pass/fail on latency alone.
+        const script = findScript(projectRoot, ['build']);
+        if (!script) {
+          return {
+            ...base,
+            status: 'skipped',
+            details: { checked: false, reason: 'No build script found' },
+          };
+        }
+        const budgetMs = options.performanceBudgetMs ?? 300_000;
+        const startedAt = Date.now();
+        try {
+          await execSilently('pnpm', ['run', script], { cwd: projectRoot, timeout: 600_000 });
+          const durationMs = Date.now() - startedAt;
+          return {
+            ...base,
+            status: durationMs <= budgetMs ? 'passed' : 'warning',
+            details: {
+              checked: true,
+              script,
+              durationMs,
+              budgetMs,
+              ...(durationMs > budgetMs ? { reason: 'Build exceeded the performance budget' } : {}),
+              ...options.metadata,
+            },
+          };
+        } catch (error) {
+          return {
+            ...base,
+            status: 'failed',
+            details: {
+              checked: true,
+              script,
+              durationMs: Date.now() - startedAt,
+              error: describeCommandFailure(error),
+            },
+          };
+        }
       }
       default:
         return { ...base, status: 'skipped', details: { reason: `Unknown stage: ${stage}` } };

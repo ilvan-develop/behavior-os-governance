@@ -51,6 +51,15 @@
       }
     },
     {
+      "includes": ["docs/analysis/capabilities.json"],
+      "formatter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    },
+    {
       "includes": ["**/tests/**", "**/*.test.ts"],
       "linter": {
         "rules": {

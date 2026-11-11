@@ -271,6 +271,59 @@ describe('BehaviorOS gate pipeline', () => {
     expect(result.blockedBy).toBe('always');
   });
 
+  it('applies role policies before the DNA for mutating, non-control-plane actions', async () => {
+    const bos = new BehaviorOS();
+    await bos.loadDNA(dna);
+    bos.defineRolePolicy({
+      id: 'no-edit',
+      name: 'No edits',
+      description: 'Developers may not edit files',
+      condition: 'edit',
+      action: 'block',
+      severity: 'high',
+      appliesTo: ['role'],
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    bos.registerRole({
+      id: 'developer',
+      name: 'Developer',
+      displayName: 'Developer',
+      responsibilities: ['implement features'],
+      policies: ['no-edit'],
+      canAudit: false,
+      canEnforce: false,
+      canTeach: false,
+    });
+
+    const blocked = bos.preflightAction('edit src/a.ts', { agent: 'developer' });
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.blockedBy).toBe('governance');
+
+    // Read-only inspection is never gated by a role policy (same carve-out as
+    // the native permission hook), and the DNA does not block it either.
+    expect(bos.preflightAction('grep files', { agent: 'developer' }).allowed).toBe(true);
+  });
+
+  it('never blocks the control plane even when the DNA denies it', async () => {
+    const bos = new BehaviorOS();
+    await bos.loadDNA({
+      ...dna,
+      governance: [
+        {
+          id: 'no-control-plane',
+          level: 'critical',
+          action: 'block',
+          conditions: [{ type: 'action', value: 'bos_apply_code_fixes' }],
+          description: 'Control plane is denied by mistake',
+        },
+      ],
+    });
+
+    const result = bos.preflightAction('bos_apply_code_fixes', { agent: 'agent-1' });
+    expect(result.allowed).toBe(true);
+    expect(result.run.overall).toBe('pass');
+  });
+
   it('persists blocked pre-flights and pipeline runs to SQLite', async () => {
     const first = new BehaviorOS({ persistence: { path: dbPath } });
     await first.loadDNA(dna);

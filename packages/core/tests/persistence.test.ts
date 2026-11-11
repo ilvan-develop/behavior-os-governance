@@ -39,7 +39,7 @@ describe('BehaviorOS persistence', () => {
     const snapshot = bos.exportState();
     // The snapshot must be plain JSON so it can be written to any storage.
     expect(() => JSON.parse(JSON.stringify(snapshot))).not.toThrow();
-    expect(snapshot.version).toBe(1);
+    expect(snapshot.version).toBe(2);
 
     const restored = new BehaviorOS();
     expect(restored.importState(snapshot)).toBe(true);
@@ -66,6 +66,68 @@ describe('BehaviorOS persistence', () => {
 
     expect(bos.getState().currentStep).toBe(before);
     expect(bos.getState().selectedDna).toBe('Test DNA');
+  });
+
+  it('round-trips knowledge-graph nodes/edges and temporal rules', async () => {
+    await bos.loadDNA(testDna);
+    const now = new Date().toISOString();
+    bos.addKnowledgeNode({
+      id: 'node:mission:1',
+      type: 'mission',
+      label: 'Ship it',
+      properties: { owner: 'architect' },
+      createdAt: now,
+      updatedAt: now,
+    });
+    bos.addKnowledgeNode({
+      id: 'node:decision:1',
+      type: 'decision',
+      label: 'Use the graph',
+      properties: {},
+      createdAt: now,
+      updatedAt: now,
+    });
+    bos.addKnowledgeEdge({
+      id: 'edge:1',
+      from: 'node:mission:1',
+      to: 'node:decision:1',
+      type: 'PART_OF',
+      weight: 0.8,
+      createdAt: now,
+    });
+    bos.addTemporalRule({
+      baseRuleId: 'block-prod',
+      rule: testDna.governance[0],
+      scheduleType: 'absolute',
+      startTime: '2020-01-01T00:00:00.000Z',
+      endTime: '2999-01-01T00:00:00.000Z',
+      reason: 'keep the review window closed',
+      authorizedBy: 'security-officer',
+    });
+
+    const snapshot = bos.exportState();
+    expect(snapshot.knowledgeGraph?.nodes).toHaveLength(2);
+    expect(snapshot.knowledgeGraph?.edges).toHaveLength(1);
+    expect(snapshot.temporalRules).toHaveLength(1);
+
+    const restored = new BehaviorOS();
+    expect(restored.importState(snapshot)).toBe(true);
+    expect(restored.getKnowledgeGraphStats().totalNodes).toBe(2);
+    expect(restored.getKnowledgeGraphStats().totalEdges).toBe(1);
+    expect(restored.getTemporalGovernanceEngine().getTemporalRules()).toHaveLength(1);
+  });
+
+  it('still reads a v1 snapshot (no graph state)', async () => {
+    await bos.loadDNA(testDna);
+    const legacy = { ...bos.exportState(), version: 1 as const };
+    delete (legacy as { knowledgeGraph?: unknown }).knowledgeGraph;
+    delete (legacy as { temporalRules?: unknown }).temporalRules;
+
+    const restored = new BehaviorOS();
+    expect(restored.importState(legacy)).toBe(true);
+    expect(restored.getDNA()?.name).toBe('Test DNA');
+    expect(restored.getKnowledgeGraphStats().totalNodes).toBe(0);
+    expect(restored.getTemporalGovernanceEngine().getTemporalRules()).toHaveLength(0);
   });
 });
 

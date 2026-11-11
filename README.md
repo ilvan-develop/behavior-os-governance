@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-1201-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-1480-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.2.2-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -34,7 +34,7 @@ pnpm build
 # Initialize a new project scaffold
 pnpm exec behavioros init --dna surgical-team
 
-# Run the full test suite (1201 cases, 110 files)
+# Run the full test suite (1480 cases, 131 files)
 pnpm test
 
 # Type-check (11 packages)
@@ -347,11 +347,11 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 
 | Metric                               | Value                                                      |
 | ------------------------------------ | ---------------------------------------------------------- |
-| Test files (`*.test.ts`)             | 110                                                        |
-| Test cases (executed by `pnpm test`) | 1201                                                       |
+| Test files (`*.test.ts`)             | 131                                                        |
+| Test cases (executed by `pnpm test`) | 1480                                                       |
 | Typecheck                            | `pnpm typecheck` (11/11 tasks, 0 errors)                   |
 | Build                                | `pnpm build` (ESM + DTS)                                   |
-| Coverage                             | `pnpm test:coverage` (same 110 files / 1201 cases, exit 0) |
+| Coverage                             | `pnpm test:coverage` (same 131 files / 1480 cases, exit 0) |
 | Publishability                       | `pnpm verify:publish` (packed manifests, exit 0)           |
 | Lint                                 | `pnpm lint:check` (Biome, clean)                           |
 | Clean                                | `pnpm clean` (8/8 tasks, removes `dist/`)                  |

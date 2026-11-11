@@ -283,3 +283,92 @@ describe('AuditEngine - audit root from the environment (R19)', () => {
     }
   });
 });
+
+// P1-5: `performance` and `governance` were accepted by the schema but the
+// real engine returned `skipped: Unknown stage`, so a caller could request a
+// stage that did nothing while the audit still reported `pass`.
+describe('AuditEngine - performance and governance stages (P1-5)', () => {
+  it('reports governance as skipped with a reason when no script exists', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bos-audit-gov-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'probe' }));
+      const report = await new AuditEngine().runReal({
+        missionId: 'm-gov',
+        agentId: 'a',
+        stages: ['governance'],
+        root: dir,
+      });
+      expect(report.stages[0]?.status).toBe('skipped');
+      expect(String(report.stages[0]?.details.reason)).toContain('governance script');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs the project governance script and passes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bos-audit-gov-pass-'));
+    try {
+      writeFileSync(
+        join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'probe',
+          scripts: { 'verify:governance': `node -e "process.exit(0)"` },
+        }),
+      );
+      const report = await new AuditEngine().runReal({
+        missionId: 'm-gov-pass',
+        agentId: 'a',
+        stages: ['governance'],
+        root: dir,
+      });
+      const stage = report.stages[0];
+      expect(stage?.status).toBe('passed');
+      expect(stage?.details.script).toBe('verify:governance');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports performance as skipped when the project has no build script', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bos-audit-perf-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'probe' }));
+      const report = await new AuditEngine().runReal({
+        missionId: 'm-perf',
+        agentId: 'a',
+        stages: ['performance'],
+        root: dir,
+      });
+      expect(report.stages[0]?.status).toBe('skipped');
+      expect(String(report.stages[0]?.details.reason)).toContain('build script');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('measures the build duration and passes inside the budget', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bos-audit-perf-pass-'));
+    try {
+      writeFileSync(
+        join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'probe',
+          scripts: { build: `node -e "process.exit(0)"` },
+        }),
+      );
+      const report = await new AuditEngine().runReal({
+        missionId: 'm-perf-pass',
+        agentId: 'a',
+        stages: ['performance'],
+        root: dir,
+        performanceBudgetMs: 60_000,
+      });
+      const stage = report.stages[0];
+      expect(stage?.status).toBe('passed');
+      expect(typeof stage?.details.durationMs).toBe('number');
+      expect(stage?.details.budgetMs).toBe(60_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

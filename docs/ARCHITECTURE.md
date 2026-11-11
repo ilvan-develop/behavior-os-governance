@@ -94,6 +94,12 @@ default run uses the first four.
 > A raw `AuditEngine` used directly is not downgraded; consume reports through
 > `BehaviorOS`.
 
+`performance` times the project's own `build` script against a configurable
+budget (`performanceBudgetMs`, default 300 s) and reports `warning` when the
+budget is exceeded; `governance` runs the project's `verify:governance` (or
+`governance`) script. When a project declares neither script the stage reports
+`skipped` with an explicit reason instead of the former "Unknown stage".
+
 ### 8. Quality Layer
 
 Quality gates enforcement:
@@ -151,11 +157,15 @@ Mission lifecycle management:
 - Evidence provenance (`executed` / `reported` / `simulated`) and an optional
   `verificationMode: 'executed'` that refuses reported evidence
 
-## Core Engines (11 Total)
+## Core Engines (48 Total)
 
-These are the only engines that exist in `packages/core/src/engine/`. Earlier
-revisions of this document listed 22 "engines" with synthetic `Ops/sec` figures;
-only the eleven below are real, and no throughput numbers are claimed.
+There are 48 engines in `packages/core/src/engine/` plus the
+`BehaviorOS` facade (`behavior-os.ts`) and the registry (`index.ts`) — 50 files
+in total. Earlier revisions of this document listed 22 "engines" with synthetic
+`Ops/sec` figures and later claimed only eleven existed; neither is true today.
+No throughput numbers are claimed.
+
+The eleven **foundational** engines that the governance path depends on are:
 
 | Engine               | File                       | Purpose                                                                                           |
 | -------------------- | -------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -170,6 +180,19 @@ only the eleven below are real, and no throughput numbers are claimed.
 | DriftEngine          | `drift-engine.ts`          | Behavioral drift between DNA snapshots                                                            |
 | CodeEditEngine       | `code-edit-engine.ts`      | Guarded single-file text edits (dry-run, confinement, hashes)                                     |
 | DNALoader            | `dna-loader.ts`            | YAML pattern loading with Zod validation                                                          |
+
+The remaining 37 cover collaboration (brainstorm, consensus,
+pragmatic-conversation, collective-intelligence), memory (knowledge-graph,
+persistent-memory, memory-consolidation, metacognition), policy and risk
+(role-policy, dynamic-policy, temporal-governance, safety-floor, anomaly,
+circuit-breaker), analysis (fairness, compliance, explainable-report, drift,
+antipattern, behavioral-ux), transfer (cross-dna-learning, cross-dna-pipeline,
+cross-domain), and execution (pipeline-planner, pipeline-recovery,
+external-adapter, zero-trust-identity, value-alignment, counterfactual-audit,
+experiential-learning, temporal-pattern). See
+[`ARCHITECTURE_REVIEW_2026-11-11.md`](ARCHITECTURE_REVIEW_2026-11-11.md) for the
+enforcement classification of every engine (`enforced`, `exposed`,
+`library-only`).
 
 ## Persistence (pluggable)
 
@@ -258,7 +281,11 @@ pending ──▶ active ──▶ completed   (terminal)
   `EVIDENCE_UNVERIFIED`. A mission created with `verificationMode: 'executed'`
   refuses any required gate whose latest evidence is not executed. Evidence
   remains caller-supplied and is not cryptographically attested by the host.
-- The OpenCode plugin persists the whole engine snapshot. Every lifecycle
+- The OpenCode plugin persists the whole engine snapshot (v2). Besides
+  protocol state, DNA, missions, learnings, learning records, the policy ledger,
+  role registry and agents, the snapshot now carries the knowledge graph
+  (`knowledgeGraph.nodes` / `.edges`) and time-based governance rules
+  (`temporalRules`); v1 snapshots remain readable. Every lifecycle
   transition (mission create/start/complete/fail/cancel and learning promotion)
   runs under a per-instance lifecycle lock that covers capture → mutate →
   persist → rollback, so a failed write restores only its own transition and can

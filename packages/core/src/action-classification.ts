@@ -18,7 +18,8 @@ export function isControlPlaneAction(action: string | undefined): boolean {
 }
 
 /** Tools whose execution mutates state and therefore counts as a `change`. */
-export const MUTATING_ACTION = /write|edit|patch|bash|shell|apply|create|delete|move/i;
+export const MUTATING_ACTION =
+  /write|edit|patch|bash|shell|apply|create|delete|move|deploy|publish|release/i;
 
 /** Whether an action string performs an operation on the environment. */
 export function isMutatingAction(action: string | undefined): boolean {
