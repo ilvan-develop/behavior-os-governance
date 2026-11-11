@@ -227,6 +227,31 @@ describe('BehaviorOS Core', () => {
       expect(decision.reason).toContain('Unknown role');
     });
 
+    it('restores a registered agent from the snapshot', () => {
+      bos.setActiveAgent({ id: 'probe-operator', name: 'Probe Operator', type: 'operator' });
+      const snapshot = bos.exportState();
+      expect(snapshot.agents?.map((agent) => agent.id)).toContain('probe-operator');
+
+      const restored = new BehaviorOS();
+      expect(restored.importState(snapshot)).toBe(true);
+
+      const identity = restored.resolveAgentIdentity();
+      expect(identity.agentId).toBe('probe-operator');
+      expect(identity.source).toBe('registered');
+      // The type fallback must still work after the restart.
+      expect(
+        restored.evaluateRoleAction({ agentId: 'probe-operator' }, 'edit src/a.ts').action,
+      ).toBe('allow');
+    });
+
+    it('still imports a legacy snapshot without an agent registry', () => {
+      const snapshot = bos.exportState();
+      delete (snapshot as { agents?: unknown }).agents;
+      const restored = new BehaviorOS();
+      expect(restored.importState(snapshot)).toBe(true);
+      expect(restored.resolveAgentIdentity().source).toBe('unassigned');
+    });
+
     it('does not fall back when an explicit unknown role was named', () => {
       bos.setActiveAgent({ id: 'probe-operator', name: 'Probe Operator', type: 'operator' });
       const decision = bos.evaluateRoleAction(

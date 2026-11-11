@@ -273,6 +273,12 @@ export interface BehaviorOSSnapshot {
    * every edit by that agent would fall back to the unknown-role fail-safe.
    */
   rolePolicy?: RolePolicyState;
+  /**
+   * Registered agents. Optional for older snapshots. Without it a restart keeps
+   * the declared `agentState.agentId` but loses the agent record (type,
+   * capabilities), so the type-based role fallback cannot run.
+   */
+  agents?: Agent[];
 }
 
 /** Deep-clone via JSON so a snapshot only ever contains persistable values. */
@@ -2751,6 +2757,7 @@ export class BehaviorOS {
       learnings: this.getLearningEngine().snapshot(),
       learningRecords: this.getLearningEngine().snapshotRecords(),
       policyLedger: this.getLearningEngine().snapshotPolicyLedger(),
+      agents: Array.from(this.agents.values()),
       // Only include the registry when it exists: exporting must not
       // instantiate an engine just to persist an empty registry.
       ...(roleEngine ? { rolePolicy: roleEngine.snapshot() } : {}),
@@ -2778,6 +2785,10 @@ export class BehaviorOS {
       this.currentDNA = snapshot.dna ?? null;
       // The rebuilt pipeline must reflect the restored DNA's quality gates.
       this.pipeline = null;
+      // Restore registered agents before identity/role resolution can run.
+      for (const agent of snapshot.agents ?? []) {
+        if (agent?.id) this.agents.set(agent.id, cloneJson(agent));
+      }
 
       // Rebind the DNA-scoped engines to the restored DNA so a decision cached
       // under a previous pattern can never leak into the restored session.
