@@ -17,6 +17,7 @@ import {
   controlPlanSignature,
   createInitialControlState,
   type OrchestratorOptions,
+  renameWithRetry,
 } from '../src/index.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -1178,5 +1179,49 @@ describe('Persistent engineering control loop', () => {
       // There's no public deleteMission API, so we test the tag adoption path
       // instead by creating a fresh orphaned-state scenario.
     });
+  });
+});
+
+describe('renameWithRetry', () => {
+  it('retries the transient denials Windows returns while a scanner holds the file', () => {
+    const codes = ['EPERM', 'EBUSY'];
+    const waits: number[] = [];
+    let attempts = 0;
+
+    renameWithRetry(
+      'from',
+      'to',
+      () => {
+        const code = codes[attempts];
+        attempts += 1;
+        if (code) {
+          const error = new Error(code) as NodeJS.ErrnoException;
+          error.code = code;
+          throw error;
+        }
+      },
+      (ms) => waits.push(ms),
+    );
+
+    expect(attempts).toBe(3);
+    expect(waits).toEqual([10, 25]);
+  });
+
+  it('does not retry a permanent rename error', () => {
+    let attempts = 0;
+    expect(() =>
+      renameWithRetry(
+        'from',
+        'to',
+        () => {
+          attempts += 1;
+          const error = new Error('missing') as NodeJS.ErrnoException;
+          error.code = 'ENOENT';
+          throw error;
+        },
+        () => {},
+      ),
+    ).toThrow('missing');
+    expect(attempts).toBe(1);
   });
 });

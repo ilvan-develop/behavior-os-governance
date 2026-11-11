@@ -1646,8 +1646,42 @@ export class ControlLoop {
       encoding: 'utf8',
       mode: 0o600,
     });
-    renameSync(temporary, this.statePath);
+    renameWithRetry(temporary, this.statePath);
   }
+}
+
+/** Delays between atomic-rename attempts; the first attempt is immediate. */
+const RENAME_RETRY_DELAYS_MS = [0, 10, 25, 50, 100];
+
+/**
+ * Atomically move `from` over `to`, retrying the transient denials Windows
+ * produces while a scanner or indexer still holds the freshly written file.
+ * Permanent errors (ENOENT, ENOSPC, ...) are thrown immediately.
+ */
+export function renameWithRetry(
+  from: string,
+  to: string,
+  rename: (from: string, to: string) => void = renameSync,
+  wait: (ms: number) => void = sleepSync,
+): void {
+  let lastError: unknown;
+  for (const delay of RENAME_RETRY_DELAYS_MS) {
+    if (delay > 0) wait(delay);
+    try {
+      rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+/** Synchronous sleep without a timer; callers are already on the sync path. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 const CONTROL_PHASES = new Set<string>([
