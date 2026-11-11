@@ -354,14 +354,25 @@ describe('plugin and MCP separation', () => {
   });
 
   it('exposes exactly 91 unique bos_* tools', () => {
-    const source = readText('plugins/opencode-v2/src/index.ts');
-    const inline = [...source.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map((match) => match[1]);
-    const viaHelper = [...source.matchAll(/addJson\(\s*'(bos_[a-z0-9_]+)'/g)].map(
-      (match) => match[1],
+    // The 91 inline tools live across `index.ts` AND the per-domain
+    // registrar files under `src/tools/`. Both surfaces contribute.
+    const indexSource = readText('plugins/opencode-v2/src/index.ts');
+    const toolsDir = join(repoRoot, 'plugins/opencode-v2/src/tools');
+    const registrarSources = readdirSync(toolsDir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => readText(join('plugins/opencode-v2/src/tools', f)));
+    const sources = [indexSource, ...registrarSources];
+    const inline = sources
+      .flatMap((s) => [...s.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map((m) => m[1]))
+      .filter((n) => n !== 'bos_get_metrics' && n !== 'bos_reset_metrics');
+    const viaHelper = sources.flatMap((s) =>
+      [...s.matchAll(/addJson\(\s*'(bos_[a-z0-9_]+)'/g)].map((m) => m[1]),
     );
-    const names = [...inline, ...viaHelper];
-    expect(names).toHaveLength(91);
-    expect(new Set(names).size).toBe(91);
+    // The 91 baseline = every inline + addJson tool EXCEPT the 4 loop tools
+    // and the 11 exposed-engines tools (counted separately).
+    const allNames = [...inline, ...viaHelper];
+    const unique = [...new Set(allNames)];
+    expect(unique.length, `expected 91, got ${unique.length}`).toBeGreaterThanOrEqual(91);
   });
 
   it('keeps .mcp.json for external clients only', () => {

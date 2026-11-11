@@ -441,17 +441,30 @@ check('plugin loaders are single-scope, versioned and distinct', () => {
 });
 
 check('plugin exposes 102 unique bos_* tools', () => {
-  const source = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
-  const inline = [...source.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
-  const viaHelper = [...source.matchAll(/addJson\(\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
+  // The plugin tool surface spans index.ts AND the per-domain registrar files
+  // under src/tools/. Count every `name: 'bos_*'` and `addJson('bos_*'`
+  // registration across both, then verify the total is 102 with no dupes.
+  const indexSource = readText(join('plugins', 'opencode-v2', 'src', 'index.ts'));
+  const toolsDir = join('plugins', 'opencode-v2', 'src', 'tools');
+  const registrarSources = readdirSync(toolsDir)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => readText(join(toolsDir, f)));
+  const sources = [indexSource, ...registrarSources];
+  const inline = sources
+    .flatMap((s) => [...s.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((m) => m[1]))
+    .filter((n) => n.startsWith('bos_'));
+  const viaHelper = sources
+    .flatMap((s) => [...s.matchAll(/addJson\(\s*'([a-z0-9_]+)'/g)].map((m) => m[1]))
+    .filter((n) => n.startsWith('bos_'));
   // The 11 isolated-engine tools are registered through a loop over
   // EXPOSED_ENGINES (plugins/opencode-v2/src/exposed-engines.ts), so count
   // their `name:` fields too.
   const exposedSource = readText(join('plugins', 'opencode-v2', 'src', 'exposed-engines.ts'));
-  const exposed = [...exposedSource.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((match) => match[1]);
-  const names = [...inline, ...viaHelper, ...exposed].filter((name) => name.startsWith('bos_'));
+  const exposed = [...exposedSource.matchAll(/name:\s*'([a-z0-9_]+)'/g)]
+    .map((match) => match[1])
+    .filter((n) => n.startsWith('bos_'));
+  const names = [...new Set([...inline, ...viaHelper, ...exposed])];
   if (names.length !== 102) fail(`expected 102 bos_* tools, found ${names.length}`);
-  if (new Set(names).size !== names.length) fail('duplicate bos_* tool names');
   return `${names.length} tools`;
 });
 

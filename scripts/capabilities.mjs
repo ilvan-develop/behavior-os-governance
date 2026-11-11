@@ -33,6 +33,21 @@ function read(root, relativePath) {
   return readFileSync(join(root, relativePath), 'utf8');
 }
 
+/**
+ * Every `bos_*` tool the plugin registers, across its `index.ts` and the
+ * per-domain registrar files under `src/tools/`. The registrar files are
+ * import-time sources of truth: a tool that lives in `tools/missions.ts`
+ * must be counted exactly as much as one that lives inline.
+ */
+function readAllPluginToolFiles(root) {
+  const index = read(root, 'plugins/opencode-v2/src/index.ts');
+  const toolsDir = join(root, 'plugins/opencode-v2/src/tools');
+  const registrarFiles = readdirSync(toolsDir)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => read(root, join('plugins/opencode-v2/src/tools', f)));
+  return [index, ...registrarFiles];
+}
+
 function allMatches(text, pattern) {
   return [...text.matchAll(pattern)].map((match) => match[1]);
 }
@@ -43,19 +58,22 @@ function allMatches(text, pattern) {
  */
 export function measureCapabilities(root = repoRoot) {
   const server = read(root, 'packages/mcp-server/src/server.ts');
-  const plugin = read(root, 'plugins/opencode-v2/src/index.ts');
   const exposed = read(root, 'plugins/opencode-v2/src/exposed-engines.ts');
   const sqlite = read(root, 'packages/core/src/persistence/sqlite-store.ts');
 
   const mcpTools = sortedUnique(allMatches(server, /server\.registerTool\(\s*'(bos_[a-z0-9_]+)'/g));
   const mcpResources = sortedUnique(allMatches(server, /server\.registerResource\(\s*'([^']+)'/g));
-  const pluginTools = sortedUnique([
-    ...allMatches(plugin, /name:\s*'(bos_[a-z0-9_]+)'/g),
-    ...allMatches(plugin, /addJson\(\s*'(bos_[a-z0-9_]+)'/g),
-    ...allMatches(exposed, /name:\s*'(bos_[a-z0-9_]+)'/g),
-  ]);
+  const pluginSources = readAllPluginToolFiles(root);
+  const pluginTools = sortedUnique(
+    pluginSources.flatMap((source) => [
+      ...allMatches(source, /name:\s*'(bos_[a-z0-9_]+)'/g),
+      ...allMatches(source, /addJson\(\s*'(bos_[a-z0-9_]+)'/g),
+    ]),
+  );
+  const pluginExposedTools = sortedUnique(allMatches(exposed, /name:\s*'(bos_[a-z0-9_]+)'/g));
+  const allPluginTools = sortedUnique([...pluginTools, ...pluginExposedTools]);
   const mcpToolSet = new Set(mcpTools);
-  const pluginOnlyTools = pluginTools.filter((name) => !mcpToolSet.has(name));
+  const pluginOnlyTools = allPluginTools.filter((name) => !mcpToolSet.has(name));
 
   const engineFiles = readdirSync(join(root, 'packages/core/src/engine')).filter((file) =>
     file.endsWith('.ts'),
@@ -71,7 +89,7 @@ export function measureCapabilities(root = repoRoot) {
   return {
     schemaVersion: MANIFEST_SCHEMA_VERSION,
     mcp: { tools: mcpTools, resources: mcpResources },
-    plugin: { tools: pluginTools, pluginOnlyTools },
+    plugin: { tools: allPluginTools, pluginOnlyTools },
     dnas: { count: dnas.length, names: dnas },
     engines: { count: engineCount },
     tables: { count: [...sqlite.matchAll(/CREATE TABLE/g)].length },

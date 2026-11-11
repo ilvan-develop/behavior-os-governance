@@ -298,15 +298,27 @@ describe('documentation consistency', () => {
   });
 
   it('keeps plugin-only tools exactly equal to the plugin/server difference', () => {
-    const pluginSource = readFileSync(
-      join(repoRoot, 'plugins', 'opencode-v2', 'src', 'index.ts'),
-      'utf-8',
-    );
-    const pluginNames = [...pluginSource.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map(
-      (match) => match[1],
-    );
+    // The plugin tool surface now spans index.ts AND the per-domain
+    // registrar files under src/tools/; count both, then verify the
+    // difference against MCP is still exactly the 4 declared loop tools.
+    const readDir = (dir: string): string[] =>
+      readdirSync(join(repoRoot, dir)).filter((f) => f.endsWith('.ts'));
+    const toolFiles = [
+      'plugins/opencode-v2/src/index.ts',
+      ...readDir('plugins/opencode-v2/src/tools').map((f) =>
+        join('plugins/opencode-v2/src/tools', f),
+      ),
+      'plugins/opencode-v2/src/exposed-engines.ts',
+    ];
+    const pluginNames: string[] = [];
+    for (const rel of toolFiles) {
+      const source = readFileSync(join(repoRoot, rel), 'utf-8');
+      pluginNames.push(
+        ...[...source.matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)].map((m) => m[1]),
+        ...[...source.matchAll(/addJson\(\s*'(bos_[a-z0-9_]+)'/g)].map((m) => m[1]),
+      );
+    }
     const mcpNames = new Set(MCP_TOOLS);
-
     expect([...new Set(pluginNames)].sort()).toEqual([...pluginNames].sort());
     expect(pluginNames.filter((name) => !mcpNames.has(name)).sort()).toEqual(
       [...PLUGIN_ONLY_TOOLS].sort(),
@@ -597,14 +609,31 @@ function measuredCounts() {
     (file) => file.endsWith('.ts'),
   );
   // engineFiles = engines + the BehaviorOS facade + the engine registry.
+  //
+  // The plugin tool surface spans index.ts AND the per-domain registrar
+  // files under src/tools/. Count every occurrence across both, then
+  // deduplicate (a tool defined in one of the registrar files will not
+  // appear twice).
+  const pluginSourceFiles = [
+    'plugins/opencode-v2/src/index.ts',
+    ...readdirSync(join(repoRoot, 'plugins', 'opencode-v2', 'src', 'tools'))
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => join('plugins/opencode-v2/src/tools', f)),
+    'plugins/opencode-v2/src/exposed-engines.ts',
+  ];
+  const pluginTools = new Set<string>();
+  for (const file of pluginSourceFiles) {
+    for (const match of [...readRepoFile(file).matchAll(/name:\s*'(bos_[a-z0-9_]+)'/g)]) {
+      pluginTools.add(match[1]);
+    }
+    for (const match of [...readRepoFile(file).matchAll(/addJson\(\s*'(bos_[a-z0-9_]+)'/g)]) {
+      pluginTools.add(match[1]);
+    }
+  }
   return {
     mcpTools: countIn('packages/mcp-server/src/server.ts', /server\.registerTool\(/g),
     mcpResources: countIn('packages/mcp-server/src/server.ts', /server\.registerResource\(/g),
-    pluginTools:
-      countIn('plugins/opencode-v2/src/index.ts', /name: 'bos_/g) +
-      countIn('plugins/opencode-v2/src/index.ts', /addJson\(\s*'bos_/g) +
-      // The 11 isolated-engine tools are registered from EXPOSED_ENGINES.
-      countIn('plugins/opencode-v2/src/exposed-engines.ts', /name: 'bos_/g),
+    pluginTools: pluginTools.size,
     dnas: readdirSync(join(repoRoot, 'dnas')).filter((file) => file.endsWith('.yaml')).length,
     tables: countIn('packages/core/src/persistence/sqlite-store.ts', /CREATE TABLE/g),
     engines: engineFiles.length - 2,
