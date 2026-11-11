@@ -57,6 +57,46 @@ describe('buildGovernanceContext', () => {
     expect(context['production-change']).toBe(true);
   });
 
+  it('does not read a search phrase as a deployment', () => {
+    // Regression: searching the audit log for "irreversible deployment"
+    // escalated the shell command itself (seq 27890/27891).
+    const context = buildGovernanceContext({
+      tool: 'shell',
+      action: 'shell',
+      text: 'irreversible deployment requires human approval',
+      metadata: {
+        command: 'Select-String -Path audit.jsonl -Pattern "irreversible deployment"',
+      },
+    });
+    expect(context.deployment).toBeUndefined();
+    expect(context.production).toBeUndefined();
+  });
+
+  it('flags a real push command as a deployment', () => {
+    const context = buildGovernanceContext({
+      tool: 'shell',
+      action: 'shell',
+      metadata: { command: 'git push origin main' },
+    });
+    expect(context.deployment).toBe(true);
+  });
+
+  it('flags a real deploy verb but not the same word in arguments', () => {
+    const real = buildGovernanceContext({
+      tool: 'shell',
+      action: 'shell',
+      metadata: { command: 'deploy api --env prod' },
+    });
+    expect(real.deployment).toBe(true);
+
+    const mention = buildGovernanceContext({
+      tool: 'shell',
+      action: 'shell',
+      metadata: { command: 'echo "deploy api --env prod"' },
+    });
+    expect(mention.deployment).toBeUndefined();
+  });
+
   it('flags destructive commands as critical and breaking', () => {
     const context = buildGovernanceContext({ tool: 'bash', text: 'rm -rf /data' });
     expect(context['critical-action']).toBe(true);

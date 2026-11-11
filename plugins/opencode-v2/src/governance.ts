@@ -5,7 +5,7 @@
  * tested in isolation and reused by the CLI or MCP server.
  */
 
-import { isMutatingAction } from '@behavior-os/core';
+import { classifyIrreversibleCommand, isMutatingAction } from '@behavior-os/core';
 import type { MissionPriority, MissionType } from '@behavior-os/schemas';
 import { buildOperatingContract } from './native-playbook.js';
 
@@ -21,6 +21,35 @@ export const isMutating = isMutatingAction;
  */
 const ENVIRONMENT_ACTION =
   /bash|shell|exec|execute|command|run|invoke|script|deploy|releas|publish|rollout|promote|push|apply|migrate|install/i;
+
+/** Tools whose first argument is a command line, not prose or data. */
+const EXECUTION_HEAD = new Set([
+  'bash',
+  'shell',
+  'sh',
+  'zsh',
+  'powershell',
+  'pwsh',
+  'cmd',
+  'terminal',
+  'exec',
+  'execute',
+  'command',
+  'process',
+  'run',
+  'spawn',
+]);
+
+/** Actions that *are* the deployment verb (e.g. `deploy api`), not commands. */
+const DEPLOY_ACTION_HEAD = new Set([
+  'deploy',
+  'deployment',
+  'release',
+  'rollout',
+  'promote',
+  'publish',
+  'ship',
+]);
 
 /**
  * Signals used to build the condition bag a DNA governance rule is matched
@@ -130,11 +159,37 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
   const changesState = isMutating(signals.tool) || isMutating(signals.action);
   const canOperate = ENVIRONMENT_ACTION.test(`${signals.action ?? ''} ${signals.tool ?? ''}`);
 
-  // A deployment is *performed*: only an action that can run one deploys. Writing
-  // a file that mentions "release" is not a release.
-  if (canOperate && (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship'))) {
-    context.deployment = true;
+  // A deployment is *performed*: only an action that can run one deploys. The
+  // verb must sit in command position; scanning the whole argument text made a
+  // read-only search for the phrase "irreversible deployment" escalate as a
+  // deployment (log seq 27890/27891). Writing a file that mentions "release" is
+  // not a release either.
+  const headOf = (value: string | undefined): string =>
+    (value ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '';
+  const runsCommand =
+    EXECUTION_HEAD.has(headOf(signals.action)) || EXECUTION_HEAD.has(headOf(signals.tool));
+  const commandCandidates: string[] = [...(signals.resources ?? [])];
+  const metadata = signals.metadata ?? {};
+  for (const key of ['command', 'commandLine', 'script', 'args']) {
+    const value = metadata[key];
+    if (typeof value === 'string') commandCandidates.push(value);
+    else if (Array.isArray(value)) {
+      const parts = value.filter((part): part is string => typeof part === 'string');
+      if (parts.length > 0) commandCandidates.push(parts.join(' '));
+    }
   }
+  const commandDeploys =
+    runsCommand &&
+    commandCandidates.some((candidate) => classifyIrreversibleCommand(candidate) === 'deployment');
+  const actionDeploys =
+    DEPLOY_ACTION_HEAD.has(headOf(signals.action)) || DEPLOY_ACTION_HEAD.has(headOf(signals.tool));
+  // When the host supplies the command line, only the command position may
+  // deploy. Callers that pass prose only (no command) keep the historical
+  // phrase match, so a deploy verb in free text still counts for them.
+  const proseDeploys =
+    runsCommand && (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship'));
+  const deployVerb =
+    actionDeploys || (commandCandidates.length > 0 ? commandDeploys : proseDeploys);
 
   // A production *change*, however, is touched by anything that is not read-only:
   // writing `infra/prod/main.tf` counts, and surgical-team's `sterile-field` rule
@@ -162,8 +217,9 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
   ];
   const hasProductionPath = productionSegments.some((segment) => resourcesText.includes(segment));
   const hasProductionFlag = hasPhrase('--prod', '-prod');
-  const deployVerb =
-    canOperate && (hasPhrase('deploy', 'releas', 'publish', 'rollout') || hasWord('ship'));
+  if (deployVerb) {
+    context.deployment = true;
+  }
   if (
     (canOperate || changesState) &&
     (hasProductionPath ||
