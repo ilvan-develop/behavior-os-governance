@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/tests-1482-brightgreen" alt="Tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-1485-brightgreen" alt="Tests" /></a>
   <a href="#"><img src="https://img.shields.io/badge/version-2.2.2-blue" alt="Version" /></a>
   <a href="#"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node" /></a>
@@ -34,7 +34,7 @@ pnpm build
 # Initialize a new project scaffold
 pnpm exec behavioros init --dna surgical-team
 
-# Run the full test suite (1482 cases, 131 files)
+# Run the full test suite (1485 cases, 131 files)
 pnpm test
 
 # Type-check (11 packages)
@@ -348,10 +348,10 @@ Counted from the repository (not aspirational). Run `pnpm test` for the live res
 | Metric                               | Value                                                      |
 | ------------------------------------ | ---------------------------------------------------------- |
 | Test files (`*.test.ts`)             | 131                                                        |
-| Test cases (executed by `pnpm test`) | 1482                                                       |
+| Test cases (executed by `pnpm test`) | 1485                                                       |
 | Typecheck                            | `pnpm typecheck` (11/11 tasks, 0 errors)                   |
 | Build                                | `pnpm build` (ESM + DTS)                                   |
-| Coverage                             | `pnpm test:coverage` (same 131 files / 1482 cases, exit 0) |
+| Coverage                             | `pnpm test:coverage` (same 131 files / 1485 cases, exit 0) |
 | Publishability                       | `pnpm verify:publish` (packed manifests, exit 0)           |
 | Lint                                 | `pnpm lint:check` (Biome, clean)                           |
 | Clean                                | `pnpm clean` (8/8 tasks, removes `dist/`)                  |
@@ -446,15 +446,15 @@ mcpServers:
 
 ## Packages
 
-| Package                        | Description                                                                                                                              | Version |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                         | 2.2.2   |
-| `@behavior-os/core`            | 48 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                           | 2.2.2   |
-| `@behavior-os/sdk`             | High-level TypeScript SDK (mission lifecycle, governance, learning)                                                                      | 2.2.2   |
-| `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics) | 2.2.2   |
-| `@behavior-os/mcp-server`      | MCP server with 98 tools + 2 resources                                                                                                   | 2.2.2   |
-| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 102 tools + hooks - loaded from this workspace, not published to npm                                             | 2.1.0   |
-| `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                               | 1.0.1   |
+| Package                        | Description                                                                                                                                                            | Version |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `@behavior-os/schemas`         | Zod v4.4.3 schemas for all types                                                                                                                                       | 2.2.2   |
+| `@behavior-os/core`            | 48 engines + BehaviorOS facade + persistence (SQLite/Postgres)                                                                                                         | 2.2.2   |
+| `@behavior-os/sdk`             | Full-surface TypeScript SDK — inherits the entire BehaviorOS facade (governance, missions, learning, memory, decisions, collaboration, policies, fairness, compliance) | 2.3.0   |
+| `@behavior-os/cli`             | CLI (13 commands: init, compile, validate, status, diff, simulate, deploy, ecosystem, agent, autonomous, protocol, drift-check, metrics)                               | 2.2.2   |
+| `@behavior-os/mcp-server`      | MCP server with 98 tools + 2 resources                                                                                                                                 | 2.2.2   |
+| `@behavior-os/opencode-plugin` | OpenCode v2 plugin with 102 tools + hooks - loaded from this workspace, not published to npm                                                                           | 2.1.0   |
+| `behavioros-orchestrator`      | Real task orchestration (shell adapter, retries, circuit breaker, persistent control loop)                                                                             | 1.0.1   |
 
 ## License
 

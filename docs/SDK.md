@@ -9,6 +9,12 @@ pnpm add -g @behavior-os/cli
 
 ## Quick Start
 
+`@behavior-os/sdk` exports the full engine under two names: `BehaviorOS` and
+`BehaviorOSSDK` (a subclass with no added methods). Both expose the **entire**
+facade — governance, missions, learning, memory, decisions, collaboration,
+policies, temporal rules, fairness, compliance and orchestration — so there is
+no "reduced" SDK surface to drift out of date.
+
 ```typescript
 import { BehaviorOS } from '@behavior-os/sdk';
 
@@ -58,7 +64,13 @@ bos.recordLearning({
 
 ```typescript
 new BehaviorOS(config?: BehaviorOSConfig)
+new BehaviorOSSDK(config?: BehaviorOSConfig) // same engine, same surface
 ```
+
+The table below lists the most-used methods, not the complete API. The full
+surface (140+ public methods) is defined in `@behavior-os/core` and inherited by
+`BehaviorOSSDK`; `packages/sdk/tests/sdk.test.ts` asserts that every public
+facade method is reachable from the SDK, so the two cannot diverge.
 
 #### Methods
 

@@ -1,8 +1,65 @@
+import { BehaviorOS } from '@behavior-os/core';
 import type { DNA } from '@behavior-os/schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BehaviorOSSDK } from '../src/index.js';
 
+/** Every public method reachable from an instance, including inherited ones. */
+function publicMethods(instance: object): string[] {
+  const names = new Set<string>();
+  let proto: object | null = Object.getPrototypeOf(instance);
+  while (proto && proto !== Object.prototype) {
+    for (const name of Object.getOwnPropertyNames(proto)) {
+      if (name === 'constructor') continue;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+      if (descriptor && typeof descriptor.value === 'function') names.add(name);
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+  for (const name of Object.getOwnPropertyNames(instance)) {
+    if (typeof (instance as Record<string, unknown>)[name] === 'function') names.add(name);
+  }
+  return [...names];
+}
+
 describe('BehaviorOSSDK', () => {
+  describe('surface parity with the BehaviorOS facade', () => {
+    it('is a BehaviorOS, not a partial mirror', () => {
+      expect(new BehaviorOSSDK()).toBeInstanceOf(BehaviorOS);
+    });
+
+    it('exposes every public facade method', () => {
+      // Regression guard for the old wrapper: it re-declared 15 methods and
+      // silently hid decisions, brainstorming, policies, knowledge graph,
+      // memory, fairness and compliance. Inheritance must keep the whole API.
+      const facade = new BehaviorOS();
+      const sdk = new BehaviorOSSDK();
+      const facadeMethods = publicMethods(facade);
+      expect(facadeMethods.length).toBeGreaterThan(100);
+      const missing = facadeMethods.filter(
+        (name) => typeof (sdk as unknown as Record<string, unknown>)[name] !== 'function',
+      );
+      expect(missing).toEqual([]);
+    });
+
+    it('reaches the capabilities the old wrapper hid', () => {
+      const sdk = new BehaviorOSSDK();
+      for (const name of [
+        'decide',
+        'createBrainstormSession',
+        'getPragmaticConversation',
+        'createPolicyCandidate',
+        'preflightAction',
+        'addKnowledgeNode',
+        'saveMemory',
+        'evaluateFairness',
+        'addTemporalRule',
+        'transitionMission',
+      ]) {
+        expect(typeof (sdk as unknown as Record<string, unknown>)[name], name).toBe('function');
+      }
+    });
+  });
+
   let sdk: BehaviorOSSDK;
 
   beforeEach(() => {

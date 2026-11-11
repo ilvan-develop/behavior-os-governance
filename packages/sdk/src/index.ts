@@ -1,14 +1,4 @@
-import { BehaviorOS, type BehaviorOSConfig, type MissionTransitionResult } from '@behavior-os/core';
-import type {
-  AuditReport,
-  DNA,
-  GovernanceDecision,
-  LearningEvent,
-  Mission,
-  MissionPriority,
-  MissionStatus,
-  MissionType,
-} from '@behavior-os/schemas';
+import { BehaviorOS, type BehaviorOSConfig } from '@behavior-os/core';
 
 export type { BehaviorOSConfig, MissionTransitionResult } from '@behavior-os/core';
 export { BehaviorOS } from '@behavior-os/core';
@@ -24,122 +14,23 @@ export type {
   MissionType,
 } from '@behavior-os/schemas';
 
-export class BehaviorOSSDK {
-  private bos: BehaviorOS;
-
+/**
+ * The full Behavior-OS SDK.
+ *
+ * It inherits the entire `BehaviorOS` facade instead of re-declaring a subset:
+ * the previous hand-written wrapper exposed 15 of 140+ methods, so an SDK user
+ * silently lost decisions, brainstorming, conversations, policies, temporal
+ * rules, knowledge graph, memory, fairness and compliance. Inheritance makes
+ * surface parity structural — a new facade method is available here the moment
+ * it exists, and `sdk.test.ts` fails if the relationship ever becomes a
+ * composition again.
+ *
+ * `BehaviorOS` is re-exported as well, so both import styles are the same
+ * object graph and cannot drift.
+ */
+export class BehaviorOSSDK extends BehaviorOS {
   constructor(config: BehaviorOSConfig = {}) {
-    this.bos = new BehaviorOS(config);
-  }
-
-  // DNA Management
-  async loadDNA(dna: DNA): Promise<void> {
-    await this.bos.loadDNA(dna);
-  }
-
-  getDNA(): DNA | null {
-    return this.bos.getDNA();
-  }
-
-  // Governance
-  evaluateGovernance(
-    action: string,
-    context: { agent: string; scope?: string; [key: string]: unknown },
-  ): GovernanceDecision {
-    return this.bos.evaluateGovernance(action, context);
-  }
-
-  // Quality
-  checkQuality(metrics: Record<string, number>): { passed: boolean; details: unknown } {
-    return this.bos.checkQuality(metrics);
-  }
-
-  // Audit
-  async runAudit(options: {
-    missionId: string;
-    agentId?: string;
-    stages?: string[];
-    simulate?: boolean;
-  }): Promise<AuditReport> {
-    return this.bos.runAudit(options);
-  }
-
-  // Missions
-  createMission(options: {
-    title: string;
-    description?: string;
-    type: string;
-    priority: string;
-    dnaPattern?: string;
-    createdBy?: string;
-    tags?: string[];
-    /** Gates that must each have passing evidence before completion. */
-    requiredChecks?: string[];
-    /** `executed` requires real, provenance-stamped evidence for every gate. */
-    verificationMode?: 'any' | 'executed';
-  }): Mission {
-    return this.bos.createMission(options);
-  }
-
-  startMission(missionId: string): Mission | null {
-    return this.bos.startMission(missionId);
-  }
-
-  completeMission(
-    missionId: string,
-    options: {
-      expectedVersion?: number;
-      actor?: string;
-      evidence?: Array<{
-        gate: string;
-        status: 'passed' | 'failed' | 'skipped';
-        source: string;
-        detail?: string;
-        simulated?: boolean;
-        provenance?: 'executed' | 'reported' | 'simulated';
-        executionId?: string;
-      }>;
-    } = {},
-  ): Mission | null {
-    return this.bos.completeMission(missionId, options);
-  }
-
-  failMission(missionId: string, reason?: string): Mission | null {
-    return this.bos.failMission(missionId, reason);
-  }
-
-  cancelMission(missionId: string): MissionTransitionResult {
-    return this.bos.cancelMission(missionId);
-  }
-
-  listMissions(
-    limit = 50,
-    filters: { status?: MissionStatus; type?: MissionType; priority?: MissionPriority } = {},
-  ): Mission[] {
-    return this.bos.listMissions(limit, filters);
-  }
-
-  // Learning
-  recordLearning(options: {
-    type: string;
-    source: string;
-    content: string;
-    impact: string;
-    relatedMission?: string;
-  }): LearningEvent {
-    return this.bos.recordLearning(options);
-  }
-
-  getInsights(limit = 10): LearningEvent[] {
-    return this.bos.getInsights(limit);
-  }
-
-  // Status
-  getStatus() {
-    return this.bos.getStatus();
-  }
-
-  getState() {
-    return this.bos.getState();
+    super(config);
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "@behavior-os/sdk",
   "version": "2.3.0",
-  "description": "High-level TypeScript SDK for Behavior-OS",
+  "description": "Full-surface TypeScript SDK for Behavior-OS",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
