@@ -27,11 +27,13 @@ coverage/
 !.opencode/plugins/
 .opencode/plugins/*
 !.opencode/plugins/behavioros.ts
+!.opencode/plugins/graphify.js
 !.opencode/skills/
 .opencode/skills/*
 !.opencode/skills/behavior-os/
 !.opencode/skills/docs-research/
 !.opencode/skills/engineering-cycle/
+!.opencode/skills/graphify/
 !.opencode/skills/release/
 !.opencode/skills/verification-first/
 !.opencode/skills/stack-install/
@@ -97,3 +99,6 @@ npm-lock.yaml
 status.log
 # Generated npm auth token file (home dir); never committed.
 .npmrc.auth
+
+# graphify generated knowledge graph (rebuild locally: graphify extract . --code-only)
+graphify-out/
