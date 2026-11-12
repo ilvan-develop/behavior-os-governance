@@ -160,7 +160,8 @@ Mission lifecycle management:
 ## Core Engines (48 Total)
 
 There are 48 engines in `packages/core/src/engine/` plus the
-`BehaviorOS` facade (`behavior-os.ts`) and the registry (`index.ts`) — 50 files
+`BehaviorOS` facade (`behavior-os.ts`), its pure declaration module
+(`behavior-os-types.ts`) and the registry (`index.ts`) — 51 files
 in total. Earlier revisions of this document listed 22 "engines" with synthetic
 `Ops/sec` figures and later claimed only eleven existed; neither is true today.
 No throughput numbers are claimed.

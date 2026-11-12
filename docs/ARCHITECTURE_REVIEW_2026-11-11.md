@@ -438,3 +438,34 @@ Baseline pós-mudança: `pnpm typecheck` 11/11, `pnpm lint:check` 486 arquivos,
 `pnpm smoke:mcp` 98 tools + 2 resources, `pnpm verify:opencode` 40/40.
 
 Em aberto (Fases 2–3): decomposição dos monolitos, classificação `library-only` dos 8 motores e telemetria de uso por tool.
+
+## 12. Atualização — Fase 2 (2026-11-12)
+
+Itens da Fase 2 concluídos com evidência:
+
+- **Paridade MCP × plugin medida em runtime** (`e099022`). `scripts/tool-parity.mjs`
+  compara nomes, schemas de input e campos `required` das duas superfícies e falha
+  com diff nominal; `pnpm verify:tool-parity` = 98 tools partilhadas idênticas +
+  4 diferenças declaradas (`INTENTIONAL`), integrado em `verify:all` e CI.
+- **SDK de superfície completa** (`3d2bdb6`). `BehaviorOSSDK` passa a herdar
+  `BehaviorOS` em vez de espelhar 15 métodos; um teste enumera >100 métodos em
+  runtime e falha se algum não for alcançável.
+- **Plugin decomposto por domínio** (`41efb3f`). 38 tools saíram do `setup()` para
+  9 ficheiros em `plugins/opencode-v2/src/tools/`, com uma única costura
+  (`ToolRegistrarContext`); hooks e coalescer permanecem no `index.ts`.
+- **Fachada reduzida** (`1f358ea`, `370ba8b`). Declarações puras movidas para
+  `behavior-os-types.ts` (re-exportadas) e o boilerplate get-or-create de 38
+  accessors centralizado em `EngineRegistry.ensure()`.
+  `behavior-os.ts`: 3082 → 2762 linhas.
+
+Baseline atual: `pnpm typecheck` 11/11, `pnpm lint:check` 501 ficheiros,
+`pnpm test` **1479 passed + 6 skipped** (1485), `pnpm build` 8/8,
+`pnpm verify:capabilities` PASS (48 motores, 102 tools, 4 plugin-only),
+`pnpm verify:tool-parity` PASS, `pnpm verify:opencode` 40/40,
+`pnpm verify:governance` 25/25, `pnpm smoke:mcp` 98 tools + 2 resources.
+
+Em aberto na Fase 2: a camada de serviços da fachada (missões, learning, evolução,
+políticas) exige um contexto partilhado explícito porque esses métodos mutam
+`agentState`/`agents`/`store` e chamam `advanceProtocolStep`/`recordLearning`; não
+é uma extração mecânica. As 4 loop tools continuam exclusivas do plugin
+(documentado e verificado). Fase 3: telemetria de uso por tool em `bos_get_metrics`.
