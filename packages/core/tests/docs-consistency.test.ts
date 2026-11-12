@@ -608,7 +608,8 @@ function measuredCounts() {
   const engineFiles = readdirSync(join(repoRoot, 'packages', 'core', 'src', 'engine')).filter(
     (file) => file.endsWith('.ts'),
   );
-  // engineFiles = engines + the BehaviorOS facade + the engine registry.
+  // engineFiles = engines + the BehaviorOS facade + its pure type module + the
+  // engine registry.
   //
   // The plugin tool surface spans index.ts AND the per-domain registrar
   // files under src/tools/. Count every occurrence across both, then
@@ -636,7 +637,7 @@ function measuredCounts() {
     pluginTools: pluginTools.size,
     dnas: readdirSync(join(repoRoot, 'dnas')).filter((file) => file.endsWith('.yaml')).length,
     tables: countIn('packages/core/src/persistence/sqlite-store.ts', /CREATE TABLE/g),
-    engines: engineFiles.length - 2,
+    engines: engineFiles.length - 3,
   };
 }
 

@@ -78,8 +78,9 @@ export function measureCapabilities(root = repoRoot) {
   const engineFiles = readdirSync(join(root, 'packages/core/src/engine')).filter((file) =>
     file.endsWith('.ts'),
   );
-  // engineFiles = engines + the BehaviorOS facade + the engine registry.
-  const engineCount = engineFiles.length - 2;
+  // engineFiles = engines + the BehaviorOS facade + its pure type module + the
+  // engine registry.
+  const engineCount = engineFiles.length - 3;
 
   const dnas = readdirSync(join(root, 'dnas'))
     .filter((file) => file.endsWith('.yaml'))
