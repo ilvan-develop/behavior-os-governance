@@ -484,3 +484,22 @@ políticas) exige um contexto partilhado explícito porque esses métodos mutam
   sessão desaparecida libertada, rollback de criação e rollback de evidência.
 - **Em aberto.** A extração de learning/evolução/políticas da fachada e a Fase 3
   (telemetria por tool) permanecem; o padrão de host explícito é o seam a reutilizar.
+
+## 14. Atualização — Fase 2.6 cont. (LearningPolicyService)
+
+- **LearningPolicyService extraído.** `recordLearning`, `getInsights`,
+  `getLearningEvents`, o lifecycle de records (create/advance + persistência G-014),
+  toda a política versionada (create/validate/approve/activate/deactivate/rollback/monitor
+  - snapshot/ledger + `afterPolicyMutation` mirror no log de governança),
+    `proposeEvolution`/`applyEvolution`, `proposeCodeFixes`/`applyCodeFixes`
+    e `listCodeFixResults` saíram da fachada para
+    `packages/core/src/services/learning-policy-service.ts` com
+    `LearningPolicyServiceHost` (learningEngine, metricsEngine, store, config, dna,
+    replaceDna, activeMission, currentStep, advanceProtocolStep, decide).
+- **Fachada reduzida.** `behavior-os.ts`: 2424 → **2178 linhas** (−246).
+- **Prova.** A suíte de 930 casos do core continua verde após a extração
+  (facade-host-logic, decision-engine, policy-versioning, learning-lifecycle,
+  audit-engine-real), incluindo o rollback de `recordCodeFixResults` e o mirror
+  `afterPolicyMutation` agora no serviço.
+- **Em aberto.** Fase 3 (telemetria por tool, session.context enriquecida,
+  /policy /fairness /compliance) e os 8 motores library-only.
