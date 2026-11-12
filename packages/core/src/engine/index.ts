@@ -137,6 +137,19 @@ export class EngineRegistry {
     return this.engines.get(name) as T | undefined;
   }
 
+  /**
+   * Return the engine registered under `key`, creating it on first use.
+   *
+   * The factory only runs when no engine is registered, so lazy engines stay
+   * lazy. This is the single place the facade's accessors express the
+   * "get or create" policy instead of repeating it in every getter.
+   */
+  ensure<T>(key: string, create: () => T): T {
+    const existing = this.get<T>(key);
+    if (existing !== undefined) return existing;
+    return create();
+  }
+
   // Governance and quality engines are bound to a specific DNA. Reuse the
   // existing engine while the DNA reference is unchanged so their internal
   // caches stay effective; recreate only when the DNA actually changes.

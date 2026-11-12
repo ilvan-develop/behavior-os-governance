@@ -515,12 +515,11 @@ export class BehaviorOS {
   // Quality Engine
   /** Get the quality engine, creating it on first use. */
   getQualityEngine(): import('./quality-engine.js').QualityEngine {
-    if (!this.currentDNA) {
+    const dna = this.currentDNA;
+    if (!dna) {
       throw new Error('No DNA loaded. Call loadDNA() first.');
     }
-    let engine = this.registry.get<import('./quality-engine.js').QualityEngine>('quality');
-    if (!engine) engine = this.registry.createQualityEngine(this.currentDNA);
-    return engine;
+    return this.registry.ensure('quality', () => this.registry.createQualityEngine(dna));
   }
 
   /** Assess the pragmatic value of a set of code changes. */
@@ -730,19 +729,13 @@ export class BehaviorOS {
 
   // Missions
   private getMissionEngine(): MissionEngine {
-    let engine = this.registry.get<MissionEngine>('mission');
-    if (!engine) {
-      engine = this.registry.createMissionEngine(this.currentDNA ?? undefined);
-    }
-    return engine;
+    return this.registry.ensure('mission', () =>
+      this.registry.createMissionEngine(this.currentDNA ?? undefined),
+    );
   }
 
   private getLearningEngine(): LearningEngine {
-    let engine = this.registry.get<LearningEngine>('learning');
-    if (!engine) {
-      engine = this.registry.createLearningEngine();
-    }
-    return engine;
+    return this.registry.ensure('learning', () => this.registry.createLearningEngine());
   }
 
   /**
@@ -1658,9 +1651,7 @@ export class BehaviorOS {
 
   // Decisions (voting/quorum) ----------------------------------------------
   private getDecisionEngine(): DecisionEngine {
-    let engine = this.registry.get<DecisionEngine>('decision');
-    if (!engine) engine = this.registry.createDecisionEngine();
-    return engine;
+    return this.registry.ensure('decision', () => this.registry.createDecisionEngine());
   }
 
   /**
@@ -1712,9 +1703,7 @@ export class BehaviorOS {
   // Drift (public accessor for host tools) ----------------------------------
   /** Get the drift engine, creating it on first use. */
   getDriftEngine(): DriftEngine {
-    let engine = this.registry.get<DriftEngine>('drift');
-    if (!engine) engine = this.registry.createDriftEngine();
-    return engine;
+    return this.registry.ensure('drift', () => this.registry.createDriftEngine());
   }
 
   // Consensus ----------------------------------------------------------------
@@ -1766,9 +1755,7 @@ export class BehaviorOS {
 
   /** Lazily-created metrics engine shared by all instrumentation points. */
   private getMetricsEngine(): import('./metrics-engine.js').MetricsEngine {
-    let engine = this.registry.get<import('./metrics-engine.js').MetricsEngine>('metrics');
-    if (!engine) engine = this.registry.createMetricsEngine();
-    return engine;
+    return this.registry.ensure('metrics', () => this.registry.createMetricsEngine());
   }
 
   /** Reset all governance metrics. */
@@ -1837,9 +1824,7 @@ export class BehaviorOS {
   // Brainstorming & Collaboration ------------------------------------------
   /** Get the brainstorm engine, creating it on first use. */
   getBrainstorm(): import('./brainstorm-engine.js').BrainstormEngine {
-    let engine = this.registry.get<import('./brainstorm-engine.js').BrainstormEngine>('brainstorm');
-    if (!engine) engine = this.registry.createBrainstormEngine();
-    return engine;
+    return this.registry.ensure('brainstorm', () => this.registry.createBrainstormEngine());
   }
 
   /** Create a new brainstorming session. */
@@ -1860,69 +1845,49 @@ export class BehaviorOS {
   // Dynamic DNA ------------------------------------------------------------
   /** Get the dynamic DNA manager. */
   getDynamicDNAManager() {
-    let manager = this.registry.get<import('./dynamic-dna.js').DynamicDNAManager>('dynamic-dna');
-    if (!manager) manager = this.registry.createDynamicDNAManager();
-    return manager;
+    return this.registry.ensure('dynamic-dna', () => this.registry.createDynamicDNAManager());
   }
 
   // Behavioral UX ----------------------------------------------------------
   /** Get the behavioral UX engine. */
   getBehavioralUX() {
-    let engine =
-      this.registry.get<import('./behavioral-ux.js').BehavioralUXEngine>('behavioral-ux');
-    if (!engine) engine = this.registry.createBehavioralUXEngine();
-    return engine;
+    return this.registry.ensure('behavioral-ux', () => this.registry.createBehavioralUXEngine());
   }
 
   // Anti-Pattern Engine ----------------------------------------------------
   /** Get the anti-pattern detection engine. */
   getAntipatternEngine() {
-    let engine =
-      this.registry.get<import('./antipattern-engine.js').AntipatternEngine>('antipattern');
-    if (!engine) engine = this.registry.createAntipatternEngine();
-    return engine;
+    return this.registry.ensure('antipattern', () => this.registry.createAntipatternEngine());
   }
 
   // Pragmatic Conversation Engine ------------------------------------------
   /** Get the pragmatic conversation engine. */
   getPragmaticConversation() {
-    let engine =
-      this.registry.get<import('./pragmatic-conversation.js').PragmaticConversationEngine>(
-        'pragmatic-conversation',
-      );
-    if (!engine) engine = this.registry.createPragmaticConversationEngine();
-    return engine;
+    return this.registry.ensure('pragmatic-conversation', () =>
+      this.registry.createPragmaticConversationEngine(),
+    );
   }
 
   // Role & Policy Engine ----------------------------------------------------
   /** Get the role/policy enforcement engine. */
   getRolePolicyEngine(): import('./role-policy-engine.js').RolePolicyEngine {
-    let engine =
-      this.registry.get<import('./role-policy-engine.js').RolePolicyEngine>('role-policy');
-    if (!engine) engine = this.registry.createRolePolicyEngine();
-    return engine;
+    return this.registry.ensure('role-policy', () => this.registry.createRolePolicyEngine());
   }
 
   // Cognitive Load Engine -----------------------------------------------------
   /** Get the cognitive load balancer engine. */
   getCognitiveLoadBalancer(): import('./cognitive-load-engine.js').CognitiveLoadBalancerEngine {
-    let engine =
-      this.registry.get<import('./cognitive-load-engine.js').CognitiveLoadBalancerEngine>(
-        'cognitive-load',
-      );
-    if (!engine) engine = this.registry.createCognitiveLoadBalancerEngine();
-    return engine;
+    return this.registry.ensure('cognitive-load', () =>
+      this.registry.createCognitiveLoadBalancerEngine(),
+    );
   }
 
   // Natural Language Engine ---------------------------------------------------
   /** Get the natural language rules engine. */
   getNaturalLanguageEngine(): import('./natural-language-engine.js').NaturalLanguageEngine {
-    let engine =
-      this.registry.get<import('./natural-language-engine.js').NaturalLanguageEngine>(
-        'natural-language',
-      );
-    if (!engine) engine = this.registry.createNaturalLanguageEngine();
-    return engine;
+    return this.registry.ensure('natural-language', () =>
+      this.registry.createNaturalLanguageEngine(),
+    );
   }
 
   // Temporal Governance Engine --------------------------------------------------
@@ -1931,9 +1896,9 @@ export class BehaviorOS {
    * Wraps existing governance rules with temporal windows (absolute, recurring, cron).
    */
   getTemporalGovernanceEngine(): TemporalGovernanceEngine {
-    let engine = this.registry.get<TemporalGovernanceEngine>('temporal-governance');
-    if (!engine) engine = this.registry.createTemporalGovernanceEngine();
-    return engine;
+    return this.registry.ensure('temporal-governance', () =>
+      this.registry.createTemporalGovernanceEngine(),
+    );
   }
 
   /**
@@ -1981,128 +1946,95 @@ export class BehaviorOS {
    * Get the metacognition engine for reasoning path reconstruction and bias detection.
    */
   getMetaCognition(): import('./metacognition-engine.js').MetaCognitionEngine {
-    let engine =
-      this.registry.get<import('./metacognition-engine.js').MetaCognitionEngine>('metacognition');
-    if (!engine) engine = this.registry.createMetaCognitionEngine();
-    return engine;
+    return this.registry.ensure('metacognition', () => this.registry.createMetaCognitionEngine());
   }
 
   /**
    * G-009: Get the anomaly detection engine for behavioral deviation scoring.
    */
   getAnomalyDetection(): import('./anomaly-detection-engine.js').AnomalyDetectionEngine {
-    let engine =
-      this.registry.get<import('./anomaly-detection-engine.js').AnomalyDetectionEngine>(
-        'anomaly-detection',
-      );
-    if (!engine) engine = this.registry.createAnomalyDetectionEngine();
-    return engine;
+    return this.registry.ensure('anomaly-detection', () =>
+      this.registry.createAnomalyDetectionEngine(),
+    );
   }
 
   /**
    * G-013: Get the experiential learning engine for the Execute→Observe→Reflect→Abstract→Apply loop.
    */
   getExperientialLearning(): import('./experiential-learning-engine.js').ExperientialLearningEngine {
-    let engine =
-      this.registry.get<import('./experiential-learning-engine.js').ExperientialLearningEngine>(
-        'experiential-learning',
-      );
-    if (!engine) engine = this.registry.createExperientialLearningEngine();
-    return engine;
+    return this.registry.ensure('experiential-learning', () =>
+      this.registry.createExperientialLearningEngine(),
+    );
   }
 
   /**
    * G-016: Get the compliance mapper engine for regulatory rule mapping.
    */
   getComplianceMapper(): import('./compliance-mapper-engine.js').ComplianceMapperEngine {
-    let engine =
-      this.registry.get<import('./compliance-mapper-engine.js').ComplianceMapperEngine>(
-        'compliance-mapper',
-      );
-    if (!engine) engine = this.registry.createComplianceMapperEngine();
-    return engine;
+    return this.registry.ensure('compliance-mapper', () =>
+      this.registry.createComplianceMapperEngine(),
+    );
   }
 
   /**
    * G-004: Get the hybrid evaluation engine for symbolic-neural combined decisions.
    */
   getHybridEvaluation(): import('./hybrid-evaluation-engine.js').HybridEvaluationEngine {
-    let engine =
-      this.registry.get<import('./hybrid-evaluation-engine.js').HybridEvaluationEngine>(
-        'hybrid-evaluation',
-      );
-    if (!engine) engine = this.registry.createHybridEvaluationEngine();
-    return engine;
+    return this.registry.ensure('hybrid-evaluation', () =>
+      this.registry.createHybridEvaluationEngine(),
+    );
   }
 
   /**
    * G-010: Get the zero-trust identity engine for DID-based agent identity.
    */
   getZeroTrustIdentity(): import('./zero-trust-identity-engine.js').ZeroTrustIdentityEngine {
-    let engine =
-      this.registry.get<import('./zero-trust-identity-engine.js').ZeroTrustIdentityEngine>(
-        'zero-trust-identity',
-      );
-    if (!engine) engine = this.registry.createZeroTrustIdentityEngine();
-    return engine;
+    return this.registry.ensure('zero-trust-identity', () =>
+      this.registry.createZeroTrustIdentityEngine(),
+    );
   }
 
   /**
    * G-011: Get the dynamic policy engine for risk-adaptive enforcement.
    */
   getDynamicPolicy(): import('./dynamic-policy-engine.js').DynamicPolicyEngine {
-    let engine =
-      this.registry.get<import('./dynamic-policy-engine.js').DynamicPolicyEngine>('dynamic-policy');
-    if (!engine) engine = this.registry.createDynamicPolicyEngine();
-    return engine;
+    return this.registry.ensure('dynamic-policy', () => this.registry.createDynamicPolicyEngine());
   }
 
   /**
    * G-017: Get the counterfactual audit engine for forensic what-if analysis.
    */
   getCounterfactualAudit(): import('./counterfactual-audit-engine.js').CounterfactualAuditEngine {
-    let engine =
-      this.registry.get<import('./counterfactual-audit-engine.js').CounterfactualAuditEngine>(
-        'counterfactual-audit',
-      );
-    if (!engine) engine = this.registry.createCounterfactualAuditEngine();
-    return engine;
+    return this.registry.ensure('counterfactual-audit', () =>
+      this.registry.createCounterfactualAuditEngine(),
+    );
   }
 
   /**
    * G-018: Get the explainable report engine for stakeholder-friendly summaries.
    */
   getExplainableReport(): import('./explainable-report-engine.js').ExplainableReportEngine {
-    let engine =
-      this.registry.get<import('./explainable-report-engine.js').ExplainableReportEngine>(
-        'explainable-report',
-      );
-    if (!engine) engine = this.registry.createExplainableReportEngine();
-    return engine;
+    return this.registry.ensure('explainable-report', () =>
+      this.registry.createExplainableReportEngine(),
+    );
   }
 
   /**
    * G-005: Get the temporal pattern engine for recurring behavior detection.
    */
   getTemporalPattern(): import('./temporal-pattern-engine.js').TemporalPatternEngine {
-    let engine =
-      this.registry.get<import('./temporal-pattern-engine.js').TemporalPatternEngine>(
-        'temporal-pattern',
-      );
-    if (!engine) engine = this.registry.createTemporalPatternEngine();
-    return engine;
+    return this.registry.ensure('temporal-pattern', () =>
+      this.registry.createTemporalPatternEngine(),
+    );
   }
 
   /**
    * G-007: Get the cross-domain knowledge transfer engine.
    */
   getCrossDomainTransfer(): import('./cross-domain-transfer-engine.js').CrossDomainTransferEngine {
-    let engine =
-      this.registry.get<import('./cross-domain-transfer-engine.js').CrossDomainTransferEngine>(
-        'cross-domain-transfer',
-      );
-    if (!engine) engine = this.registry.createCrossDomainTransferEngine();
-    return engine;
+    return this.registry.ensure('cross-domain-transfer', () =>
+      this.registry.createCrossDomainTransferEngine(),
+    );
   }
 
   /**
@@ -2111,11 +2043,9 @@ export class BehaviorOS {
    * e.g., transferring Surgical Team's zero-defect testing phase to DevOps Pipeline.
    */
   getCrossDnaPipelineTransfer(): import('./cross-dna-pipeline-transfer-engine.js').CrossDnaPipelineTransferEngine {
-    let engine = this.registry.get<
-      import('./cross-dna-pipeline-transfer-engine.js').CrossDnaPipelineTransferEngine
-    >('cross-dna-pipeline-transfer');
-    if (!engine) engine = this.registry.createCrossDnaPipelineTransferEngine();
-    return engine;
+    return this.registry.ensure('cross-dna-pipeline-transfer', () =>
+      this.registry.createCrossDnaPipelineTransferEngine(),
+    );
   }
 
   /**
@@ -2124,82 +2054,63 @@ export class BehaviorOS {
    * should be recommended for adoption in the target pipeline.
    */
   getConfidenceWeightedGateSelector(): import('./confidence-weighted-gate-selector.js').ConfidenceWeightedGateSelector {
-    let engine = this.registry.get<
-      import('./confidence-weighted-gate-selector.js').ConfidenceWeightedGateSelector
-    >('confidence-weighted-gate-selector');
-    if (!engine) engine = this.registry.createConfidenceWeightedGateSelector();
-    return engine;
+    return this.registry.ensure('confidence-weighted-gate-selector', () =>
+      this.registry.createConfidenceWeightedGateSelector(),
+    );
   }
 
   /**
    * G-008: Get the memory consolidation engine.
    */
   getMemoryConsolidation(): import('./memory-consolidation-engine.js').MemoryConsolidationEngine {
-    let engine =
-      this.registry.get<import('./memory-consolidation-engine.js').MemoryConsolidationEngine>(
-        'memory-consolidation',
-      );
-    if (!engine) engine = this.registry.createMemoryConsolidationEngine();
-    return engine;
+    return this.registry.ensure('memory-consolidation', () =>
+      this.registry.createMemoryConsolidationEngine(),
+    );
   }
 
   /**
    * G-012: Get the circuit breaker intelligence engine.
    */
   getCircuitBreakerIntelligence(): import('./circuit-breaker-intelligence.js').CircuitBreakerIntelligence {
-    let engine = this.registry.get<
-      import('./circuit-breaker-intelligence.js').CircuitBreakerIntelligence
-    >('circuit-breaker-intelligence');
-    if (!engine) engine = this.registry.createCircuitBreakerIntelligence();
-    return engine;
+    return this.registry.ensure('circuit-breaker-intelligence', () =>
+      this.registry.createCircuitBreakerIntelligence(),
+    );
   }
 
   /**
    * G-014: Get the value alignment engine.
    */
   getValueAlignment(): import('./value-alignment-engine.js').ValueAlignmentEngine {
-    let engine =
-      this.registry.get<import('./value-alignment-engine.js').ValueAlignmentEngine>(
-        'value-alignment',
-      );
-    if (!engine) engine = this.registry.createValueAlignmentEngine();
-    return engine;
+    return this.registry.ensure('value-alignment', () =>
+      this.registry.createValueAlignmentEngine(),
+    );
   }
 
   /**
    * G-015: Get the collective intelligence engine.
    */
   getCollectiveIntelligence(): import('./collective-intelligence-engine.js').CollectiveIntelligenceEngine {
-    let engine =
-      this.registry.get<import('./collective-intelligence-engine.js').CollectiveIntelligenceEngine>(
-        'collective-intelligence',
-      );
-    if (!engine) engine = this.registry.createCollectiveIntelligenceEngine();
-    return engine;
+    return this.registry.ensure('collective-intelligence', () =>
+      this.registry.createCollectiveIntelligenceEngine(),
+    );
   }
 
   /**
    * G-019: Get the external system adapter engine.
    */
   getExternalSystemAdapter(): import('./external-adapter-engine.js').ExternalSystemAdapter {
-    let engine =
-      this.registry.get<import('./external-adapter-engine.js').ExternalSystemAdapter>(
-        'external-adapter',
-      );
-    if (!engine) engine = this.registry.createExternalSystemAdapter();
-    return engine;
+    return this.registry.ensure('external-adapter', () =>
+      this.registry.createExternalSystemAdapter(),
+    );
   }
 
   /**
    * G-020: Get the governance-as-code engine.
    */
   getGovernanceAsCode(): import('./governance-as-code-engine.js').GovernanceAsCodeEngine {
-    let engine =
-      this.registry.get<import('./governance-as-code-engine.js').GovernanceAsCodeEngine>(
-        'governance-as-code',
-      );
-    if (!engine) engine = this.registry.createGovernanceAsCodeEngine();
-    return engine;
+    return this.registry.ensure('governance-as-code', () =>
+      this.registry.createGovernanceAsCodeEngine(),
+    );
   }
 
   /**
@@ -2208,10 +2119,9 @@ export class BehaviorOS {
    * phases, gates, agents, and auto-loadable skills.
    */
   getPipelinePlanner(): import('./pipeline-planner.js').PipelinePlannerEngine {
-    let engine =
-      this.registry.get<import('./pipeline-planner.js').PipelinePlannerEngine>('pipeline-planner');
-    if (!engine) engine = this.registry.createPipelinePlannerEngine();
-    return engine;
+    return this.registry.ensure('pipeline-planner', () =>
+      this.registry.createPipelinePlannerEngine(),
+    );
   }
 
   /**
@@ -2221,12 +2131,9 @@ export class BehaviorOS {
    * when recovery is not possible — enabling full autonomous construction.
    */
   getPipelineRecovery(): import('./pipeline-recovery-engine.js').PipelineRecoveryEngine {
-    let engine =
-      this.registry.get<import('./pipeline-recovery-engine.js').PipelineRecoveryEngine>(
-        'pipeline-recovery',
-      );
-    if (!engine) engine = this.registry.createPipelineRecoveryEngine();
-    return engine;
+    return this.registry.ensure('pipeline-recovery', () =>
+      this.registry.createPipelineRecoveryEngine(),
+    );
   }
 
   /**
@@ -2261,12 +2168,9 @@ export class BehaviorOS {
    * Get the knowledge graph engine for structured relationship queries and inference.
    */
   getKnowledgeGraph(): import('./knowledge-graph-engine.js').KnowledgeGraphEngine {
-    let engine =
-      this.registry.get<import('./knowledge-graph-engine.js').KnowledgeGraphEngine>(
-        'knowledge-graph',
-      );
-    if (!engine) engine = this.registry.createKnowledgeGraphEngine();
-    return engine;
+    return this.registry.ensure('knowledge-graph', () =>
+      this.registry.createKnowledgeGraphEngine(),
+    );
   }
 
   /**
@@ -2325,17 +2229,13 @@ export class BehaviorOS {
    * Integrates the knowledge graph and metacognition engines with SQLite storage.
    */
   getPersistentMemory(): import('./persistent-memory-engine.js').PersistentMemoryEngine {
-    let engine =
-      this.registry.get<import('./persistent-memory-engine.js').PersistentMemoryEngine>(
-        'persistent-memory',
-      );
-    if (!engine) {
-      engine = this.registry.createPersistentMemoryEngine();
+    return this.registry.ensure('persistent-memory', () => {
+      const engine = this.registry.createPersistentMemoryEngine();
       // Wire up dependencies
       engine.setStore(this.store ?? undefined);
       engine.setKnowledgeGraph(this.getKnowledgeGraph());
-    }
-    return engine;
+      return engine;
+    });
   }
 
   /**
