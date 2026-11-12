@@ -1402,6 +1402,19 @@ export class BehaviorOS {
     });
   }
 
+  /** Record a tool invocation for per-tool telemetry (Fase 3.3). */
+  recordToolInvocation(tool: string, outcome: 'success' | 'failure', latencyMs?: number): void {
+    this.getMetricsEngine().recordToolInvocation(tool, outcome, latencyMs);
+    // Persist so telemetry survives a restart, like the other meta snapshots.
+    this.persistToolUsage();
+  }
+
+  /** Write the per-tool usage telemetry to the store's `meta` channel. */
+  persistToolUsage(): void {
+    if (!this.store) return;
+    this.store.setMeta('tool-usage', JSON.stringify(this.getMetricsEngine().getToolUsage()));
+  }
+
   // Governance Log (read / verify / sink) ----------------------------------
   // Exposed so MCP hosts (not just the OpenCode plugin) can read the
   // hash-chained governance log and verify its integrity (Finding #8).
@@ -2248,6 +2261,16 @@ export class BehaviorOS {
     } else {
       this.getLearningEngine().importLegacyPolicies();
     }
+    // Per-tool usage telemetry (Fase 3.3) hydrates from its meta snapshot so
+    // counters survive a restart.
+    const toolUsageRaw = this.store.getMeta('tool-usage');
+    if (toolUsageRaw) {
+      try {
+        this.getMetricsEngine().restoreToolUsage(JSON.parse(toolUsageRaw));
+      } catch {
+        // Corrupt telemetry: start empty; the next invocation re-persists.
+      }
+    }
   }
 
   /**
@@ -2266,6 +2289,7 @@ export class BehaviorOS {
       this.learningPolicy.persistPolicyLedger();
       for (const agent of this.agents.values()) store.saveAgent(agent);
       this.persistRolePolicyState();
+      this.persistToolUsage();
     });
   }
 

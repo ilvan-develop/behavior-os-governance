@@ -171,4 +171,50 @@ describe('MetricsEngine', () => {
     // Uptime should be at least 0
     expect(initialUptime).toBeGreaterThanOrEqual(0);
   });
+
+  it('records tool invocations for per-tool telemetry (Fase 3.3)', () => {
+    const engine = new MetricsEngine();
+
+    engine.recordToolInvocation('bos_get_metrics', 'success', 12);
+    engine.recordToolInvocation('bos_get_metrics', 'success', 15);
+    engine.recordToolInvocation('bos_get_metrics', 'failure', 20);
+    engine.recordToolInvocation('bos_run_audit', 'success', 42);
+
+    const usage = engine.getToolUsage();
+    expect(usage['bos_get_metrics']).toEqual({
+      total: 3,
+      success: 2,
+      failure: 1,
+      lastLatencyMs: 20,
+      lastUsedAt: usage['bos_get_metrics']!.lastUsedAt,
+    });
+    expect(usage['bos_run_audit']).toEqual({
+      total: 1,
+      success: 1,
+      failure: 0,
+      lastLatencyMs: 42,
+      lastUsedAt: usage['bos_run_audit']!.lastUsedAt,
+    });
+
+    // The snapshot exposes toolUsage
+    expect(Object.keys(engine.metrics.toolUsage)).toHaveLength(2);
+  });
+
+  it('restores and resets tool usage', () => {
+    const engine = new MetricsEngine();
+    engine.restoreToolUsage({
+      bos_get_metrics: {
+        total: 5,
+        success: 4,
+        failure: 1,
+        lastLatencyMs: 10,
+        lastUsedAt: new Date().toISOString(),
+      },
+    });
+    expect(engine.getToolUsage()['bos_get_metrics']?.total).toBe(5);
+
+    // A reset clears tool usage
+    engine.reset();
+    expect(engine.getToolUsage()).toEqual({});
+  });
 });

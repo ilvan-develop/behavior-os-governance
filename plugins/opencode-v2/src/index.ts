@@ -26,9 +26,6 @@ import type {
   KnowledgeGraphEdge,
   KnowledgeGraphNode,
   KnowledgeQuery,
-  MissionPriority,
-  MissionStatus,
-  MissionType,
   ProtocolStep,
 } from '@behavior-os/schemas';
 import { Plugin } from '@opencode/plugin';
@@ -2251,13 +2248,18 @@ export default Plugin.define({
           description,
           input: input as PluginToolInfo['input'],
           execute: async (raw: unknown): Promise<{ content: string }> => {
+            const startedAt = Date.now();
             try {
               const output = await run((raw ?? {}) as Record<string, unknown>);
+              // Per-tool telemetry (Fase 3.3): record every invocation on the
+              // shared metrics engine so `bos_get_metrics` reports usage by tool.
+              bos.recordToolInvocation(name, 'success', Date.now() - startedAt);
               return {
                 content: typeof output === 'string' ? output : JSON.stringify(output, null, 2),
               };
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
+              bos.recordToolInvocation(name, 'failure', Date.now() - startedAt);
               return { content: JSON.stringify({ ok: false, error: message }, null, 2) };
             }
           },

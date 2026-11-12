@@ -501,5 +501,21 @@ políticas) exige um contexto partilhado explícito porque esses métodos mutam
   (facade-host-logic, decision-engine, policy-versioning, learning-lifecycle,
   audit-engine-real), incluindo o rollback de `recordCodeFixResults` e o mirror
   `afterPolicyMutation` agora no serviço.
-- **Em aberto.** Fase 3 (telemetria por tool, session.context enriquecida,
-  /policy /fairness /compliance) e os 8 motores library-only.
+- **Em aberto.** Fase 3 (session.context enriquecida, /policy /fairness /compliance)
+  e os 8 motores library-only.
+
+## 15. Atualização — Fase 3.3 (telemetria de uso por tool)
+
+- **`ToolUsageMetrics` no `MetricsEngine`.** Novo campo `toolUsage` em
+  `BehaviorOSMetrics` (per-tool: `total`, `success`, `failure`, `lastLatencyMs`,
+  `lastUsedAt`) com `recordToolInvocation` / `getToolUsage` / `restoreToolUsage`
+  e reset em `reset()`.
+- **Instrumentação no plugin.** `addJson` (o único ponto de registo de tools)
+  regista cada invocação no metrics engine (success/failure + latência), pelo que
+  **todas** as tools do plugin alimentam a telemetria sem tocar no lifecycle lock.
+- **Fachada + persistência.** `recordToolInvocation` e `persistToolUsage` na
+  `BehaviorOS`; o estado persiste no canal `meta` (`tool-usage`) e hidrata no boot,
+  sobrevivendo a um restart, à semelhança de `role-policy-state` / `policy-ledger`.
+- **Prova.** `metrics-engine.test.ts` (+2 casos: contagem per-tool e
+  restore/reset); `verify:capabilities`, `verify:tool-parity`, `verify:opencode`
+  mantêm-se verdes (a mudança é aditiva — nenhum schema de tool mudou).

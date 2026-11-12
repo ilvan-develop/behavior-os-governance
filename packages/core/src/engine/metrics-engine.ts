@@ -45,6 +45,20 @@ export interface CrossDnaMetrics {
   byTarget: Record<string, number>;
 }
 
+/** Per-tool invocation counter. */
+export interface ToolUsageMetrics {
+  /** Total invocations. */
+  total: number;
+  /** Successful invocations (no exception, no governance deny). */
+  success: number;
+  /** Failed invocations (exception, timeout, or governance deny). */
+  failure: number;
+  /** Latency of the most recent invocation in ms (0 when no invocation yet). */
+  lastLatencyMs: number;
+  /** ISO timestamp of the most recent invocation (null when no invocation yet). */
+  lastUsedAt: string | null;
+}
+
 /** Aggregated system-wide metrics snapshot. */
 export interface BehaviorOSMetrics {
   timestamp: string;
@@ -53,6 +67,8 @@ export interface BehaviorOSMetrics {
   consensus: ConsensusMetrics;
   prediction: PredictionMetrics;
   crossDna: CrossDnaMetrics;
+  /** Per-tool usage telemetry (Fase 3.3). */
+  toolUsage: Record<string, ToolUsageMetrics>;
   learningEventsTotal: number;
   learningEventsByType: Record<string, number>;
 }
@@ -73,6 +89,8 @@ export class MetricsEngine {
   private readonly _learningByType = new Map<string, number>();
   /** Rule fire counts feeding `topRules`, keyed by rule id. */
   private readonly _ruleFires = new Map<string, { count: number; action: string }>();
+  /** Per-tool usage telemetry (Fase 3.3), keyed by tool name. */
+  private readonly _toolUsage = new Map<string, ToolUsageMetrics>();
   private startTime: number;
 
   constructor() {
@@ -144,6 +162,45 @@ export class MetricsEngine {
     this._metrics = this.computeMetrics();
   }
 
+  /** Record a tool invocation for per-tool telemetry (Fase 3.3). */
+  recordToolInvocation(tool: string, outcome: 'success' | 'failure', latencyMs?: number): void {
+    const entry = this._toolUsage.get(tool) ?? {
+      total: 0,
+      success: 0,
+      failure: 0,
+      lastLatencyMs: 0,
+      lastUsedAt: null,
+    };
+    entry.total += 1;
+    if (outcome === 'success') entry.success += 1;
+    else entry.failure += 1;
+    if (typeof latencyMs === 'number') entry.lastLatencyMs = latencyMs;
+    entry.lastUsedAt = new Date().toISOString();
+    this._toolUsage.set(tool, entry);
+    this._metrics = this.computeMetrics();
+  }
+
+  /** Restore per-tool telemetry from a persisted snapshot (best effort). */
+  restoreToolUsage(snapshot: Record<string, ToolUsageMetrics> | undefined): void {
+    if (!snapshot) return;
+    this._toolUsage.clear();
+    for (const [tool, entry] of Object.entries(snapshot)) {
+      this._toolUsage.set(tool, {
+        total: entry.total,
+        success: entry.success,
+        failure: entry.failure,
+        lastLatencyMs: entry.lastLatencyMs,
+        lastUsedAt: entry.lastUsedAt,
+      });
+    }
+    this._metrics = this.computeMetrics();
+  }
+
+  /** Get the current per-tool telemetry snapshot. */
+  getToolUsage(): Record<string, ToolUsageMetrics> {
+    return Object.fromEntries(this._toolUsage);
+  }
+
   /** Record a learning event. */
   recordLearningEvent(type: string): void {
     const current = this._learningByType.get(type) ?? 0;
@@ -182,6 +239,7 @@ export class MetricsEngine {
     this._crossDnaSuggestions.length = 0;
     this._learningByType.clear();
     this._ruleFires.clear();
+    this._toolUsage.clear();
     this.startTime = Date.now();
     this._metrics = this.createDefaultMetrics();
   }
@@ -220,6 +278,7 @@ export class MetricsEngine {
         bySource: {},
         byTarget: {},
       },
+      toolUsage: {},
       learningEventsTotal: 0,
       learningEventsByType: {},
     };
@@ -240,6 +299,7 @@ export class MetricsEngine {
       consensus,
       prediction,
       crossDna,
+      toolUsage: this.getToolUsage(),
       learningEventsTotal: totalLearning,
       learningEventsByType: learningByType,
     };

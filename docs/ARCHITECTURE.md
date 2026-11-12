@@ -170,8 +170,11 @@ The facade delegates the mission lifecycle to
 `packages/core/src/services/mission-service.ts` and the learning/policy/evolution
 lifecycle to `packages/core/src/services/learning-policy-service.ts`, each
 through an explicit host contract (`MissionServiceHost`,
-`LearningPolicyServiceHost`). Both files live outside `engine/`, so the
-48-engine count and the 51-file layout above are unchanged.
+`LearningPolicyServiceHost`). Per-tool usage telemetry (Fase 3.3) lives in the
+`MetricsEngine` (`toolUsage`) and is instrumented at the plugin's single tool
+registration point, persisted via the store's `meta` channel. All service files
+live outside `engine/`, so the 48-engine count and the 51-file layout above are
+unchanged.
 
 The eleven **foundational** engines that the governance path depends on are:
 
