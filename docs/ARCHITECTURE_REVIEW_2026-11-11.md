@@ -469,3 +469,18 @@ políticas) exige um contexto partilhado explícito porque esses métodos mutam
 `agentState`/`agents`/`store` e chamam `advanceProtocolStep`/`recordLearning`; não
 é uma extração mecânica. As 4 loop tools continuam exclusivas do plugin
 (documentado e verificado). Fase 3: telemetria de uso por tool em `bos_get_metrics`.
+
+## 13. Atualização — Fase 2.6 (2026-11-12)
+
+- **MissionService extraído.** `createMission`, `transitionMission`,
+  `addMissionEvidence`, `start/complete/fail/pause/resume/cancel` e a convergência
+  de colaborações saíram da fachada para
+  `packages/core/src/services/mission-service.ts`, com uma interface explícita
+  `MissionServiceHost` (store, engine, estado das colaborações, `agentState`, DNA
+  e cursor do protocolo). A fachada mantém a API pública como delegados finos.
+  `behavior-os.ts`: 2762 → 2424 linhas.
+- **Prova.** `packages/core/tests/mission-service.test.ts` (6 casos): protocolo
+  explícito vs opt-out, convergência aberta recusada, convergência fechada aceite,
+  sessão desaparecida libertada, rollback de criação e rollback de evidência.
+- **Em aberto.** A extração de learning/evolução/políticas da fachada e a Fase 3
+  (telemetria por tool) permanecem; o padrão de host explícito é o seam a reutilizar.

@@ -30,7 +30,6 @@ import type {
   Persona,
   PipelineRun,
   Prediction,
-  ProtocolStep,
   RankedRecommendation,
   Vote,
 } from '@behavior-os/schemas';
@@ -39,6 +38,7 @@ import { isControlPlaneAction, isMutatingAction } from '../action-classification
 import * as GovernanceLog from '../governance-log.js';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
+import { MissionService } from '../services/mission-service.js';
 import {
   type AgentIdentity,
   BEHAVIOROS_SNAPSHOT_VERSION,
@@ -87,18 +87,12 @@ import type {
   PolicyVersionStatus,
 } from './learning-engine.js';
 import type {
+  MissionEngine,
   MissionEvidenceInput,
   MissionTransitionOptions,
   MissionTransitionResult,
 } from './mission-engine.js';
-import { isCollaborationTag, MissionEngine } from './mission-engine.js';
-import {
-  type GateContext,
-  PipelineEngine,
-  type PipelineGate,
-  type PreflightResult,
-} from './pipeline-engine.js';
-import type { RolePolicyState } from './role-policy-engine.js';
+import { type GateContext, PipelineEngine, type PreflightResult } from './pipeline-engine.js';
 
 export * from './behavior-os-types.js';
 
@@ -122,6 +116,7 @@ export class BehaviorOS {
   private storeInitError: string | null = null;
   private pipeline: PipelineEngine | null = null;
   private codeEditEngine: CodeEditEngine | null = null;
+  private readonly missions: MissionService;
 
   constructor(config: BehaviorOSConfig = {}) {
     this.config = config;
@@ -136,6 +131,28 @@ export class BehaviorOS {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+
+    // Mission lifecycle lives in a service with an explicit host contract; the
+    // facade keeps thin delegates so the public API is unchanged.
+    this.missions = new MissionService({
+      store: () => this.store,
+      missionEngine: () => this.getMissionEngine(),
+      isCollaborationClosed: (sessionId) => {
+        if (sessionId.startsWith('brainstorm-')) {
+          const session = this.getBrainstorm().getSession(sessionId);
+          return !session || session.phase === 'decided' || session.phase === 'cancelled';
+        }
+        const session = this.getPragmaticConversation().getSession(sessionId);
+        return !session || session.status === 'resolved' || session.status === 'cancelled';
+      },
+      activeMission: () => this.agentState.activeMission,
+      setActiveMission: (missionId) => {
+        this.agentState.activeMission = missionId;
+        this.agentState.updatedAt = new Date().toISOString();
+      },
+      dnaName: () => this.currentDNA?.name,
+      advanceProtocolStep: (tool) => this.advanceProtocolStep(tool),
+    });
 
     // Preload a DNA pattern when configured so the first governance/quality
     // evaluation does not require an explicit loadDNA() call.
@@ -748,37 +765,7 @@ export class BehaviorOS {
     sessionId: string,
     missionId?: string,
   ): Mission | null {
-    const target = missionId ?? this.agentState.activeMission;
-    if (!target || !isCollaborationTag(sessionId)) return null;
-    const expected = kind === 'brainstorm' ? 'brainstorm-' : 'conv';
-    if (!sessionId.startsWith(expected)) return null;
-    return this.getMissionEngine().registerCollaboration(target, sessionId);
-  }
-
-  /**
-   * Return the collaboration tags still awaiting convergence, dropping the ones
-   * whose session is closed or no longer known (for example after a restart:
-   * sessions are in-memory, so a vanished session must not deadlock the
-   * mission forever).
-   */
-  private openCollaborations(mission: Mission): string[] {
-    const tags = (mission.tags ?? []).filter(isCollaborationTag);
-    if (tags.length === 0) return [];
-    const engine = this.getMissionEngine();
-    const open: string[] = [];
-    for (const tag of tags) {
-      let closed: boolean;
-      if (tag.startsWith('brainstorm-')) {
-        const session = this.getBrainstorm().getSession(tag);
-        closed = !session || session.phase === 'decided' || session.phase === 'cancelled';
-      } else {
-        const session = this.getPragmaticConversation().getSession(tag);
-        closed = !session || session.status === 'resolved' || session.status === 'cancelled';
-      }
-      if (closed) engine.removeCollaboration(mission.id, tag);
-      else open.push(tag);
-    }
-    return open;
+    return this.missions.registerCollaboration(kind, sessionId, missionId);
   }
 
   createMission(options: {
@@ -800,28 +787,7 @@ export class BehaviorOS {
      */
     advanceProtocol?: boolean;
   }): Mission {
-    const { advanceProtocol, ...missionOptions } = options;
-    const engine = this.getMissionEngine();
-    const mission = engine.create({
-      ...missionOptions,
-      type: options.type as MissionType,
-      priority: options.priority as MissionPriority,
-      dnaPattern: options.dnaPattern ?? this.currentDNA?.name ?? 'default',
-      createdBy: options.createdBy ?? 'system',
-    });
-    if (this.store) {
-      try {
-        this.store.saveMission(mission);
-      } catch (error) {
-        // Creation must not leave a mission that durable state never saw.
-        engine.remove(mission.id);
-        throw error;
-      }
-    }
-    if (advanceProtocol !== false) {
-      this.advanceProtocolStep('bos_create_mission');
-    }
-    return mission;
+    return this.missions.create(options);
   }
 
   /**
@@ -836,63 +802,7 @@ export class BehaviorOS {
     to: MissionStatus,
     options: MissionTransitionOptions = {},
   ): MissionTransitionResult {
-    const engine = this.getMissionEngine();
-    const before = engine.get(missionId);
-    const rollback = before ? structuredClone(before) : null;
-
-    // Convergence gate: a mission that opened native collaboration must let the
-    // session converge before it can complete. Closed sessions are dropped from
-    // the tag list here, so a retry after resolution succeeds without manual
-    // bookkeeping; an open one refuses with the sessions that still need a
-    // decision.
-    if (to === 'completed' && before) {
-      const open = this.openCollaborations(before);
-      if (open.length > 0) {
-        return {
-          ok: false,
-          code: 'EVIDENCE_MISSING',
-          message:
-            `Open collaboration must converge before completion: ${open.join(', ')}. ` +
-            'Resolve each brainstorm (decided/cancelled) or conversation (resolved/cancelled) and retry.',
-          mission: before,
-          from: before.status,
-          to,
-        };
-      }
-    }
-
-    const result = engine.transition(missionId, to, options);
-    if (!result.ok || !result.changed) return result;
-
-    if (this.store) {
-      try {
-        this.store.saveMission(result.mission);
-      } catch (error) {
-        if (rollback) engine.restoreOne(rollback);
-        return {
-          ok: false,
-          code: 'PERSISTENCE_FAILED',
-          message: `Failed to persist mission "${missionId}": ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          mission: rollback,
-          from: before?.status,
-          to,
-        };
-      }
-    }
-
-    const now = new Date().toISOString();
-    if (to === 'active') {
-      // Starting (or resuming) makes this the single active mission.
-      this.agentState.activeMission = missionId;
-      this.agentState.updatedAt = now;
-    } else if (MissionEngine.isTerminal(to) && this.agentState.activeMission === missionId) {
-      this.agentState.activeMission = null;
-      this.agentState.updatedAt = now;
-    }
-
-    return result;
+    return this.missions.transition(missionId, to, options);
   }
 
   /**
@@ -905,46 +815,15 @@ export class BehaviorOS {
     evidence: MissionEvidenceInput[],
     options: MissionTransitionOptions = {},
   ): MissionTransitionResult {
-    const engine = this.getMissionEngine();
-    const before = engine.get(missionId);
-    const rollback = before ? structuredClone(before) : null;
-
-    const result = engine.addEvidence(missionId, evidence, options);
-    if (!result.ok || !result.changed) return result;
-
-    if (this.store) {
-      try {
-        this.store.saveMission(result.mission);
-      } catch (error) {
-        if (rollback) engine.restoreOne(rollback);
-        return {
-          ok: false,
-          code: 'PERSISTENCE_FAILED',
-          message: `Failed to persist evidence for mission "${missionId}": ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          mission: rollback,
-          from: before?.status,
-          to: before?.status ?? 'active',
-        };
-      }
-    }
-
-    return result;
+    return this.missions.addEvidence(missionId, evidence, options);
   }
 
   startMission(missionId: string, options: { advanceProtocol?: boolean } = {}): Mission | null {
-    const result = this.transitionMission(missionId, 'active');
-    if (!result.ok) return null;
-    if (result.changed && options.advanceProtocol !== false) {
-      this.advanceProtocolStep('bos_start_mission');
-    }
-    return result.mission;
+    return this.missions.start(missionId, options);
   }
 
   completeMission(missionId: string, options: MissionTransitionOptions = {}): Mission | null {
-    const result = this.transitionMission(missionId, 'completed', options);
-    return result.ok ? result.mission : null;
+    return this.missions.complete(missionId, options);
   }
 
   failMission(
@@ -952,26 +831,25 @@ export class BehaviorOS {
     reason?: string,
     options: Omit<MissionTransitionOptions, 'reason'> = {},
   ): Mission | null {
-    const result = this.transitionMission(missionId, 'failed', { ...options, reason });
-    return result.ok ? result.mission : null;
+    return this.missions.fail(missionId, reason, options);
   }
 
   pauseMission(missionId: string, options: MissionTransitionOptions = {}): MissionTransitionResult {
-    return this.transitionMission(missionId, 'paused', options);
+    return this.missions.pause(missionId, options);
   }
 
   resumeMission(
     missionId: string,
     options: MissionTransitionOptions = {},
   ): MissionTransitionResult {
-    return this.transitionMission(missionId, 'active', options);
+    return this.missions.resume(missionId, options);
   }
 
   cancelMission(
     missionId: string,
     options: MissionTransitionOptions = {},
   ): MissionTransitionResult {
-    return this.transitionMission(missionId, 'cancelled', options);
+    return this.missions.cancel(missionId, options);
   }
 
   // Learning

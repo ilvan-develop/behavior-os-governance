@@ -166,6 +166,12 @@ in total. Earlier revisions of this document listed 22 "engines" with synthetic
 `Ops/sec` figures and later claimed only eleven existed; neither is true today.
 No throughput numbers are claimed.
 
+The facade delegates the mission lifecycle to
+`packages/core/src/services/mission-service.ts` through an explicit
+`MissionServiceHost` (store, engine, collaboration state, agent state, DNA and
+protocol cursor). That file lives outside `engine/`, so the 48-engine count and
+the 51-file layout above are unchanged.
+
 The eleven **foundational** engines that the governance path depends on are:
 
 | Engine               | File                       | Purpose                                                                                           |
