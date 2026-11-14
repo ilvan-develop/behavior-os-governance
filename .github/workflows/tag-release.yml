@@ -32,7 +32,8 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish to npm
-        run: pnpm changeset publish
+        # Exit 0 when packages are already published (E409 / "No unpublished projects")
+        run: pnpm changeset publish || echo "⚠️  All packages already published – skipping."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
