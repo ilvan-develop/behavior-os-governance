@@ -15,6 +15,7 @@ import {
   getGovernanceLogSinkStatus,
   initGovernanceLogSink,
   isControlPlaneAction,
+  isReadOnlyAction,
   PROTOCOL_STEPS,
   seedGovernanceLog,
   verifyGovernanceLog,
@@ -583,6 +584,18 @@ export function hasProjectLoader(directory: string): boolean {
     path.join(directory, '.opencode', 'plugins', 'behavioros.ts'),
     path.join(directory, '.opencode', 'plugins', 'behavioros.js'),
   ].some((file) => existsSync(file));
+}
+
+/**
+ * Test-only: clear the shared role/policy engine so a test that registers a
+ * catch-all (`*`) policy cannot leak into later tests and turn a mission-level
+ * preflight into an order-dependent GOVERNANCE_DENIED instead of the intended
+ * per-task AGENT_NOT_FOUND. Uses the engine's supported `restore()` with an
+ * empty state; it never touches persistence. Exported under a `ForTest` name
+ * so production code and the tool surface do not gain a destructive reset.
+ */
+export function resetRolePolicyEngineForTest(): void {
+  getBehaviorOS().getRolePolicyEngine().restore({ roles: [], policies: [], trail: [] });
 }
 
 export default Plugin.define({
@@ -2670,7 +2683,9 @@ export default Plugin.define({
 
       try {
         const isControlPlane = isControlPlaneAction(event.action);
-        const readOnly = !isMutating(event.action);
+        // G-01: fail-closed. Only a provably read-only action skips the role
+        // pre-evaluate; an unknown verb is treated as mutating.
+        const readOnly = isReadOnlyAction(event.action);
 
         // R9: Role pre-evaluate — operator-defined role policies run BEFORE DNA
         // so a role can deny an action even when the DNA would allow it. A DNA
@@ -2945,7 +2960,9 @@ export default Plugin.define({
         // `metadata` for non-mutating tools, where the host's own content
         // is the source of the signals.
         const inputRecord = asRecord(eventTyped.input);
-        const isMutTool = isMutating(toolName);
+        // Control-plane tools are not operations on the governed environment;
+        // their payload must not be scanned as an edit diff.
+        const isMutTool = isMutating(toolName) && !isControlPlaneAction(toolName);
         const context = isMutTool
           ? buildGovernanceContext({
               tool: toolName,

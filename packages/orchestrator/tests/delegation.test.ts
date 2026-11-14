@@ -399,3 +399,60 @@ describe('DelegationEngine shared reservation ledger', () => {
     expect(engine.activeTaskCount()).toBe(1);
   });
 });
+
+/**
+ * SPOF resilience (laboratório §5): if the injected `CognitiveLoadBalancerEngine`
+ * fails mid-delegation (corrupted state, race, downstream error), the
+ * `DelegationEngine` must NOT propagate the exception to the orchestrator.
+ * Fail-safe posture: `assign()` degrades to a refusal with a reason, never
+ * throws. This protects the `LoopManager` + `AutonomousOrchestrator`
+ * (11 nodes that cascade per `graphify affected DelegationEngine`).
+ */
+describe('DelegationEngine load-balancer failure resilience (SPOF)', () => {
+  /** A load-balancer stub whose read AND mutation methods throw. */
+  function makeFailingLoadEngine(): CognitiveLoadBalancerEngine {
+    const failing = new CognitiveLoadBalancerEngine();
+    const boom = () => {
+      throw new Error('load-balancer state corrupted');
+    };
+    // Methods called by `assign()`.
+    failing.isAgentOverloaded = boom;
+    failing.recommendAssignment = boom;
+    failing.getAgentLoad = boom;
+    // Lifecycle methods called by onTaskStarted / onTaskCompleted / onTaskFailed.
+    failing.assignTask = boom;
+    failing.completeTask = boom;
+    return failing;
+  }
+
+  it('assign() refuses (does not throw) when the load balancer is broken', () => {
+    const load = makeFailingLoadEngine();
+    const engine = new DelegationEngine(load, {
+      profiles: makeProfiles(),
+    });
+    // `isAgentOverloaded` is called inside `assign()`'s eligibility filter.
+    // Without a try/catch the exception propagates and the orchestrator
+    // (and therefore the LoopManager) crashes.
+    expect(() =>
+      engine.assign({
+        taskId: 't1',
+        requiredSkills: ['implement'],
+        mutating: true,
+        inFlightCount: 0,
+      }),
+    ).not.toThrow();
+  });
+
+  it('lifecycle hooks survive a broken load balancer', () => {
+    const load = makeFailingLoadEngine();
+    const engine = new DelegationEngine(load, { profiles: makeProfiles() });
+    // `onTaskStarted`/`onTaskCompleted`/`onTaskFailed` delegate to
+    // `load.assignTask` / `load.completeTask`, which now throw. Without the
+    // guard the orchestrator's dispatch-loop observer crashes mid-lifecycle.
+    expect(() => engine.onTaskStarted('fixer-1', 't1')).not.toThrow();
+    expect(() => engine.onTaskCompleted('fixer-1', 't1')).not.toThrow();
+    expect(() => engine.onTaskFailed('fixer-1', 't1')).not.toThrow();
+    // The read surface degrades to 0 instead of throwing.
+    expect(engine.getAgentLoad('fixer-1')).toBe(0);
+  });
+});

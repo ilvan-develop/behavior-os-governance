@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import plugin, { describeProtocolProgress } from '../src/index';
+import plugin, { describeProtocolProgress, resetRolePolicyEngineForTest } from '../src/index';
 
 interface CapturedTool {
   name: string;
@@ -971,42 +971,69 @@ describe('behavior-os plugin registration', () => {
     const whoami = await runTool(addedTools, 'bos_whoami', {});
     const agentId = (JSON.parse(whoami.content) as { agentId: string }).agentId;
 
-    await runTool(addedTools, 'bos_define_policy', {
-      id: 'p-block-all',
-      name: 'Block everything for the governed persona',
-      description: "Catch-all '*' to prove control-plane and read-only stay escapable",
-      condition: '*',
-      action: 'block',
-      severity: 'critical',
-      appliesTo: ['role'],
-      effectiveFrom: '2026-01-01T00:00:00.000Z',
-    });
-    await runTool(addedTools, 'bos_register_role', {
-      id: agentId,
-      name: 'Governed persona role',
-      displayName: 'Governed persona role',
-      responsibilities: ['enforced in the session'],
-      policies: ['p-block-all'],
-    });
+    try {
+      await runTool(addedTools, 'bos_define_policy', {
+        id: 'p-block-all',
+        name: 'Block everything for the governed persona',
+        description: "Catch-all '*' to prove control-plane and read-only stay escapable",
+        condition: '*',
+        action: 'block',
+        severity: 'critical',
+        appliesTo: ['role'],
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+      });
+      await runTool(addedTools, 'bos_register_role', {
+        id: agentId,
+        name: 'Governed persona role',
+        displayName: 'Governed persona role',
+        responsibilities: ['enforced in the session'],
+        policies: ['p-block-all'],
+      });
 
-    const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
+      const permission = permissionHooks.evaluate as (event: FakePermissionEvent) => Promise<void>;
 
-    const reading: FakePermissionEvent = {
-      action: 'grep',
-      resources: ['dnas/surgical-team.yaml'],
-      agent: 'test',
-      effect: 'allow',
+      const reading: FakePermissionEvent = {
+        action: 'grep',
+        resources: ['dnas/surgical-team.yaml'],
+        agent: 'test',
+        effect: 'allow',
+      };
+      await permission(reading);
+      expect(reading.effect).toBe('allow'); // read-only → no role gate
+
+      const controlPlane: FakePermissionEvent = {
+        action: 'bos_list_dna',
+        agent: 'test',
+        effect: 'allow',
+      };
+      await permission(controlPlane);
+      expect(controlPlane.effect).toBe('allow'); // control-plane must stay escapable
+    } finally {
+      // The catch-all role policy is scoped to this test. Without this, the
+      // shared engine leaks `p-block-all` into later tests (P-01), so the
+      // control-loop test's mission-level preflight reports GOVERNANCE_DENIED
+      // instead of the intended per-task AGENT_NOT_FOUND.
+      resetRolePolicyEngineForTest();
+    }
+  });
+
+  it('leaves the role/policy engine clean after the catch-all test (P-01 regression guard)', async () => {
+    // If the catch-all test above regressed and stopped scoping its policy,
+    // the engine would still hold `p-block-all` and this would fail.
+    const { ctx, addedTools } = createFakeContext(repoRoot);
+    await plugin.setup(ctx as never);
+    await runTool(addedTools, 'bos_select_dna', { pattern: 'surgical-team' });
+    const roles = JSON.parse((await runTool(addedTools, 'bos_list_roles', {})).content) as {
+      roles: Array<{ policies?: string[] }>;
+      policies: Array<{ id: string }>;
     };
-    await permission(reading);
-    expect(reading.effect).toBe('allow'); // read-only → no role gate
-
-    const controlPlane: FakePermissionEvent = {
-      action: 'bos_list_dna',
-      agent: 'test',
-      effect: 'allow',
-    };
-    await permission(controlPlane);
-    expect(controlPlane.effect).toBe('allow'); // control-plane must stay escapable
+    const leaked = roles.policies.find((p) => p.id === 'p-block-all');
+    expect(leaked, `p-block-all must not leak past its test (P-01)`).toBeUndefined();
+    for (const role of roles.roles) {
+      expect(role.policies, `role must not reference p-block-all (P-01)`).not.toContain(
+        'p-block-all',
+      );
+    }
   });
 
   it('escalates (ask) a deployment through the permission hook under devops-pipeline', async () => {

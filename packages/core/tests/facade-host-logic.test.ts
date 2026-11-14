@@ -136,4 +136,62 @@ describe('action classification and the bootstrap deny-override policy', () => {
     expect(isMutatingAction('grep')).toBe(false);
     expect(isMutatingAction(undefined)).toBe(false);
   });
+
+  // G-01 regression: a deny is released only for actions that are *provably*
+  // read-only. The old policy treated every unrecognised verb as harmless, so a
+  // denied data export or `git push` passed preflight.
+  it('refuses to release a deny for actions that can leak or change state (G-01)', async () => {
+    const leaky = bos.evaluateGovernance('export_protected_records', {
+      agent: 'a',
+      context: { '*': true },
+    });
+    expect(leaky.verdict).toBe('deny');
+
+    for (const action of [
+      'export_protected_records',
+      'export',
+      'send_report',
+      'transmit_records',
+      'upload_bundle',
+      'git push',
+      'git push origin main',
+      'npm publish',
+      'scp secrets.txt host:/tmp',
+      'webhook_dispatch',
+      'frobnicate_records',
+    ]) {
+      expect(bos.bootstrapDenyOverride(action, leaky), action).toBe(false);
+    }
+  });
+
+  it('preflight keeps a DNA deny for a data export (G-01 end to end)', async () => {
+    const exportRule: GovernanceRule = {
+      id: 'deny-sensitive',
+      level: 'critical',
+      action: 'block',
+      conditions: [{ type: 'sensitive', value: true }],
+      description: 'fixture deny',
+    };
+    const facade = new BehaviorOS();
+    await facade.loadDNA({ ...dna('lockdown'), governance: [exportRule] });
+
+    expect(
+      facade.evaluateGovernance('export_records', {
+        agent: 'a',
+        context: { sensitive: true },
+      }).verdict,
+    ).toBe('deny');
+    expect(
+      facade.preflightAction('export_records', {
+        agent: 'a',
+        context: { sensitive: true },
+      }).allowed,
+    ).toBe(false);
+    expect(
+      facade.preflightAction('read_file', {
+        agent: 'a',
+        context: { sensitive: true },
+      }).allowed,
+    ).toBe(true);
+  });
 });

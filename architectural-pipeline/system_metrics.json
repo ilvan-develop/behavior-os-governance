@@ -1,0 +1,365 @@
+{
+  "packages": {
+    "package:cli": {
+      "name": "@behavior-os/cli",
+      "version": "2.3.0",
+      "dependencies": {
+        "@behavior-os/core": "workspace:*",
+        "@behavior-os/schemas": "workspace:*",
+        "commander": "^12.0.0",
+        "chalk": "^5.3.0",
+        "js-yaml": "^5.4.3"
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11"
+      },
+      "path": "packages/cli"
+    },
+    "package:core": {
+      "name": "@behavior-os/core",
+      "version": "2.3.0",
+      "dependencies": {
+        "@behavior-os/schemas": "workspace:*",
+        "js-yaml": "^5.4.3"
+      },
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "@types/pg": "^8.23.1",
+        "pg": "^8.23.1",
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11"
+      },
+      "path": "packages/core"
+    },
+    "package:mcp-server": {
+      "name": "@behavior-os/mcp-server",
+      "version": "2.3.0",
+      "dependencies": {
+        "@behavior-os/core": "workspace:*",
+        "@behavior-os/schemas": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.32.1",
+        "js-yaml": "^5.4.3",
+        "zod": "^4.4.3"
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11"
+      },
+      "path": "packages/mcp-server"
+    },
+    "package:orchestrator": {
+      "name": "behavioros-orchestrator",
+      "version": "1.0.1",
+      "dependencies": {
+        "@behavior-os/core": "workspace:*",
+        "@behavior-os/schemas": "workspace:*"
+      },
+      "devDependencies": {
+        "typescript": "~5.9.3"
+      },
+      "path": "packages/orchestrator"
+    },
+    "package:schemas": {
+      "name": "@behavior-os/schemas",
+      "version": "2.3.0",
+      "dependencies": {},
+      "devDependencies": {
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11",
+        "zod": "^4.6.7"
+      },
+      "path": "packages/schemas"
+    },
+    "package:sdk": {
+      "name": "@behavior-os/sdk",
+      "version": "2.3.0",
+      "dependencies": {
+        "@behavior-os/core": "workspace:*",
+        "@behavior-os/schemas": "workspace:*"
+      },
+      "devDependencies": {
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11"
+      },
+      "path": "packages/sdk"
+    },
+    "plugin:opencode-v2": {
+      "name": "@behavior-os/opencode-plugin",
+      "version": "2.1.0",
+      "dependencies": {
+        "@behavior-os/core": "workspace:*",
+        "@behavior-os/schemas": "workspace:*",
+        "@opencode/plugin": "^2.0.0-beta.10",
+        "behavioros-orchestrator": "workspace:*",
+        "effect": "4.0.0-rc.112",
+        "js-yaml": "^5.4.3"
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "~5.9.3",
+        "vitest": "^4.1.11"
+      },
+      "path": "plugins/opencode-v2"
+    }
+  },
+  "loc": {
+    ".json": {
+      "files": 2541,
+      "lines": 240266
+    },
+    ".md": {
+      "files": 365,
+      "lines": 42728
+    },
+    ".js": {
+      "files": 86,
+      "lines": 15371
+    },
+    ".yml": {
+      "files": 4,
+      "lines": 201
+    },
+    ".yaml": {
+      "files": 23,
+      "lines": 7201
+    },
+    ".ts": {
+      "files": 359,
+      "lines": 77995
+    },
+    ".mjs": {
+      "files": 75,
+      "lines": 13789
+    }
+  },
+  "graph_stats": {
+    "node_count": 3869,
+    "edge_count": 7549,
+    "relation_counts": {
+      "contains": 2489,
+      "imports_from": 850,
+      "re_exports": 159,
+      "indirect_call": 29,
+      "calls": 1167,
+      "references": 716,
+      "extends": 15,
+      "imports": 1104,
+      "implements": 12,
+      "inherits": 8,
+      "cites": 19,
+      "declares": 65,
+      "dynamic_import": 44,
+      "method": 870,
+      "rationale_for": 2
+    },
+    "top_degree": [
+      [
+        "packages_core_src_engine_behavior_os_behavioros",
+        182
+      ],
+      [
+        "packages_core_src_engine_behavior_os",
+        168
+      ],
+      [
+        "packages_schemas_src_index",
+        154
+      ],
+      [
+        "ref_vitest",
+        143
+      ],
+      [
+        "plugins_opencode_v2_src_index",
+        130
+      ],
+      [
+        "packages_schemas_src_dna_dna",
+        128
+      ],
+      [
+        "packages_core_src_engine_index",
+        121
+      ],
+      [
+        "plugins_opencode_v2_src_index_setup",
+        99
+      ],
+      [
+        "packages_core_src_engine_learning_engine",
+        76
+      ],
+      [
+        "packages_schemas_src_responsible_ai",
+        74
+      ],
+      [
+        "ref_node_path",
+        73
+      ],
+      [
+        "packages_schemas_src_mission_mission",
+        69
+      ],
+      [
+        "packages_orchestrator_src_control_loop",
+        68
+      ],
+      [
+        "ref_node_fs",
+        64
+      ],
+      [
+        "packages_core_src_engine_learning_engine_learningengine",
+        60
+      ],
+      [
+        "packages_orchestrator_src_orchestrator",
+        54
+      ],
+      [
+        "packages_core_src_engine_index_engineregistry",
+        53
+      ],
+      [
+        "packages_schemas_src_learning_learningevent",
+        53
+      ],
+      [
+        "packages_orchestrator_src_orchestrator_autonomousorchestrator",
+        49
+      ],
+      [
+        "packages_mcp_server_src_server",
+        48
+      ]
+    ],
+    "top_in_degree": [
+      [
+        "ref_vitest",
+        143
+      ],
+      [
+        "packages_schemas_src_index",
+        142
+      ],
+      [
+        "packages_schemas_src_dna_dna",
+        128
+      ],
+      [
+        "packages_core_src_engine_behavior_os_behavioros",
+        73
+      ],
+      [
+        "ref_node_path",
+        73
+      ],
+      [
+        "packages_schemas_src_mission_mission",
+        69
+      ],
+      [
+        "ref_node_fs",
+        64
+      ],
+      [
+        "packages_schemas_src_learning_learningevent",
+        53
+      ],
+      [
+        "packages_core_src_engine_index_engineregistry_register",
+        44
+      ],
+      [
+        "packages_core_src_index",
+        36
+      ],
+      [
+        "packages_schemas_src_governance_governancedecision",
+        35
+      ],
+      [
+        "ref_node_url",
+        35
+      ],
+      [
+        "packages_core_src_services_learning_policy_service_learningpolicyservicehost_learningengine",
+        30
+      ],
+      [
+        "ref_node_os",
+        26
+      ],
+      [
+        "packages_core_src_engine_behavior_os",
+        24
+      ]
+    ],
+    "top_out_degree": [
+      [
+        "packages_core_src_engine_behavior_os",
+        144
+      ],
+      [
+        "plugins_opencode_v2_src_index",
+        121
+      ],
+      [
+        "packages_core_src_engine_index",
+        118
+      ],
+      [
+        "packages_core_src_engine_behavior_os_behavioros",
+        109
+      ],
+      [
+        "plugins_opencode_v2_src_index_setup",
+        98
+      ],
+      [
+        "packages_schemas_src_responsible_ai",
+        73
+      ],
+      [
+        "packages_orchestrator_src_control_loop",
+        66
+      ],
+      [
+        "packages_core_src_engine_learning_engine",
+        63
+      ],
+      [
+        "packages_orchestrator_src_orchestrator",
+        50
+      ],
+      [
+        "packages_core_src_engine_index_engineregistry",
+        49
+      ],
+      [
+        "packages_core_src_services_learning_policy_service",
+        47
+      ],
+      [
+        "packages_core_src_engine_learning_engine_learningengine",
+        45
+      ],
+      [
+        "packages_mcp_server_src_server",
+        44
+      ],
+      [
+        "packages_orchestrator_src_llm_index",
+        44
+      ],
+      [
+        "validation_lab_harness_run",
+        44
+      ]
+    ]
+  }
+}

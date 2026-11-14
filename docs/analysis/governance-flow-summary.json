@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-07T16:24:17.601Z",
+  "generatedAt": "2026-11-14T18:16:22.342Z",
   "totalScenarios": 1000,
   "partA": {
     "scenarios": 945,
@@ -7,9 +7,9 @@
     "dnasWithBlockRule": 19,
     "verdictsByProvider": {
       "plugin": {
-        "allow": 285,
-        "escalate": 24,
-        "deny": 6
+        "escalate": 70,
+        "allow": 243,
+        "deny": 2
       },
       "mcp": {
         "deny": 190,
@@ -22,9 +22,9 @@
         "allow": 15
       }
     },
-    "scenariosWhereBlockRuleExistsButVerdictAllows": 255,
-    "blockRuleApplicableScenarios": 579,
-    "blockRuleNotApplicableScenarios": 276,
+    "scenariosWhereBlockRuleExistsButVerdictAllows": 219,
+    "blockRuleApplicableScenarios": 573,
+    "blockRuleNotApplicableScenarios": 282,
     "gapScenarios": 0
   },
   "partB": {

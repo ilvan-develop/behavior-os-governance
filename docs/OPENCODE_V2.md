@@ -85,19 +85,21 @@ never in frontmatter.
 
 ## Skills
 
-| Skill ID             | Trigger                                                        |
-| -------------------- | -------------------------------------------------------------- |
-| `behavior-os`        | Governance, DNA, missions, audits, production or risky actions |
-| `verification-first` | Any implementation, fix, audit or completion report            |
-| `engineering-cycle`  | Multi-step changes that must follow the repository workflow    |
-| `docs-research`      | OpenCode V2 or Behavior-OS claims that need official evidence  |
-| `release`            | Versioning, tagging, publishing or deployment preparation      |
+| Skill ID                 | Trigger                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| `behavior-os`            | Governance, DNA, missions, audits, production or risky actions        |
+| `verification-first`     | Any implementation, fix, audit or completion report                   |
+| `engineering-cycle`      | Multi-step changes that must follow the repository workflow           |
+| `pragmatic-intelligence` | Systemic reasoning before action: map the graph, decide with evidence |
+| `graphify`               | Codebase questions: query the knowledge graph before raw search       |
+| `docs-research`          | OpenCode V2 or Behavior-OS claims that need official evidence         |
+| `stack-install`          | New stacks: docs first, framework CLI, verify with real commands      |
+| `release`                | Versioning, tagging, publishing or deployment preparation             |
 
 Skills are advertised by their description and loaded only when relevant. The
 directory name is the ID; keep it lowercase kebab-case and keep the frontmatter
-`name` and `description` accurate. `stack-install` is the guardrail for new
-stacks: official docs first, framework CLI generates the files, never hand-write
-generated code, verify with real commands.
+`name` and `description` accurate. `stack-install` enforces docs-first CLI
+scaffolding for new stacks; never hand-write generated files.
 
 ## Plugin and MCP
 

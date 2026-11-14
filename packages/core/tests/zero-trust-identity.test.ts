@@ -42,13 +42,58 @@ describe('ZeroTrustIdentityEngine (G-010)', () => {
     expect(result.reason).toContain('DID mismatch');
   });
 
-  it('revokes an identity by setting expiry to now', () => {
+  it('revokes an identity by recording an explicit revocation', () => {
     const engine = new ZeroTrustIdentityEngine();
     engine.issueIdentity('agent-1');
     engine.revokeIdentity('agent-1');
 
-    // The revocation sets expiresAt to now — verify the state was mutated
-    expect(engine.getIdentity('agent-1')?.expiresAt).not.toBeNull();
+    const identity = engine.getIdentity('agent-1');
+    expect(identity?.revokedAt).toBeTruthy();
+    // Revocation is state, not an expiry trick.
+    expect(identity?.expiresAt).toBeNull();
+  });
+
+  // S-01 regression: revocation must be immediate, monotonic and enforced by
+  // the capability gate, not only by a timestamp comparison.
+  it('verification rejects a revoked identity immediately', () => {
+    const engine = new ZeroTrustIdentityEngine();
+    const issued = engine.issueIdentity('agent-1');
+    engine.revokeIdentity('agent-1');
+
+    const result = engine.verifyIdentity('agent-1', issued.did);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('revoked');
+  });
+
+  it('removes capabilities immediately on revocation', () => {
+    const engine = new ZeroTrustIdentityEngine();
+    engine.issueIdentity('agent-1', ['deploy', 'read']);
+    expect(engine.hasCapability('agent-1', 'deploy')).toBe(true);
+
+    engine.revokeIdentity('agent-1');
+    expect(engine.hasCapability('agent-1', 'deploy')).toBe(false);
+    expect(engine.hasCapability('agent-1', 'read')).toBe(false);
+  });
+
+  it('cannot be un-revoked by moving the expiry into the future', () => {
+    const engine = new ZeroTrustIdentityEngine();
+    const issued = engine.issueIdentity('agent-1', ['deploy']);
+    engine.revokeIdentity('agent-1');
+    const identity = engine.getIdentity('agent-1');
+    if (identity) identity.expiresAt = new Date(Date.now() + 60_000).toISOString();
+
+    expect(engine.verifyIdentity('agent-1', issued.did).valid).toBe(false);
+    expect(engine.hasCapability('agent-1', 'deploy')).toBe(false);
+  });
+
+  it('treats an expired identity as unverified and without capabilities', () => {
+    const engine = new ZeroTrustIdentityEngine();
+    const issued = engine.issueIdentity('agent-1', ['deploy']);
+    const identity = engine.getIdentity('agent-1');
+    if (identity) identity.expiresAt = new Date(Date.now() - 1_000).toISOString();
+
+    expect(engine.verifyIdentity('agent-1', issued.did).valid).toBe(false);
+    expect(engine.hasCapability('agent-1', 'deploy')).toBe(false);
   });
 
   it('checks capabilities', () => {

@@ -326,13 +326,18 @@ describe('documentation consistency', () => {
   });
 
   it('keeps documented schema counts equal to the measured source', () => {
-    const schemaSource = readFileSync(
-      join(repoRoot, 'packages', 'schemas', 'src', 'index.ts'),
-      'utf-8',
+    const schemaDir = join(repoRoot, 'packages', 'schemas', 'src');
+    const schemaFiles = readdirSync(schemaDir).filter(
+      (f) => f.endsWith('.ts') && f !== 'index.d.ts',
     );
-    const lines = schemaSource.split(/\r?\n/);
-    const objects = lines.filter((line) => line.includes('z.object(')).length;
-    const enums = lines.filter((line) => line.includes('z.enum(')).length;
+    let objects = 0;
+    let enums = 0;
+    for (const file of schemaFiles) {
+      const source = readFileSync(join(schemaDir, file), 'utf-8');
+      const lines = source.split(/\r?\n/);
+      objects += lines.filter((line) => line.includes('z.object(')).length;
+      enums += lines.filter((line) => line.includes('z.enum(')).length;
+    }
     const claims = readFileSync(join(repoRoot, 'docs', 'CLAIMS.md'), 'utf-8');
 
     expect(claims).toContain(`# Schemas Zod (esperado: ${objects} objetos, ${enums} enums)`);
@@ -638,6 +643,9 @@ function measuredCounts() {
     dnas: readdirSync(join(repoRoot, 'dnas')).filter((file) => file.endsWith('.yaml')).length,
     tables: countIn('packages/core/src/persistence/sqlite-store.ts', /CREATE TABLE/g),
     engines: engineFiles.length - 3,
+    skills: readdirSync(join(repoRoot, '.opencode', 'skills'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name),
   };
 }
 
@@ -698,6 +706,7 @@ describe('documented counts match the code', () => {
     expect(measured.dnas).toBe(21);
     expect(measured.tables).toBe(9);
     expect(measured.engines).toBe(48);
+    expect(measured.skills).toHaveLength(8);
   });
 
   it('keeps the capability manifest in sync with the measured surfaces', () => {
@@ -759,6 +768,11 @@ describe('documented counts match the code', () => {
       { pattern: /(\d+)\s+(?:core )?engines/g, expected: [measured.engines], label: 'engines' },
       { pattern: /(\d+)\s+DNA pattern/g, expected: [measured.dnas], label: 'DNA patterns' },
       { pattern: /(\d+)\s+tables\b/g, expected: [measured.tables], label: 'SQLite tables' },
+      {
+        pattern: /(\d+)\s+skills\b/g,
+        expected: [measured.skills.length],
+        label: 'skills',
+      },
     ];
 
     for (const file of currentDocs) {
@@ -771,6 +785,17 @@ describe('documented counts match the code', () => {
               `"${claim.text}"`,
           ).toEqual(rule.expected);
         }
+      }
+    }
+  });
+
+  it('documents every skill that ships in the control plane', () => {
+    for (const skill of measured.skills) {
+      for (const file of ['docs/CLAIMS.md', 'docs/OPENCODE_V2.md']) {
+        expect(
+          readRepoFile(file).includes(`\`${skill}\``),
+          `${file} does not document the \`${skill}\` skill`,
+        ).toBe(true);
       }
     }
   });

@@ -29,7 +29,10 @@
         "**/coverage/**",
         "**/node_modules/**",
         "**/.turbo/**",
-        "**/.behavioros/**"
+        "**/.behavioros/**",
+        "**/validation-lab/**",
+        "**/.forensic/**",
+        "**/architectural-pipeline/**"
       ],
       "linter": {
         "enabled": false

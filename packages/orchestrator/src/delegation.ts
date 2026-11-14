@@ -137,25 +137,41 @@ export class DelegationEngine {
       };
     }
 
-    const eligible = [...this.profiles.values()].filter((profile) => {
-      // A mutating task requires a write-authority role.
-      if (mutating && this.policy.readonlyRoles.includes(profile.role)) return false;
-      // A mutating task must not go to a role that lacks write authority.
-      if (mutating && !this.policy.writeRoles.includes(profile.role)) return false;
-      // Authority is a second, independent gate: a mislabelled role can never
-      // turn a readonly agent into a writer (ADR-006: delegation is data).
-      if (mutating && profile.authority === 'readonly') return false;
-      // Skill match (if any skills are required): at least one required skill
-      // must be present (same semantics as the core load balancer).
-      if (requiredSkills.length > 0) {
-        const hasSkills = requiredSkills.some((skill) => profile.capabilities.includes(skill));
-        if (!hasSkills) return false;
-      }
-      // Load-based eligibility (overloaded agents are deprioritized by the
-      // balancer's own threshold; we still allow assignment to a less-loaded
-      // eligible agent).
-      return !this.load.isAgentOverloaded(profile.id);
-    });
+    // Fail-safe: if the load balancer is corrupted, `isAgentOverloaded` can
+    // throw. Catching here keeps `assign()` from propagating the exception to
+    // the orchestrator (SPOF mitigation, lab §5). Degrade to refusal.
+    let eligible: AgentProfile[];
+    try {
+      eligible = [...this.profiles.values()].filter((profile) => {
+        // A mutating task requires a write-authority role.
+        if (mutating && this.policy.readonlyRoles.includes(profile.role)) return false;
+        // A mutating task must not go to a role that lacks write authority.
+        if (mutating && !this.policy.writeRoles.includes(profile.role)) return false;
+        // Authority is a second, independent gate: a mislabelled role can never
+        // turn a readonly agent into a writer (ADR-006: delegation is data).
+        if (mutating && profile.authority === 'readonly') return false;
+        // Skill match (if any skills are required): at least one required skill
+        // must be present (same semantics as the core load balancer).
+        if (requiredSkills.length > 0) {
+          const hasSkills = requiredSkills.some((skill) => profile.capabilities.includes(skill));
+          if (!hasSkills) return false;
+        }
+        // Load-based eligibility (overloaded agents are deprioritized by the
+        // balancer's own threshold; we still allow assignment to a less-loaded
+        // eligible agent).
+        return !this.load.isAgentOverloaded(profile.id);
+      });
+    } catch (err) {
+      // The load balancer is in an unrecoverable state. Refuse the task so the
+      // orchestrator can retry or surface the failure, rather than crashing.
+      return {
+        taskId,
+        agentId: null,
+        role: null,
+        reason: `Load-balancer failure: ${err instanceof Error ? err.message : String(err)}`,
+        recommendedBy: 'none',
+      };
+    }
 
     if (eligible.length === 0) {
       return {
@@ -204,17 +220,32 @@ export class DelegationEngine {
   }
 
   /**
+   * Run a load-balancer interaction without letting a corrupted injected
+   * engine crash the orchestrator's dispatch loop (SPOF mitigation). Load
+   * tracking is best-effort: when the balancer is unusable, `assign()` already
+   * degrades to a refusal, so swallowing a lifecycle/read failure here is safe
+   * and keeps the dispatch observer alive.
+   */
+  private safeLoad<T>(operation: () => T, fallback: T): T {
+    try {
+      return operation();
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
    * Record a task's lifecycle so the load balancer's load/fatigue stay
    * current. The orchestrator calls `onTaskStarted`/`onTaskCompleted`/
    * `onTaskFailed` from its dispatch loop (the existing `taskStarted` /
    * `taskSettled` observer hooks).
    */
   onTaskStarted(agentId: string, taskId: string): void {
-    this.load.assignTask(agentId, taskId);
+    this.safeLoad(() => this.load.assignTask(agentId, taskId), undefined);
   }
 
   onTaskCompleted(agentId: string, taskId: string): void {
-    this.load.completeTask(agentId, taskId);
+    this.safeLoad(() => this.load.completeTask(agentId, taskId), undefined);
   }
 
   onTaskFailed(agentId: string, taskId: string): void {
@@ -222,16 +253,16 @@ export class DelegationEngine {
     // repeated failures leak load until the agent is permanently overloaded
     // and every future assignment is refused. `completeTask` is the load
     // balancer's only release path; failure fatigue is a separate concern.
-    this.load.completeTask(agentId, taskId);
+    this.safeLoad(() => this.load.completeTask(agentId, taskId), undefined);
   }
 
   getPolicy(): DelegationPolicy {
     return { ...this.policy };
   }
 
-  /** Current load of a registered agent (0 when unknown). */
+  /** Current load of a registered agent (0 when unknown or unavailable). */
   getAgentLoad(agentId: string): number {
-    return this.load.getAgentLoad(agentId);
+    return this.safeLoad(() => this.load.getAgentLoad(agentId), 0);
   }
 
   /**
@@ -293,7 +324,7 @@ export class DelegationEngine {
     const reservation = this.reservations.get(reservationKey);
     if (!reservation || reservation.started) return false;
     reservation.started = true;
-    this.load.assignTask(reservation.agentId, reservationKey);
+    this.safeLoad(() => this.load.assignTask(reservation.agentId, reservationKey), undefined);
     return true;
   }
 
@@ -319,7 +350,7 @@ export class DelegationEngine {
 
     if (!reservation.started) return true; // never dispatched; nothing to release in load
 
-    this.load.completeTask(reservation.agentId, reservationKey);
+    this.safeLoad(() => this.load.completeTask(reservation.agentId, reservationKey), undefined);
     return true;
   }
 

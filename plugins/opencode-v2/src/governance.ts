@@ -5,7 +5,11 @@
  * tested in isolation and reused by the CLI or MCP server.
  */
 
-import { classifyIrreversibleCommand, isMutatingAction } from '@behavior-os/core';
+import {
+  classifyIrreversibleCommand,
+  isControlPlaneAction,
+  isMutatingAction,
+} from '@behavior-os/core';
 import type { MissionPriority, MissionType } from '@behavior-os/schemas';
 import { buildOperatingContract } from './native-playbook.js';
 
@@ -146,8 +150,12 @@ export function buildGovernanceContext(signals: GovernanceSignals): Record<strin
     if (!(key in context)) context[key] = value;
   }
 
-  // Mutating tools are always a change.
-  if (isMutating(signals.tool) || isMutating(signals.action)) {
+  // Mutating tools are always a change. The governance control plane is not an
+  // operation on the governed environment: counting it would escalate the very
+  // tool that opens a mission (fail-closed must not become self-blocking).
+  const mutates = (value: string | undefined): boolean =>
+    isMutating(value) && !isControlPlaneAction(value);
+  if (mutates(signals.tool) || mutates(signals.action)) {
     context.change = true;
   }
 

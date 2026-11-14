@@ -1,0 +1,45 @@
+{
+  "pkg_deps": {
+    "packages/core": [
+      "@behavior-os",
+      "js-yaml",
+      "node:fs",
+      "node:path",
+      "packages/schemas"
+    ],
+    "packages/mcp-server": [
+      "js-yaml",
+      "node:fs",
+      "node:path",
+      "node:url",
+      "packages/core",
+      "packages/schemas"
+    ],
+    "packages/orchestrator": [
+      "@behavior-os",
+      "packages/core",
+      "packages/schemas"
+    ],
+    "packages/sdk": [
+      "packages/core",
+      "packages/schemas"
+    ],
+    "plugins/opencode-v2": [
+      "@behavior-os",
+      "packages/core",
+      "packages/orchestrator",
+      "packages/schemas"
+    ],
+    "packages/cli": [
+      "@behavior-os",
+      "node:fs",
+      "packages/core",
+      "packages/schemas"
+    ],
+    "examples": [
+      "packages/core"
+    ]
+  },
+  "total_import_edges": 2157,
+  "total_call_edges": 2066
+}

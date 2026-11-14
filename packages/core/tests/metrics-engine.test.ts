@@ -181,19 +181,19 @@ describe('MetricsEngine', () => {
     engine.recordToolInvocation('bos_run_audit', 'success', 42);
 
     const usage = engine.getToolUsage();
-    expect(usage['bos_get_metrics']).toEqual({
+    expect(usage.bos_get_metrics).toEqual({
       total: 3,
       success: 2,
       failure: 1,
       lastLatencyMs: 20,
-      lastUsedAt: usage['bos_get_metrics']!.lastUsedAt,
+      lastUsedAt: usage.bos_get_metrics?.lastUsedAt,
     });
-    expect(usage['bos_run_audit']).toEqual({
+    expect(usage.bos_run_audit).toEqual({
       total: 1,
       success: 1,
       failure: 0,
       lastLatencyMs: 42,
-      lastUsedAt: usage['bos_run_audit']!.lastUsedAt,
+      lastUsedAt: usage.bos_run_audit?.lastUsedAt,
     });
 
     // The snapshot exposes toolUsage
@@ -211,7 +211,7 @@ describe('MetricsEngine', () => {
         lastUsedAt: new Date().toISOString(),
       },
     });
-    expect(engine.getToolUsage()['bos_get_metrics']?.total).toBe(5);
+    expect(engine.getToolUsage().bos_get_metrics?.total).toBe(5);
 
     // A reset clears tool usage
     engine.reset();

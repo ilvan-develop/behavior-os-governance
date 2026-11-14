@@ -117,7 +117,10 @@ const REQUIRED_SKILLS = [
   'behavior-os',
   'verification-first',
   'engineering-cycle',
+  'pragmatic-intelligence',
+  'graphify',
   'docs-research',
+  'stack-install',
   'release',
 ];
 const READ_ONLY_AGENTS = ['researcher', 'planner', 'reviewer', 'auditor'];

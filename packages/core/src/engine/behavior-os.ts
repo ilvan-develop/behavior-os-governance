@@ -31,10 +31,15 @@ import type {
   Vote,
 } from '@behavior-os/schemas';
 import { load as yamlLoad } from 'js-yaml';
-import { isControlPlaneAction, isMutatingAction } from '../action-classification.js';
+import {
+  isControlPlaneAction,
+  isMutatingAction,
+  isReadOnlyAction,
+} from '../action-classification.js';
 import * as GovernanceLog from '../governance-log.js';
 import { SqliteStore } from '../persistence/sqlite-store.js';
 import type { Store } from '../persistence/store.js';
+import { GovernanceEvaluationService } from '../services/governance-evaluation-service.js';
 import { LearningPolicyService } from '../services/learning-policy-service.js';
 import { MissionService } from '../services/mission-service.js';
 import {
@@ -116,6 +121,7 @@ export class BehaviorOS {
   private codeEditEngine: CodeEditEngine | null = null;
   private readonly missions: MissionService;
   private readonly learningPolicy: LearningPolicyService;
+  private readonly governanceEvaluation: GovernanceEvaluationService;
 
   constructor(config: BehaviorOSConfig = {}) {
     this.config = config;
@@ -169,6 +175,12 @@ export class BehaviorOS {
       advanceProtocolStep: (tool) => this.advanceProtocolStep(tool),
       decide: (options) => this.decide(options),
     });
+
+    this.governanceEvaluation = new GovernanceEvaluationService(
+      () => this.getLearningEngine(),
+      () => this.getMetricsEngine(),
+      (decision) => this.firedRuleActions(decision),
+    );
 
     // Preload a DNA pattern when configured so the first governance/quality
     // evaluation does not require an explicit loadDNA() call.
@@ -447,59 +459,12 @@ export class BehaviorOS {
     // approved-but-inactive versions remain documentation. A policy `deny` is
     // intentionally not softened by the lenient governance level: activating a
     // blocking policy is an explicit human decision.
-    const policyEvaluation = this.getLearningEngine().evaluateActivePolicies(action);
-    const policyDenied = policyEvaluation.verdict === 'deny';
-    const decision =
-      policyEvaluation.matches.length === 0
-        ? dnaDecision
-        : (() => {
-            const policyRules = policyEvaluation.matches.map((match) => match.ruleId);
-            const policyReason = policyEvaluation.matches.map((match) => match.reason).join('; ');
-            const verdict =
-              policyEvaluation.verdict === 'deny'
-                ? ('deny' as const)
-                : policyEvaluation.verdict === 'escalate' && dnaDecision.verdict === 'allow'
-                  ? ('escalate' as const)
-                  : dnaDecision.verdict;
-            const policyWarnings = policyEvaluation.matches
-              .filter((match) => match.action === 'warn')
-              .map((match) => match.reason);
-            return {
-              ...dnaDecision,
-              verdict,
-              reason: `${dnaDecision.reason} | Active policy: ${policyReason}`,
-              rulesEvaluated: [...dnaDecision.rulesEvaluated, ...policyRules],
-              firedRules: [...(dnaDecision.firedRules ?? []), ...policyRules],
-              ...(policyWarnings.length > 0
-                ? { warnings: [...(dnaDecision.warnings ?? []), ...policyWarnings] }
-                : {}),
-            };
-          })();
-
-    // Governance-level policy: in lenient mode, soften hard DNA denials into
-    // escalations so autonomous agents can proceed with awareness of the risk.
-    const finalDecision =
-      !policyDenied && decision.verdict === 'deny' && this.config.governance?.level === 'lenient'
-        ? {
-            ...decision,
-            verdict: 'escalate' as const,
-            reason: `${decision.reason} (softened by lenient governance level)`,
-          }
-        : decision;
-
-    // Self-measurement: every evaluation through any host (plugin, MCP, CLI,
-    // orchestrator) is counted here, once, at the single facade choke point.
-    // `warn` only collides at the bucket level when the verdict is still
-    // allow: the governance engine never emits a `warn` verdict — warnings
-    // coexist with allow — so "warned" means "allowed but warned".
-    const warned = finalDecision.verdict === 'allow' && (finalDecision.warnings?.length ?? 0) > 0;
-    this.getMetricsEngine().recordGovernance(
-      warned ? 'warn' : finalDecision.verdict,
-      finalDecision.rulesEvaluated.length,
-      Date.now() - startedAt,
-      this.firedRuleActions(finalDecision),
+    return this.governanceEvaluation.evaluate(
+      dnaDecision,
+      action,
+      startedAt,
+      this.config.governance?.level,
     );
-    return finalDecision;
   }
 
   /**
@@ -2064,7 +2029,7 @@ export class BehaviorOS {
    */
   bootstrapDenyOverride(action: string, decision: GovernanceDecision): boolean {
     return (
-      decision.verdict === 'deny' && (isControlPlaneAction(action) || !isMutatingAction(action))
+      decision.verdict === 'deny' && (isControlPlaneAction(action) || isReadOnlyAction(action))
     );
   }
 

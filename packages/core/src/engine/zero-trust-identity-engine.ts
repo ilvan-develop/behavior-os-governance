@@ -5,6 +5,13 @@ import { createHash, randomUUID } from 'node:crypto';
  *
  * Issues verifiable Decentralized Identifiers (DID) for agents and
  * provides identity verification. The DID format is `did:bos:<uuid>`.
+ *
+ * S-01: revocation is explicit state (`revokedAt`), not an `expiresAt` trick.
+ * Every authorization path - verification and capability checks - must honour
+ * it immediately, independent of the clock. The previous implementation set
+ * `expiresAt = now` and compared with a strict `<`, so an identity verified in
+ * the same millisecond was still valid, and `hasCapability` never read the
+ * field at all.
  */
 
 interface AgentIdentity {
@@ -14,6 +21,10 @@ interface AgentIdentity {
   capabilities: string[];
   issuedAt: string;
   expiresAt: string | null;
+  /** ISO timestamp of the revocation, or null while the identity is active. */
+  revokedAt?: string | null;
+  /** Who revoked the identity, when supplied. */
+  revokedBy?: string;
 }
 
 interface IdentityVerificationResult {
@@ -45,6 +56,7 @@ export class ZeroTrustIdentityEngine {
       capabilities,
       issuedAt: new Date().toISOString(),
       expiresAt: null,
+      revokedAt: null,
     };
 
     this.identities.set(agentId, identity);
@@ -65,7 +77,8 @@ export class ZeroTrustIdentityEngine {
    * In this PoC, verification checks that:
    * 1. The agentId is known.
    * 2. The DID matches the stored identity.
-   * 3. The identity has not expired.
+   * 3. The identity has not been revoked.
+   * 4. The identity has not expired.
    */
   verifyIdentity(agentId: string, did: string): IdentityVerificationResult {
     const identity = this.identities.get(agentId);
@@ -90,7 +103,19 @@ export class ZeroTrustIdentityEngine {
       };
     }
 
-    if (identity.expiresAt && new Date(identity.expiresAt) < new Date()) {
+    // Revocation is state, not a timestamp race: checked before expiry so the
+    // reason is unambiguous and the result is immediate.
+    if (identity.revokedAt) {
+      return {
+        agentId,
+        did,
+        valid: false,
+        reason: `Identity revoked at ${identity.revokedAt}`,
+        verifiedAt: new Date().toISOString(),
+      };
+    }
+
+    if (identity.expiresAt && new Date(identity.expiresAt) <= new Date()) {
       return {
         agentId,
         did,
@@ -110,10 +135,16 @@ export class ZeroTrustIdentityEngine {
 
   /**
    * Check whether an identity has a specific capability.
+   *
+   * This is the authorization gate, so it must apply the same checks as
+   * verification: an unknown, revoked or expired identity has no capabilities.
    */
   hasCapability(agentId: string, capability: string): boolean {
     const identity = this.identities.get(agentId);
-    return identity?.capabilities.includes(capability) ?? false;
+    if (!identity) return false;
+    if (identity.revokedAt) return false;
+    if (identity.expiresAt && new Date(identity.expiresAt) <= new Date()) return false;
+    return identity.capabilities.includes(capability);
   }
 
   /** Get all issued identities. */
@@ -121,12 +152,16 @@ export class ZeroTrustIdentityEngine {
     return [...this.identities.values()];
   }
 
-  /** Revoke an identity by setting its expiry to now. */
-  revokeIdentity(agentId: string): void {
+  /**
+   * Revoke an identity. Revocation is explicit, immediate and monotonic: it
+   * cannot be undone by moving `expiresAt` into the future or by the clock.
+   */
+  revokeIdentity(agentId: string, revokedBy?: string): void {
     const identity = this.identities.get(agentId);
-    if (identity) {
-      identity.expiresAt = new Date().toISOString();
-    }
+    if (!identity) return;
+    if (identity.revokedAt) return;
+    identity.revokedAt = new Date().toISOString();
+    if (revokedBy) identity.revokedBy = revokedBy;
   }
 }
 

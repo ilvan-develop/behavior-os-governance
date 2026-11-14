@@ -1,0 +1,13 @@
+{
+  "name": "orbit-inventory",
+  "version": "0.4.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "express": "4.16.0",
+    "lodash": "4.17.20"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  }
+}

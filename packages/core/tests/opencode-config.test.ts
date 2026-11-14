@@ -299,7 +299,10 @@ describe('OpenCode skills', () => {
     'behavior-os',
     'verification-first',
     'engineering-cycle',
+    'pragmatic-intelligence',
+    'graphify',
     'docs-research',
+    'stack-install',
     'release',
   ];
 

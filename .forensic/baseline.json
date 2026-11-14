@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-11-14T18:56:00+01:00",
+  "git": {
+    "branch": "main",
+    "commit": "b4124ca50dce94072a62b27a630fdcce894e41d3",
+    "aheadBy": 11,
+    "status": "dirty",
+    "modifiedFiles": [
+      ".gitignore",
+      "docs/CLAIMS.md",
+      "docs/OPENCODE_V2.md",
+      "docs/analysis/governance-conformance.json",
+      "packages/core/src/action-classification.ts",
+      "packages/core/src/engine/behavior-os.ts",
+      "packages/core/src/engine/zero-trust-identity-engine.ts",
+      "packages/core/tests/docs-consistency.test.ts",
+      "packages/core/tests/facade-host-logic.test.ts",
+      "packages/core/tests/metrics-engine.test.ts",
+      "packages/core/tests/opencode-config.test.ts",
+      "packages/core/tests/zero-trust-identity.test.ts",
+      "packages/orchestrator/src/delegation.ts",
+      "packages/orchestrator/tests/delegation.test.ts",
+      "packages/schemas/src/index.ts",
+      "plugins/opencode-v2/src/governance.ts",
+      "plugins/opencode-v2/src/index.ts",
+      "plugins/opencode-v2/tests/plugin-registration.test.ts",
+      "scripts/verify-opencode.mjs"
+    ],
+    "untrackedFiles": [
+      ".opencode/skills/pragmatic-intelligence/",
+      "docs/ARCHITECTURE_DISCOVERY.md",
+      "packages/core/src/services/governance-evaluation-service.ts",
+      "packages/core/tests/action-classification.test.ts",
+      "packages/core/tests/governance-evaluation-service.test.ts",
+      "packages/schemas/src/agent.ts",
+      "packages/schemas/src/anti-pattern.ts",
+      "packages/schemas/src/code-edit.ts",
+      "packages/schemas/src/decision.ts",
+      "packages/schemas/src/dna.ts",
+      "packages/schemas/src/governance.ts",
+      "packages/schemas/src/learning.ts",
+      "packages/schemas/src/mission.ts",
+      "packages/schemas/src/protocol.ts",
+      "packages/schemas/src/responsible-ai.ts",
+      "packages/schemas/src/task.ts",
+      "validation-lab/"
+    ]
+  },
+  "runtime": {
+    "node": "v24.21.0",
+    "pnpm": "10.4.0",
+    "turbo": "2.11.7",
+    "vitest": "4.1.12",
+    "biome": "2.5.15",
+    "os": "Windows_NT win32 x64"
+  },
+  "verificationLadderBaseline": {
+    "typecheck": { "status": "PASS", "details": "11/11 tasks passed in 8 packages" },
+    "lint:check": { "status": "FAIL", "details": "39 errors in untracked validation-lab/ files" },
+    "test": { "status": "FAIL", "details": "1 test failed in @behavior-os/core (tests/audit-engine-real.test.ts due to lint failure)" },
+    "build": { "status": "PASS", "details": "8 packages built successfully" },
+    "verify:publish": { "status": "PASS", "details": "5 packages installable from registry" },
+    "verify:governance": { "status": "PASS", "details": "25/25 claims proven (100%)" },
+    "verify:capabilities": { "status": "PASS", "details": "98 MCP tools, 2 resources, 102 plugin tools, 48 engines, 21 DNAs, 9 tables" },
+    "verify:tool-parity": { "status": "PASS", "details": "98 MCP tools, 102 plugin tools, 98 shared, 4 declared differences" },
+    "verify:plugin": { "status": "PASS", "details": "102 tools, all hooks and protocol checks verified" },
+    "smoke:mcp": { "status": "PASS", "details": "smoke-mcp and smoke-dna-library 100% passed" },
+    "verify:opencode": { "status": "PASS", "details": "42/42 checks passed" },
+    "verify:windows": { "status": "PASS", "details": "zero visible console windows during governed spawn" },
+    "security:audit": { "status": "PASS", "details": "0 high or critical vulnerabilities (7 low/moderate)" }
+  }
+}

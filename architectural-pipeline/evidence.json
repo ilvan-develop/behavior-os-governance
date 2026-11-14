@@ -1,0 +1,142 @@
+{
+  "pipeline": "Architectural Intelligence & Alignment Engine",
+  "version": "2.0.0",
+  "timestamp": "2026-11-14T19:26:50+01:00",
+  "repository": {
+    "root": "c:\\www\\behavior-os",
+    "branch": "main",
+    "commit": "b4124ca",
+    "ahead_of_origin": 11,
+    "status": "clean working directory with structured refactorings staged/tracked"
+  },
+  "metrics": {
+    "packages_count": 8,
+    "engines_count": 48,
+    "dna_patterns_count": 21,
+    "sqlite_tables_count": 9,
+    "tools_mcp_count": 98,
+    "tools_plugin_count": 102,
+    "tools_shared_count": 98,
+    "tools_declared_differences": 4,
+    "graphify_nodes": 3869,
+    "graphify_edges": 7549,
+    "import_cycles_count": 0,
+    "loc_typescript": 77995,
+    "loc_markdown": 42728,
+    "loc_json": 240266
+  },
+  "verification_ladder": [
+    {
+      "gate": "pnpm typecheck",
+      "status": "PASS",
+      "tasks_successful": 11,
+      "tasks_total": 11,
+      "turbo_cache": "FULL TURBO",
+      "exit_code": 0
+    },
+    {
+      "gate": "pnpm lint:check",
+      "status": "PASS",
+      "files_checked": 518,
+      "fixes_applied": 0,
+      "exit_code": 0
+    },
+    {
+      "gate": "pnpm test",
+      "status": "PASS",
+      "packages_tested": 8,
+      "schemas_tests": "35 passed",
+      "core_tests": "932 passed, 3 skipped",
+      "orchestrator_tests": "177 passed, 3 skipped",
+      "plugin_tests": "248 passed",
+      "mcp_server_tests": "50 passed",
+      "sdk_tests": "18 passed",
+      "cli_tests": "22 passed",
+      "examples_tests": "4 passed",
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:publish",
+      "status": "PASS",
+      "packages_verified": 7,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:governance",
+      "status": "PASS",
+      "claims_tested": 25,
+      "claims_proven": 25,
+      "proven_rate": "100%",
+      "failures": 0,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:capabilities",
+      "status": "PASS",
+      "mcp_tools": 98,
+      "resources": 2,
+      "plugin_tools": 102,
+      "engines": 48,
+      "dnas": 21,
+      "tables": 9,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:tool-parity",
+      "status": "PASS",
+      "shared_identical": 98,
+      "declared_differences": 4,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:plugin",
+      "status": "PASS",
+      "plugin_id": "behavior-os",
+      "tools_exposed": 102,
+      "hooks_active": ["execute.before", "execute.after", "prompt", "context", "evaluate"],
+      "exit_code": 0
+    },
+    {
+      "gate": "smoke:mcp",
+      "status": "PASS",
+      "stdio_server": "operational",
+      "protocol_resources": 2,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:opencode",
+      "status": "PASS",
+      "checks_tested": 42,
+      "checks_passed": 42,
+      "exit_code": 0
+    },
+    {
+      "gate": "verify:windows",
+      "status": "PASS",
+      "visible_console_windows": 0,
+      "exit_code": 0
+    }
+  ],
+  "governance_flow_analysis": {
+    "total_scenarios": 1000,
+    "part_a_scenarios": 945,
+    "part_b_scenarios": 55,
+    "gap_scenarios": 0,
+    "block_rule_applicable_scenarios": 573,
+    "permission_enforced_events": 4
+  },
+  "deliverables": [
+    "architectural-pipeline/SYSTEM_ARCHITECTURE_MAP.md",
+    "architectural-pipeline/ARCHITECTURE_TREES.md",
+    "architectural-pipeline/EXECUTION_FLOW_MAP.md",
+    "architectural-pipeline/ATOMIC_ANALYSIS.md",
+    "architectural-pipeline/BEHAVIORAL_ANALYSIS.md",
+    "architectural-pipeline/ARCHITECTURE_GAP_REPORT.md",
+    "architectural-pipeline/TARGET_ARCHITECTURE.md",
+    "architectural-pipeline/ALIGNMENT_PLAN.md",
+    "architectural-pipeline/IMPLEMENTATION_REPORT.md",
+    "architectural-pipeline/VALIDATION_REPORT.md",
+    "architectural-pipeline/FINAL_AUDIT.md",
+    "architectural-pipeline/evidence.json"
+  ]
+}
