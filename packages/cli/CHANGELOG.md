@@ -1,5 +1,23 @@
 # @behavior-os/cli
 
+## 2.4.0
+
+### Minor Changes
+
+- feat(arch): modularize schemas, decouple governance evaluation service, and align architecture pipeline
+  
+  - Modularize `@behavior-os/schemas` into 11 domain submodules (dna, mission, task, agent, governance, decision, learning, protocol, code-edit, anti-pattern, responsible-ai) with backward-compatible re-exports.
+  - Extract `GovernanceEvaluationService` from `BehaviorOS` facade to isolate rule evaluation.
+  - Strengthen action classification with fail-closed read-only allowlist and state-mutation vetoes.
+  - Add granular per-tool usage telemetry to `MetricsEngine` and `bos_get_metrics`.
+  - Verify full verification ladder with 100% pass across all packages and 25/25 governance claims.
+
+### Patch Changes
+
+- Updated dependencies
+  - @behavior-os/schemas@2.4.0
+  - @behavior-os/core@2.4.0
+
 ## 2.3.0
 
 ### Minor Changes
